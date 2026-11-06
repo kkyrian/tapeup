@@ -1,4 +1,5 @@
 import AVFoundation
+import Accelerate
 import CoreAudio
 import Foundation
 import os
@@ -23,6 +24,8 @@ public final class Recorder: @unchecked Sendable {
         public var failuresBeforeFallback: Int = 3
         /// Device changes arriving within this window cause one rebuild.
         public var settleDelay: Double = 0.3
+        /// The user's name, recorded in `meta.json` so agents know whose mic the left channel is.
+        public var you: String?
 
         public init(folder: URL) { self.folder = folder }
     }
@@ -37,12 +40,22 @@ public final class Recorder: @unchecked Sendable {
         public var description: String { "encoding audio.m4a failed: \(detail); audio.caf was kept" }
     }
 
+    /// What the panel shows while recording: each track's peak since the last
+    /// read (0...1) and the devices in use.
+    public struct Live: Sendable {
+        public var microphoneLevel: Float = 0
+        public var computerLevel: Float = 0
+        public var microphone = ""
+        public var output = ""
+    }
+
     private enum Track: String { case microphone, computer }
 
-    private let options: Options
+    public let options: Options
     private let log: EventLog
     private let clock: HostClock
-    private let started = Date()
+    public let started = Date()
+    private let live = OSAllocatedUnfairLock(initialState: Live())
 
     // MARK: control queue state
     private let control = DispatchQueue(label: "tapeup.recorder.control")
@@ -71,6 +84,8 @@ public final class Recorder: @unchecked Sendable {
     private var writeTimer: DispatchSourceTimer?
     private var writeErrors = 0
     private var accepting = true
+    /// The frame of the first audio from either track; the file starts here.
+    private var origin: Int64?
 
     private var cafURL: URL { options.folder.appendingPathComponent("audio.caf") }
     private var m4aURL: URL { options.folder.appendingPathComponent("audio.m4a") }
@@ -302,9 +317,21 @@ public final class Recorder: @unchecked Sendable {
         { [weak self] host, samples in
             guard let self, !samples.isEmpty else { return }
             lastAudio.withLock { $0[track] = (generation, AudioGetCurrentHostTime()) }
+            let peak = vDSP.maximumMagnitude(samples)
+            live.withLock {
+                switch track {
+                case .microphone: $0.microphoneLevel = max($0.microphoneLevel, peak)
+                case .computer: $0.computerLevel = max($0.computerLevel, peak)
+                }
+            }
             let frame = host.map { clock.frame(atHostTime: $0) }
             data.async { [self] in
                 guard accepting else { return }
+                if origin == nil, let frame {
+                    origin = frame
+                    microphoneTrack.begin(at: frame)
+                    computerTrack.begin(at: frame)
+                }
                 switch track {
                 case .microphone: microphoneTrack.append(startFrame: frame, samples: samples)
                 case .computer: computerTrack.append(startFrame: frame, samples: samples)
@@ -329,7 +356,7 @@ public final class Recorder: @unchecked Sendable {
     // MARK: - Writing (on `data`)
 
     private func write(upTo frame: Int64) {
-        guard let file, frame > microphoneTrack.writtenUpTo else { return }
+        guard let file, origin != nil, frame > microphoneTrack.writtenUpTo else { return }
         let left = microphoneTrack.take(upTo: frame)
         let right = computerTrack.take(upTo: frame)
         let count = min(left.count, right.count)
@@ -357,7 +384,8 @@ public final class Recorder: @unchecked Sendable {
             ]
         }
         return [
-            "duration_seconds": (Double(microphoneTrack.writtenUpTo) / options.sampleRate * 10).rounded() / 10,
+            "duration_seconds": (Double(microphoneTrack.writtenUpTo - (origin ?? 0)) / options.sampleRate * 10)
+                .rounded() / 10,
             "write_errors": writeErrors,
             "microphone": stats(microphoneTrack),
             "computer_audio": stats(computerTrack),
@@ -366,8 +394,25 @@ public final class Recorder: @unchecked Sendable {
 
     // MARK: - Metadata (on `control`)
 
-    private func note(input: String) { if !inputsSeen.contains(input) { inputsSeen.append(input) } }
-    private func note(output: String) { if !outputsSeen.contains(output) { outputsSeen.append(output) } }
+    private func note(input: String) {
+        live.withLock { $0.microphone = input }
+        if !inputsSeen.contains(input) { inputsSeen.append(input) }
+    }
+
+    private func note(output: String) {
+        live.withLock { $0.output = output }
+        if !outputsSeen.contains(output) { outputsSeen.append(output) }
+    }
+
+    /// Levels since the last call, and the devices in use now.
+    public func takeLive() -> Live {
+        live.withLock { state in
+            let current = state
+            state.microphoneLevel = 0
+            state.computerLevel = 0
+            return current
+        }
+    }
 
     private func writeMeta(status: String, audio: String = "audio.caf", stats: [String: Any]? = nil) {
         var meta: [String: Any] = [
@@ -378,6 +423,7 @@ public final class Recorder: @unchecked Sendable {
             "channels": ["left": "microphone", "right": "computer audio"],
             "devices": ["inputs": inputsSeen, "outputs": outputsSeen],
         ]
+        if let you = options.you { meta["you"] = you }
         if let stats {
             meta["duration_seconds"] = stats["duration_seconds"]
             meta["write_errors"] = stats["write_errors"]
@@ -392,6 +438,31 @@ public final class Recorder: @unchecked Sendable {
         } catch {
             log.record("meta write failed", ["error": "\(error)"])
         }
+    }
+
+    /// Finishes a recording a crash left behind: encodes its `audio.caf` and
+    /// marks it recorded. Returns false when the folder needs nothing.
+    public static func recover(folder: URL) throws -> Bool {
+        let metaURL = folder.appendingPathComponent("meta.json")
+        let caf = folder.appendingPathComponent("audio.caf")
+        let m4a = folder.appendingPathComponent("audio.m4a")
+        guard let data = try? Data(contentsOf: metaURL),
+            var meta = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+            meta["status"] as? String == "recording", FileManager.default.fileExists(atPath: caf.path)
+        else { return false }
+        let frames = try AVAudioFile(forReading: caf)
+        let duration = Double(frames.length) / frames.fileFormat.sampleRate
+        try? FileManager.default.removeItem(at: m4a)
+        try encode(caf: caf, to: m4a)
+        try FileManager.default.removeItem(at: caf)
+        meta["status"] = "recorded"
+        meta["audio"] = "audio.m4a"
+        meta["recovered"] = true
+        meta["duration_seconds"] = (duration * 10).rounded() / 10
+        let out = try JSONSerialization.data(
+            withJSONObject: meta, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
+        try out.write(to: metaURL, options: .atomic)
+        return true
     }
 
     static func encode(caf: URL, to m4a: URL) throws {

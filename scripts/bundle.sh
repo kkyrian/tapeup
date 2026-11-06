@@ -10,9 +10,10 @@ bin="$(swift build -c "$config" --show-bin-path)/TapeUp"
 
 app=".build/TapeUp.app"
 rm -rf "$app"
-mkdir -p "$app/Contents/MacOS"
+mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$bin" "$app/Contents/MacOS/TapeUp"
 cp Resources/Info.plist "$app/Contents/Info.plist"
+cp Resources/AppIcon.icns "$app/Contents/Resources/AppIcon.icns"
 
 # Sign with the first Apple Development identity so macOS keeps the microphone
 # and system-audio grants across rebuilds; fall back to ad hoc elsewhere.

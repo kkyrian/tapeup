@@ -8,6 +8,8 @@
     <string>TapeUp</string>
     <key>CFBundleDisplayName</key>
     <string>TapeUp</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundleExecutable</key>
     <string>TapeUp</string>
     <key>CFBundlePackageType</key>

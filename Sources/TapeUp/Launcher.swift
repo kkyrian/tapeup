@@ -33,15 +33,11 @@ enum Launcher {
     }
 
     private static func startRecording(out: String, arguments: [String]) {
-        let stamp = DateFormatter()
-        stamp.dateFormat = "yyyy-MM-dd-HHmmss"
-        let root = URL(fileURLWithPath: out)
-        let name = stamp.string(from: Date())
-        var folder = root.appendingPathComponent(name)
-        var suffix = 2
-        while FileManager.default.fileExists(atPath: folder.path) {
-            folder = root.appendingPathComponent("\(name)-\(suffix)")
-            suffix += 1
+        let folder: URL
+        do {
+            folder = try RecordingLibrary(root: URL(fileURLWithPath: out)).newFolder()
+        } catch {
+            fail("could not create the recording folder: \(error)")
         }
         do {
             let started = try Recorder(options: Recorder.Options(folder: folder))

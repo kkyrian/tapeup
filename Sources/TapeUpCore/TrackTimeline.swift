@@ -30,6 +30,14 @@ public struct TrackTimeline: Sendable {
         self.maxGapFrames = maxGapFrames
     }
 
+    /// Starts the track at `frame` instead of zero, before anything is placed,
+    /// so a recording begins with its first sound rather than with the time
+    /// the devices took to start.
+    public mutating func begin(at frame: Int64) {
+        guard pending.isEmpty, writtenUpTo == 0 else { return }
+        writtenUpTo = frame
+    }
+
     /// The frame after the last sample placed so far.
     public var end: Int64 { writtenUpTo + Int64(pending.count) }
 

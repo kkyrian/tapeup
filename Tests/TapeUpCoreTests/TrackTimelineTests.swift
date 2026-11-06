@@ -87,4 +87,19 @@ struct TrackTimelineTests {
         #expect(track.insertedSilenceFrames == 9)
         #expect(track.untrustedTimestamps == 0)
     }
+
+    @Test func beginStartsTheTrackLater() {
+        var track = TrackTimeline(toleranceFrames: 1)
+        track.begin(at: 100)
+        track.append(startFrame: 100, samples: [1, 2])
+        #expect(track.take(upTo: 102) == [1, 2])
+        #expect(track.insertedSilenceFrames == 0)
+    }
+
+    @Test func beginAfterAudioDoesNothing() {
+        var track = TrackTimeline(toleranceFrames: 1)
+        track.append(startFrame: 0, samples: [1])
+        track.begin(at: 50)
+        #expect(track.end == 1)
+    }
 }
