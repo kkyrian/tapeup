@@ -30,6 +30,9 @@ case "record":
     Launcher.record(out: out, arguments: arguments)
     app.run()
 default:
+    // Help text shows a fifth of a second after the pointer arrives instead of
+    // macOS's slower default, so icon buttons explain themselves at once.
+    UserDefaults.standard.register(defaults: ["NSInitialToolTipDelay": 200])
     // The application holds its delegate weakly.
     let delegate = AppDelegate()
     app.delegate = delegate

@@ -53,17 +53,20 @@ public struct RecordingLibrary: Sendable {
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("TapeUp", isDirectory: true)
     }
 
-    /// A new folder named for the minute it starts, suffixed when that name is taken.
+    /// A new folder in its year's folder, named for the minute it starts,
+    /// suffixed when that name is taken: `2026/2026-11-06-1430`.
     public func newFolder(at date: Date = Date()) throws -> URL {
         try prepareRoot()
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd-HHmm"
         let name = formatter.string(from: date)
+        let year = root.appendingPathComponent(String(name.prefix(4)), isDirectory: true)
+        try FileManager.default.createDirectory(at: year, withIntermediateDirectories: true)
         // Creating is the check: another recorder may take a name between a
         // look and a create.
         for suffix in 1...999 {
-            let folder = root.appendingPathComponent(suffix == 1 ? name : "\(name)-\(suffix)", isDirectory: true)
+            let folder = year.appendingPathComponent(suffix == 1 ? name : "\(name)-\(suffix)", isDirectory: true)
             do {
                 try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
                 return folder
@@ -92,14 +95,16 @@ public struct RecordingLibrary: Sendable {
         let manager = FileManager.default
         var moved = 0
         var skipped: [String] = []
-        for entry in entries() {
-            let name = entry.folder.lastPathComponent
-            let to = destination.appendingPathComponent(name, isDirectory: true)
+        for folder in recordingFolders() {
+            let name = folder.lastPathComponent
+            let year = destination.appendingPathComponent(folder.deletingLastPathComponent().lastPathComponent)
+            let to = year.appendingPathComponent(name, isDirectory: true)
             guard !manager.fileExists(atPath: to.path) else {
                 skipped.append(name)
                 continue
             }
-            try manager.moveItem(at: entry.folder, to: to)
+            try manager.createDirectory(at: year, withIntermediateDirectories: true)
+            try manager.moveItem(at: folder, to: to)
             moved += 1
         }
         for file in [PeopleList.fileName, "AGENTS.md"] {
@@ -117,15 +122,23 @@ public struct RecordingLibrary: Sendable {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
     }
 
+    /// Every folder inside the year folders (`2026/…`), newest first by name.
+    public func recordingFolders() -> [URL] {
+        func folders(in url: URL) -> [URL] {
+            let found =
+                (try? FileManager.default.contentsOfDirectory(
+                    at: url, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])) ?? []
+            return found.filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
+        }
+        return folders(in: root)
+            .filter { $0.lastPathComponent.wholeMatch(of: /\d{4}/) != nil }
+            .flatMap(folders(in:))
+            .sorted { $0.lastPathComponent > $1.lastPathComponent }
+    }
+
     /// Recordings newest first. Folders without a readable `meta.json` are skipped.
     public func entries(limit: Int = .max) -> [RecordingEntry] {
-        let folders =
-            (try? FileManager.default.contentsOfDirectory(
-                at: root, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])) ?? []
-        return
-            folders
-            .filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
-            .sorted { $0.lastPathComponent > $1.lastPathComponent }
+        recordingFolders()
             .lazy
             .compactMap(Self.entry(at:))
             .prefix(limit)
@@ -197,9 +210,10 @@ public struct RecordingLibrary: Sendable {
     static let agentsGuide = """
         # TapeUp recordings
 
-        Each folder here is one recording made by TapeUp, named for the minute it
-        started (`YYYY-MM-DD-HHMM`, with `-2`, `-3` when two start in the same minute),
-        then its title once the user names it (`2026-11-06-1430 Lab sync`). A
+        Recordings are filed by year: each folder inside `2026/` and the like is
+        one recording made by TapeUp, named for the minute it started
+        (`YYYY-MM-DD-HHMM`, with `-2`, `-3` when two start in the same minute), then
+        its title once the user names it (`2026/2026-11-06-1430 Lab sync`). A
         rename moves the folder, so look recordings up by folder, not by a saved path.
 
         - `audio.m4a`: stereo AAC. **Left channel: the microphone** (the person at

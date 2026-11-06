@@ -529,12 +529,11 @@ final class AppModel {
 
     /// Finishes recordings a crash left behind, then refreshes the list.
     func recoverLeftovers() {
-        let root = self.root
+        let library = library
         let launched = Date()
         Task.detached(priority: .utility) {
             AudioDevices.removeLeftovers()
-            let folders =
-                (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? []
+            let folders = library.recordingFolders()
             var recovered = false
             for folder in folders {
                 if (try? Recorder.recover(folder: folder, startedBefore: launched)) == true { recovered = true }

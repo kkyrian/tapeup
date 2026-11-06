@@ -37,7 +37,7 @@ sleep 40
 wait
 while pgrep -x TapeUp >/dev/null; do sleep 1; done
 
-dir="$(ls -d "$out"/*/ | tail -1)"
+dir="$(ls -d "$out"/[0-9][0-9][0-9][0-9]/*/ | tail -1)"
 echo; echo "Recording: $dir"
 grep -v '"t":0\.' "$dir/events.jsonl" | cut -c1-200
 scripts/dev/levels.py "$dir/audio.m4a" 1

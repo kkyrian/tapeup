@@ -54,19 +54,45 @@ struct RecordingLibraryTests {
         try "notes".write(to: old.root.appendingPathComponent("summary.md"), atomically: true, encoding: .utf8)
         try PeopleList(you: "Sam", people: [.init(name: "Bea")]).save(to: old.root)
         // The new root already holds a recording named like the second one, and its own guide.
-        try manager.createDirectory(
-            at: new.appendingPathComponent(second.lastPathComponent), withIntermediateDirectories: true)
+        let inNew = { (folder: URL) in
+            new.appendingPathComponent(
+                "\(folder.deletingLastPathComponent().lastPathComponent)/\(folder.lastPathComponent)")
+        }
+        try manager.createDirectory(at: inNew(second), withIntermediateDirectories: true)
         try "mine".write(to: new.appendingPathComponent("AGENTS.md"), atomically: true, encoding: .utf8)
 
         let result = try old.move(to: new)
 
         #expect(result.moved == 1)
         #expect(result.skipped == [second.lastPathComponent])
-        #expect(manager.fileExists(atPath: new.appendingPathComponent(first.lastPathComponent).path))
+        #expect(manager.fileExists(atPath: inNew(first).path))
         #expect(manager.fileExists(atPath: second.path))
         #expect(try String(contentsOf: new.appendingPathComponent("AGENTS.md"), encoding: .utf8) == "mine")
         #expect(PeopleList.load(from: new).people.map(\.name) == ["Bea"])
         #expect(manager.fileExists(atPath: old.root.appendingPathComponent("summary.md").path))
+    }
+
+    @Test func recordingsAreFiledByYear() throws {
+        let manager = FileManager.default
+        let library = RecordingLibrary(
+            root: manager.temporaryDirectory.appendingPathComponent("tapeup-years-\(UUID().uuidString)"))
+        defer { try? manager.removeItem(at: library.root) }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .current
+        let lastYear = try #require(calendar.date(from: DateComponents(year: 2025, month: 12, day: 31, hour: 23)))
+        let thisYear = try #require(calendar.date(from: DateComponents(year: 2026, month: 1, day: 1, hour: 9)))
+        let old = try library.newFolder(at: lastYear)
+        let new = try library.newFolder(at: thisYear)
+        #expect(old.path.hasSuffix("/2025/2025-12-31-2300"))
+        #expect(new.path.hasSuffix("/2026/2026-01-01-0900"))
+        for (folder, started) in [(old, "2025-12-31T23:00:00Z"), (new, "2026-01-01T09:00:00Z")] {
+            let meta: [String: Any] = ["status": "recorded", "started": started]
+            try JSONSerialization.data(withJSONObject: meta).write(to: folder.appendingPathComponent("meta.json"))
+        }
+        // Folders that are not years, such as the user's own, are not recordings.
+        try manager.createDirectory(
+            at: library.root.appendingPathComponent("notes/2026-01-02-0900"), withIntermediateDirectories: true)
+        #expect(library.entries().map(\.folder.lastPathComponent) == ["2026-01-01-0900", "2025-12-31-2300"])
     }
 
     @Test func folderNamesStayValidAndKeepTheirStamp() {
