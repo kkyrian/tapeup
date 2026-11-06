@@ -62,4 +62,29 @@ struct TrackTimelineTests {
         #expect(track.take(upTo: 2).isEmpty)
         #expect(track.writtenUpTo == 5)
     }
+
+    @Test func missingTimestampContinuesThePreviousChunk() {
+        var track = TrackTimeline(toleranceFrames: 1)
+        track.append(startFrame: 0, samples: [1])
+        track.append(startFrame: nil, samples: [2])
+        #expect(track.take(upTo: 2) == [1, 2])
+        #expect(track.untrustedTimestamps == 0)
+    }
+
+    @Test func timestampBeyondTheGapCapIsNotTrusted() {
+        var track = TrackTimeline(toleranceFrames: 1, maxGapFrames: 10)
+        track.append(startFrame: 0, samples: [1])
+        track.append(startFrame: 1_000_000, samples: [2])
+        #expect(track.take(upTo: 2) == [1, 2])
+        #expect(track.untrustedTimestamps == 1)
+        #expect(track.insertedSilenceFrames == 0)
+    }
+
+    @Test func gapWithinTheCapIsStillSilence() {
+        var track = TrackTimeline(toleranceFrames: 1, maxGapFrames: 10)
+        track.append(startFrame: 0, samples: [1])
+        track.append(startFrame: 10, samples: [2])
+        #expect(track.insertedSilenceFrames == 9)
+        #expect(track.untrustedTimestamps == 0)
+    }
 }

@@ -35,6 +35,7 @@ sleep 10; switch output "$laptop_out"; switch input "$laptop_in"
 sleep 10; switch output "$airpods"; switch input "$airpods"
 sleep 40
 wait
+while pgrep -x TapeUp >/dev/null; do sleep 1; done
 
 dir="$(ls -d "$out"/*/ | tail -1)"
 echo; echo "Recording: $dir"

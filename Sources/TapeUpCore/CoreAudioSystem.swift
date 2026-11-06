@@ -2,81 +2,157 @@ import CoreAudio
 import Foundation
 
 enum CoreAudioSystem {
+    static let system = AudioObjectID(kAudioObjectSystemObject)
+
+    static func address(
+        _ selector: AudioObjectPropertySelector, _ scope: AudioObjectPropertyScope = kAudioObjectPropertyScopeGlobal
+    ) -> AudioObjectPropertyAddress {
+        AudioObjectPropertyAddress(mSelector: selector, mScope: scope, mElement: kAudioObjectPropertyElementMain)
+    }
+
+    static func value<T: BitwiseCopyable>(
+        _ object: AudioObjectID, _ selector: AudioObjectPropertySelector,
+        _ scope: AudioObjectPropertyScope = kAudioObjectPropertyScopeGlobal, default fallback: T
+    ) -> T {
+        var address = address(selector, scope)
+        var result = fallback
+        var size = UInt32(MemoryLayout<T>.size)
+        guard AudioObjectGetPropertyData(object, &address, 0, nil, &size, &result) == noErr else { return fallback }
+        return result
+    }
+
+    static func string(_ object: AudioObjectID, _ selector: AudioObjectPropertySelector) -> String? {
+        var address = address(selector)
+        var text: Unmanaged<CFString>?
+        var size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+        guard AudioObjectGetPropertyData(object, &address, 0, nil, &size, &text) == noErr, let text else { return nil }
+        return text.takeRetainedValue() as String
+    }
+
+    static func objects(
+        _ object: AudioObjectID, _ selector: AudioObjectPropertySelector,
+        _ scope: AudioObjectPropertyScope = kAudioObjectPropertyScopeGlobal
+    ) -> [AudioObjectID] {
+        var address = address(selector, scope)
+        var size: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(object, &address, 0, nil, &size) == noErr, size > 0 else { return [] }
+        var ids = [AudioObjectID](repeating: 0, count: Int(size) / MemoryLayout<AudioObjectID>.size)
+        guard AudioObjectGetPropertyData(object, &address, 0, nil, &size, &ids) == noErr else { return [] }
+        return ids
+    }
+
     static func defaultDevice(_ selector: AudioObjectPropertySelector) -> AudioDeviceID {
-        var address = AudioObjectPropertyAddress(
-            mSelector: selector, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
-        var device = AudioDeviceID(kAudioObjectUnknown)
-        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
-        AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &device)
-        return device
+        value(system, selector, default: AudioDeviceID(kAudioObjectUnknown))
     }
 
     static func name(of device: AudioDeviceID) -> String {
         guard device != kAudioObjectUnknown else { return "none" }
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioObjectPropertyName, mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain)
-        var name: Unmanaged<CFString>?
-        var size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
-        let status = AudioObjectGetPropertyData(device, &address, 0, nil, &size, &name)
-        guard status == noErr, let name else { return "device \(device)" }
-        return name.takeRetainedValue() as String
+        return string(device, kAudioObjectPropertyName) ?? "device \(device)"
     }
 
     static func uid(of device: AudioDeviceID) -> String? {
         guard device != kAudioObjectUnknown else { return nil }
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioDevicePropertyDeviceUID, mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain)
-        var uid: Unmanaged<CFString>?
-        var size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
-        let status = AudioObjectGetPropertyData(device, &address, 0, nil, &size, &uid)
-        guard status == noErr, let uid else { return nil }
-        return uid.takeRetainedValue() as String
+        return string(device, kAudioDevicePropertyDeviceUID)
     }
 
-    private static func objects(_ selector: AudioObjectPropertySelector) -> [AudioObjectID] {
-        var address = AudioObjectPropertyAddress(
-            mSelector: selector, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
-        var size: UInt32 = 0
-        let system = AudioObjectID(kAudioObjectSystemObject)
-        guard AudioObjectGetPropertyDataSize(system, &address, 0, nil, &size) == noErr, size > 0 else { return [] }
-        var ids = [AudioObjectID](repeating: 0, count: Int(size) / MemoryLayout<AudioObjectID>.size)
-        guard AudioObjectGetPropertyData(system, &address, 0, nil, &size, &ids) == noErr else { return [] }
-        return ids
+    /// The format of the device's first input stream, as delivered to an IOProc.
+    static func firstInputStreamFormat(of device: AudioDeviceID) -> (
+        stream: AudioObjectID, format: AudioStreamBasicDescription
+    )? {
+        guard let stream = objects(device, kAudioDevicePropertyStreams, kAudioObjectPropertyScopeInput).first else {
+            return nil
+        }
+        let format = value(stream, kAudioStreamPropertyVirtualFormat, default: AudioStreamBasicDescription())
+        guard format.mSampleRate > 0, format.mChannelsPerFrame > 0 else { return nil }
+        return (stream, format)
     }
 
-    /// Removes aggregate devices and taps a previous TapeUp process left behind.
-    /// Public taps and aggregates outlive a crashed process, and a leftover one
-    /// shows up in other apps' device menus.
-    static func removeLeftovers(aggregatePrefix: String, tapName: String) -> Int {
+    /// Frames between the moment sound happens and the moment its timestamp
+    /// names, for one direction of a device.
+    static func latencyFrames(of device: AudioDeviceID, input: Bool) -> UInt32 {
+        let scope = input ? kAudioObjectPropertyScopeInput : kAudioObjectPropertyScopeOutput
+        let deviceLatency: UInt32 = value(device, kAudioDevicePropertyLatency, scope, default: 0)
+        let safety: UInt32 = value(device, kAudioDevicePropertySafetyOffset, scope, default: 0)
+        let streamLatency: UInt32 =
+            objects(device, kAudioDevicePropertyStreams, scope).first.map {
+                value($0, kAudioStreamPropertyLatency, default: UInt32(0))
+            } ?? 0
+        return deviceLatency + safety + streamLatency
+    }
+
+    static func nominalSampleRate(of device: AudioDeviceID) -> Double {
+        value(device, kAudioDevicePropertyNominalSampleRate, default: 0)
+    }
+
+    static func builtInInput() -> AudioDeviceID? {
+        objects(system, kAudioHardwarePropertyDevices).first { device in
+            value(device, kAudioDevicePropertyTransportType, default: UInt32(0)) == kAudioDeviceTransportTypeBuiltIn
+                && firstInputStreamFormat(of: device) != nil
+        }
+    }
+
+    // MARK: - Listeners
+
+    /// A property listener that stays registered until `remove()` is called.
+    final class Listener: @unchecked Sendable {
+        private let object: AudioObjectID
+        private var address: AudioObjectPropertyAddress
+        private let queue: DispatchQueue
+        private let block: AudioObjectPropertyListenerBlock
+        private var active = false
+
+        init(
+            object: AudioObjectID, selector: AudioObjectPropertySelector, queue: DispatchQueue,
+            handler: @escaping @Sendable () -> Void
+        ) {
+            self.object = object
+            self.queue = queue
+            address = CoreAudioSystem.address(selector)
+            block = { _, _ in handler() }
+            active = AudioObjectAddPropertyListenerBlock(object, &address, queue, block) == noErr
+        }
+
+        func remove() {
+            guard active else { return }
+            AudioObjectRemovePropertyListenerBlock(object, &address, queue, block)
+            active = false
+        }
+
+        deinit { remove() }
+    }
+
+    // MARK: - Leftovers
+
+    /// Prefix shared by every aggregate device TapeUp creates; the owning
+    /// process ID follows it, so a running recording's devices are never touched.
+    static let aggregatePrefix = "tapeup-"
+    static let tapNamePrefix = "TapeUp-"
+
+    /// Removes aggregate devices and taps that a TapeUp process which is no
+    /// longer running left behind. Public taps and aggregates outlive a
+    /// crashed process, and a leftover one shows up in other apps' device menus.
+    static func removeLeftovers() -> Int {
+        func ownerIsGone(_ suffix: Substring) -> Bool {
+            guard let pid = Int32(suffix.prefix { $0.isNumber }) else { return true }
+            return pid != getpid() && kill(pid, 0) != 0 && errno == ESRCH
+        }
         var removed = 0
-        for device in objects(kAudioHardwarePropertyDevices) where uid(of: device)?.hasPrefix(aggregatePrefix) == true {
+        for device in objects(system, kAudioHardwarePropertyDevices) {
+            guard let uid = uid(of: device), uid.hasPrefix(aggregatePrefix),
+                ownerIsGone(uid.dropFirst(aggregatePrefix.count))
+            else { continue }
             if AudioHardwareDestroyAggregateDevice(device) == noErr { removed += 1 }
         }
-        for tap in objects(kAudioHardwarePropertyTapList) {
-            var address = AudioObjectPropertyAddress(
-                mSelector: kAudioTapPropertyDescription, mScope: kAudioObjectPropertyScopeGlobal,
-                mElement: kAudioObjectPropertyElementMain)
+        for tap in objects(system, kAudioHardwarePropertyTapList) {
+            var address = address(kAudioTapPropertyDescription)
             var description: Unmanaged<CATapDescription>?
             var size = UInt32(MemoryLayout<Unmanaged<CATapDescription>?>.size)
             guard AudioObjectGetPropertyData(tap, &address, 0, nil, &size, &description) == noErr,
-                description?.takeRetainedValue().name == tapName
+                let name = description?.takeRetainedValue().name, name.hasPrefix(tapNamePrefix),
+                ownerIsGone(name.dropFirst(tapNamePrefix.count))
             else { continue }
             if AudioHardwareDestroyProcessTap(tap) == noErr { removed += 1 }
         }
         return removed
-    }
-
-    /// Calls `handler` on `queue` whenever the system default for `selector` changes.
-    @discardableResult
-    static func onDefaultChange(
-        _ selector: AudioObjectPropertySelector, queue: DispatchQueue, handler: @escaping @Sendable () -> Void
-    ) -> OSStatus {
-        var address = AudioObjectPropertyAddress(
-            mSelector: selector, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
-        return AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &address, queue) { _, _ in
-            handler()
-        }
     }
 }

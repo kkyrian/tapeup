@@ -1,7 +1,7 @@
 import AppKit
 
 // Prototype entry point:
-//   TapeUp record --out <dir> [--seconds N] [--system-audio withOutput|tapOnly]
+//   TapeUp record --out <dir> [--seconds N]
 //   TapeUp permissions [--out <file>]
 // Recording stops on SIGTERM or SIGINT, or after N seconds, then prints the result as JSON.
 
@@ -12,7 +12,7 @@ if command == "permissions" {
     Launcher.reportPermissions(to: Launcher.value(after: "--out", in: arguments))
 }
 guard command == "record", let out = Launcher.value(after: "--out", in: arguments) else {
-    Launcher.fail("usage: TapeUp record --out <dir> [--seconds N] [--system-audio withOutput|tapOnly]", code: 2)
+    Launcher.fail("usage: TapeUp record --out <dir> [--seconds N]", code: 2)
 }
 
 let app = NSApplication.shared

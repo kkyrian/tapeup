@@ -18,15 +18,30 @@ public struct TrackTimeline: Sendable {
     public private(set) var droppedFrames: Int64 = 0
     public private(set) var corrections: Int = 0
 
-    public init(toleranceFrames: Int64) {
+    /// A chunk that claims to start further ahead than this is trusted no
+    /// more than one without a timestamp. The writer zero-fills real gaps as
+    /// time passes, so a genuine gap never gets this far ahead of `end`.
+    public let maxGapFrames: Int64
+
+    public private(set) var untrustedTimestamps: Int = 0
+
+    public init(toleranceFrames: Int64, maxGapFrames: Int64 = .max) {
         self.toleranceFrames = toleranceFrames
+        self.maxGapFrames = maxGapFrames
     }
 
     /// The frame after the last sample placed so far.
     public var end: Int64 { writtenUpTo + Int64(pending.count) }
 
-    public mutating func append(startFrame: Int64, samples: [Float]) {
+    /// Places a chunk at `startFrame`, or straight after the previous chunk
+    /// when there is no usable timestamp.
+    public mutating func append(startFrame: Int64?, samples: [Float]) {
         guard !samples.isEmpty else { return }
+        guard let startFrame, startFrame - end <= maxGapFrames else {
+            if startFrame != nil { untrustedTimestamps += 1 }
+            pending.append(contentsOf: samples)
+            return
+        }
         let offset = startFrame - end
         if abs(offset) <= toleranceFrames {
             pending.append(contentsOf: samples)

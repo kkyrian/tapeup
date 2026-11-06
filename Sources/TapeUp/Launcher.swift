@@ -35,11 +35,16 @@ enum Launcher {
     private static func startRecording(out: String, arguments: [String]) {
         let stamp = DateFormatter()
         stamp.dateFormat = "yyyy-MM-dd-HHmmss"
-        var options = Recorder.Options(
-            folder: URL(fileURLWithPath: out).appendingPathComponent(stamp.string(from: Date())))
-        if let mode = value(after: "--system-audio", in: arguments) { options.systemAudioMode = mode }
+        let root = URL(fileURLWithPath: out)
+        let name = stamp.string(from: Date())
+        var folder = root.appendingPathComponent(name)
+        var suffix = 2
+        while FileManager.default.fileExists(atPath: folder.path) {
+            folder = root.appendingPathComponent("\(name)-\(suffix)")
+            suffix += 1
+        }
         do {
-            let started = try Recorder(options: options)
+            let started = try Recorder(options: Recorder.Options(folder: folder))
             try started.start()
             recorder = started
         } catch {

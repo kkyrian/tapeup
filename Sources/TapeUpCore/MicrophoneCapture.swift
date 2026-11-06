@@ -1,83 +1,31 @@
-import AVFoundation
-import AudioToolbox
 import CoreAudio
 import Foundation
 
-/// Captures the current default input. A new engine is built for each device,
-/// because an engine bound to a device that went away does not recover.
+/// Captures one input device, normally the system default, with its
+/// timestamps moved back by the device's input latency.
 final class MicrophoneCapture: @unchecked Sendable {
-    struct NoInput: Error, CustomStringConvertible {
-        var description: String { "no usable input device" }
+    let device: AudioDeviceID
+    let name: String
+    private var reader: DeviceInputReader?
+
+    init(device: AudioDeviceID) {
+        self.device = device
+        name = CoreAudioSystem.name(of: device)
     }
 
-    private let sampleRate: Double
-    private let sink: @Sendable (UInt64, [Float]) -> Void
-    private let onConfigurationChange: @Sendable () -> Void
-    private var engine: AVAudioEngine?
-    private var observer: NSObjectProtocol?
-
-    private(set) var inputName = "none"
-    private var boundDevice = AudioDeviceID(kAudioObjectUnknown)
-
-    /// Whether a configuration change actually needs a new engine: the
-    /// default input moved, or the engine stopped. Binding the engine to a
-    /// device itself posts a configuration change, so most changes do not.
-    var needsRebuild: Bool {
-        guard let engine else { return true }
-        return !engine.isRunning
-            || CoreAudioSystem.defaultDevice(kAudioHardwarePropertyDefaultInputDevice) != boundDevice
-    }
-
-    init(
-        sampleRate: Double, sink: @escaping @Sendable (UInt64, [Float]) -> Void,
-        onConfigurationChange: @escaping @Sendable () -> Void
-    ) {
-        self.sampleRate = sampleRate
-        self.sink = sink
-        self.onConfigurationChange = onConfigurationChange
-    }
-
-    func start() throws {
-        var device = CoreAudioSystem.defaultDevice(kAudioHardwarePropertyDefaultInputDevice)
-        guard device != kAudioObjectUnknown else { throw NoInput() }
-        inputName = CoreAudioSystem.name(of: device)
-        boundDevice = device
-
-        let engine = AVAudioEngine()
-        let input = engine.inputNode
-        if let unit = input.audioUnit {
-            AudioUnitSetProperty(
-                unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0, &device,
-                UInt32(MemoryLayout<AudioDeviceID>.size))
-        }
-        let format = input.outputFormat(forBus: 0)
-        guard format.channelCount > 0, format.sampleRate > 0 else { throw NoInput() }
-
-        let resampler = MonoResampler(sampleRate: sampleRate)
-        let sink = self.sink
-        input.installTap(onBus: 0, bufferSize: 4096, format: format) { buffer, when in
-            let host = when.isHostTimeValid ? when.hostTime : AudioGetCurrentHostTime()
-            sink(host, resampler.process(buffer))
-        }
-        let onChange = onConfigurationChange
-        observer = NotificationCenter.default.addObserver(
-            forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil
-        ) { _ in onChange() }
-        engine.prepare()
-        do {
-            try engine.start()
-        } catch {
-            input.removeTap(onBus: 0)
-            throw error
-        }
-        self.engine = engine
+    func start(sampleRate: Double, sink: @escaping DeviceInputReader.Sink, issue: @escaping @Sendable (String) -> Void)
+        throws
+    {
+        let rate = CoreAudioSystem.nominalSampleRate(of: device)
+        let latency = CoreAudioSystem.latencyFrames(of: device, input: true)
+        let shift = rate > 0 ? -Int64(Double(latency) / rate * 1e9) : 0
+        let reader = try DeviceInputReader(device: device, shiftNanos: shift, sink: sink, issue: issue)
+        try reader.start(sampleRate: sampleRate)
+        self.reader = reader
     }
 
     func stop() {
-        if let observer { NotificationCenter.default.removeObserver(observer) }
-        observer = nil
-        engine?.inputNode.removeTap(onBus: 0)
-        engine?.stop()
-        engine = nil
+        reader?.stop()
+        reader = nil
     }
 }
