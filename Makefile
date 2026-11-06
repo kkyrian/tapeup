@@ -22,6 +22,7 @@ bundle:
 # Replaces /Applications/TapeUp.app with a fresh build and opens it.
 install: bundle
 	-pkill -x TapeUp
+	while pgrep -x TapeUp >/dev/null; do sleep 0.2; done
 	rm -rf /Applications/TapeUp.app
 	ditto .build/TapeUp.app /Applications/TapeUp.app
 	open /Applications/TapeUp.app

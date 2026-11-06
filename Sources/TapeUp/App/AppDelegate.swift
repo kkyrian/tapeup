@@ -53,7 +53,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func statusItemClicked() {
-        panel.toggle()
+        guard NSApp.currentEvent?.type == .rightMouseDown else { return panel.toggle() }
+        panel.close()
+        statusItem.menu = appMenu()
+        statusItem.button?.performClick(nil)
+        statusItem.menu = nil
+    }
+
+    /// The same app-wide items as the panel's ··· menu, on right-click.
+    private func appMenu() -> NSMenu {
+        let menu = NSMenu()
+        func item(_ title: String, on: Bool? = nil, _ action: @escaping @MainActor () -> Void) -> NSMenuItem {
+            let item = ClosureMenuItem(title: title, action: action)
+            if let on { item.state = on ? .on : .off }
+            return item
+        }
+        menu.addItem(
+            item("People…") { [weak self] in
+                self?.model.openPeople()
+                self?.panel.show()
+            })
+        let folder = item("Change Recordings Folder…") { [weak self] in
+            guard let self else { return }
+            FolderChooser.choose(model: model)
+        }
+        folder.isEnabled = model.phase == .idle
+        menu.addItem(folder)
+        menu.addItem(
+            item("Floating Controls While Recording", on: model.showsFloatingControls) { [weak self] in
+                self?.model.showsFloatingControls.toggle()
+            })
+        menu.addItem(
+            item("Open at Login", on: model.launchAtLogin) { [weak self] in
+                guard let self else { return }
+                model.launchAtLogin.toggle()
+            })
+        menu.addItem(.separator())
+        menu.addItem(item("Quit TapeUp") { NSApp.terminate(nil) })
+        menu.autoenablesItems = false
+        return menu
     }
 
     private func shortcutPressed() {
@@ -125,4 +163,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 "TapeUp, \(model.paused ? "paused" : "recording"), \(Format.spokenDuration(model.elapsed))")
         }
     }
+}
+
+/// A menu item that runs a closure.
+@MainActor
+final class ClosureMenuItem: NSMenuItem {
+    private let run: @MainActor () -> Void
+
+    init(title: String, action: @escaping @MainActor () -> Void) {
+        run = action
+        super.init(title: title, action: #selector(runAction), keyEquivalent: "")
+        target = self
+    }
+
+    required init(coder: NSCoder) { fatalError("not used") }
+
+    @objc private func runAction() { run() }
 }

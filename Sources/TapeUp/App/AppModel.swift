@@ -46,6 +46,13 @@ final class AppModel {
 
     /// The card on screen: the recording just saved, or one opened from Recent.
     var card: Card?
+    private(set) var copiedFlash = false
+    /// True when the panel was opened by the user and holds the keyboard, so
+    /// a field may take the cursor at once. False after a shortcut stop, so
+    /// the card never takes typing away from a call.
+    var panelFocused = false
+    /// Makes the panel take the keyboard; set by the panel controller.
+    var focusPanel: () -> Void = {}
 
     struct Card: Equatable {
         var entry: RecordingEntry
@@ -545,7 +552,14 @@ final class AppModel {
     func copy(_ entry: RecordingEntry) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(entry.clipboardText, forType: .string)
-        if card?.entry.folder == entry.folder { card?.copied = true }
+        guard card?.entry.folder == entry.folder else { return }
+        card?.copied = true
+        // The button says Copied for a moment; the copied lines stay.
+        copiedFlash = true
+        let folder = entry.folder
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+            if self?.card?.entry.folder == folder { self?.copiedFlash = false }
+        }
     }
 
     /// Moves a recording's folder to the Trash, where it can still be restored.
@@ -653,6 +667,8 @@ final class AppModel {
     var hasSuggestionSource: Bool { !peopleList.people.isEmpty || allEntries.contains { !$0.people.names.isEmpty } }
 
     func dismissProblem() { problem = nil }
+
+    func clearPeopleNotice() { if peopleNotice != .copied { peopleNotice = nil } }
 
     /// Puts the model in a given state for `TapeUp snapshot`, which renders
     /// the panel offscreen so its design can be checked without recording.

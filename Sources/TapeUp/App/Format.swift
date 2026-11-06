@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 enum Format {
@@ -27,6 +28,28 @@ enum Format {
             return date.formatted(.dateTime.weekday(.abbreviated)) + " " + time
         }
         return date.formatted(.dateTime.month(.abbreviated).day()) + ", " + time
+    }
+
+    /// "10:15 PM" or "22:15", as the user's clock reads.
+    static func time(_ date: Date) -> String { date.formatted(date: .omitted, time: .shortened) }
+
+    /// The width of the widest time this clock shows, so a column of times lines up.
+    static let timeColumnWidth: CGFloat = {
+        let sample = Calendar.current.date(from: DateComponents(year: 2026, month: 1, day: 1, hour: 22, minute: 58))!
+        let text = time(sample) as NSString
+        let font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .regular)
+        return ceil(text.size(withAttributes: [.font: font]).width) + 2
+    }()
+
+    /// A day heading: "Today", "Yesterday", "Wednesday", or "Oct 28".
+    static func day(_ date: Date, now: Date = Date()) -> String {
+        let calendar = Calendar.current
+        if calendar.isDateInToday(date) { return "Today" }
+        if calendar.isDateInYesterday(date) { return "Yesterday" }
+        if let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: date), to: now).day, days < 6 {
+            return date.formatted(.dateTime.weekday(.wide))
+        }
+        return date.formatted(.dateTime.month(.abbreviated).day())
     }
 
     /// "Thu, Nov 7 at 10:15 PM".

@@ -55,6 +55,10 @@ final class PanelController: NSObject, NSWindowDelegate {
         host.autoresizingMask = [.width, .height]
         background.addSubview(host)
         panel.contentView = background
+        model.focusPanel = { [weak self] in
+            self?.panel.makeKey()
+            self?.model.panelFocused = true
+        }
         resized = { [weak self] height in
             guard let self, abs(height - contentHeight) > 0.5 else { return }
             contentHeight = height
@@ -65,7 +69,16 @@ final class PanelController: NSObject, NSWindowDelegate {
     var isVisible: Bool { panel.isVisible }
     var window: NSPanel { panel }
 
-    func toggle() { isVisible ? close() : show() }
+    /// When a click outside last closed the panel. A click on the menu-bar
+    /// icon reaches that monitor first; without this, the icon's own click
+    /// would open the panel again, so a second click flashed instead of closing.
+    private var closedByOutsideClick = Date.distantPast
+
+    func toggle() {
+        if isVisible { return close() }
+        guard Date().timeIntervalSince(closedByOutsideClick) > 0.3 else { return }
+        show()
+    }
 
     /// - Parameter takingFocus: false when the panel appears on its own (after
     ///   a shortcut stop): it then becomes key only if the user clicks a field.
@@ -79,6 +92,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         panel.alphaValue = 0
         panel.orderFrontRegardless()
         if takingFocus { panel.makeKey() }
+        model.panelFocused = takingFocus
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.12
             panel.animator().alphaValue = 1
@@ -87,7 +101,11 @@ final class PanelController: NSObject, NSWindowDelegate {
         anchor?.highlight(true)
         outsideClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) {
             [weak self] _ in
-            MainActor.assumeIsolated { self?.close() }
+            MainActor.assumeIsolated {
+                guard let self, self.isVisible else { return }
+                self.closedByOutsideClick = Date()
+                self.close()
+            }
         }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self, event.window === panel else { return event }

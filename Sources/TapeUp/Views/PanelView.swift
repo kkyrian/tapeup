@@ -42,9 +42,10 @@ struct PanelView: View {
                 RecorderView(model: model)
                 if let problem = model.problem {
                     ProblemBanner(text: problem, dismiss: model.dismissProblem)
-                        .padding([.horizontal, .bottom], Style.inset)
+                        .padding(.horizontal, Style.inset)
+                        .padding(.bottom, Style.inset)
                 }
-                Divider()
+                Divider().padding(.horizontal, Style.inset)
                 RecentView(model: model)
             }
         }
@@ -56,13 +57,15 @@ struct ProblemBanner: View {
     let dismiss: () -> Void
 
     var body: some View {
-        HStack(alignment: .top, spacing: 8) {
-            Image(systemName: "exclamationmark.circle.fill").foregroundStyle(.orange)
+        HStack(alignment: .firstTextBaseline, spacing: 0) {
+            Image(systemName: "exclamationmark.circle.fill")
+                .font(.system(size: 12))
+                .foregroundStyle(.orange)
+                .frame(width: Style.textEdge - Style.inset, alignment: .leading)
             Text(text).font(.system(size: 12)).fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 0)
+            Spacer(minLength: 4)
             IconButton(symbol: "xmark", help: "Dismiss", size: 18, action: dismiss)
+                .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
         }
-        .padding(10)
-        .background(Color.orange.opacity(0.12), in: .rect(cornerRadius: Style.corner, style: .continuous))
     }
 }

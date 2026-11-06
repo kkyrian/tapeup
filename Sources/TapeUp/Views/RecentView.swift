@@ -2,14 +2,38 @@ import AppKit
 import SwiftUI
 import TapeUpCore
 
-/// The last few recordings, each one click from its path or its card.
+/// The last few recordings, grouped by day, each one click from its path or
+/// its card. The time sits in its own column, so naming a recording never moves it.
 struct RecentView: View {
     @Bindable var model: AppModel
 
+    private var days: [(day: String, entries: [RecordingEntry])] {
+        var groups: [(day: String, entries: [RecordingEntry])] = []
+        for entry in model.recent {
+            let day = Format.day(entry.started)
+            if groups.last?.day == day {
+                groups[groups.count - 1].entries.append(entry)
+            } else {
+                groups.append((day, [entry]))
+            }
+        }
+        return groups
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 2) {
-                SectionLabel(text: "Recent")
+                // Undo takes the header's place, so the list never shifts.
+                if model.trashed != nil {
+                    Text("Moved to the Trash").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+                    Button("Undo", action: model.undoTrash)
+                        .buttonStyle(.plain)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Color.accentColor)
+                        .padding(.leading, 6)
+                } else if !model.recent.isEmpty {
+                    SectionLabel(text: "Recent")
+                }
                 Spacer()
                 IconButton(symbol: "folder", help: "Open recordings folder", action: model.openRoot)
                 MoreMenu(model: model)
@@ -18,15 +42,19 @@ struct RecentView: View {
             .padding(.trailing, 8)
             .padding(.vertical, 6)
 
-            VStack(spacing: 0) {
-                if let trashed = model.trashed {
-                    TrashedRow(entry: trashed.entry, undo: model.undoTrash)
-                }
-                if model.peopleList.people.isEmpty, model.peopleList.you == nil {
-                    SetupPeopleRow(model: model)
-                }
-                ForEach(model.recent) { entry in
-                    RecentRow(entry: entry, model: model)
+            VStack(alignment: .leading, spacing: 0) {
+                let groups = days
+                ForEach(groups, id: \.day) { group in
+                    if groups.count > 1 || group.day != "Today" {
+                        Text(group.day)
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.tertiary)
+                            .padding(.horizontal, 6)
+                            .padding(.top, 4)
+                    }
+                    ForEach(group.entries) { entry in
+                        RecentRow(entry: entry, model: model)
+                    }
                 }
             }
             .padding(.horizontal, 6)
@@ -42,25 +70,37 @@ struct RecentRow: View {
     @State private var copied = false
 
     var body: some View {
-        HStack(spacing: 6) {
-            VStack(alignment: .leading, spacing: 1) {
-                Text(entry.title ?? Format.when(entry.started)).font(.system(size: 13)).lineLimit(1)
-                if let detail {
-                    Text(detail).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(Format.time(entry.started))
+                .font(.system(size: 12).monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(width: Format.timeColumnWidth, alignment: .leading)
+            VStack(alignment: .leading, spacing: 2) {
+                if let title = entry.title {
+                    Text(title).font(.system(size: 13)).lineLimit(1)
+                    if let people = peopleLine {
+                        Text(people).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                } else {
+                    Text(peopleLine ?? " ").font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(1)
                 }
             }
-            Spacer(minLength: 6)
+            Spacer(minLength: 4)
             if hovering || copied {
-                IconButton(symbol: "trash", help: "Move to Trash") { model.trash(entry) }
-                IconButton(symbol: "folder", help: "Show in Finder") { model.reveal(entry) }
-                IconButton(symbol: copied ? "checkmark" : "doc.on.doc", help: "Copy path", action: copy)
+                HStack(spacing: 0) {
+                    IconButton(symbol: "trash", help: "Move to Trash", size: 22) { model.trash(entry) }
+                    IconButton(symbol: "folder", help: "Show in Finder", size: 22) { model.reveal(entry) }
+                    IconButton(symbol: copied ? "checkmark" : "doc.on.doc", help: "Copy path", size: 22, action: copy)
+                }
+                .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
             }
             Text(Format.duration(entry.duration))
                 .font(.system(size: 12).monospacedDigit())
                 .foregroundStyle(.secondary)
         }
         .padding(.horizontal, 6)
-        .frame(height: detail == nil ? 32 : 40)
+        .padding(.vertical, 6)
+        .frame(minHeight: 28)
         .background(hovering ? Style.fill : .clear, in: .rect(cornerRadius: 6, style: .continuous))
         .contentShape(.rect)
         .onHover { hovering = $0 }
@@ -86,13 +126,7 @@ struct RecentRow: View {
     private func copy() {
         model.copy(entry)
         copied = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) { copied = false }
-    }
-
-    /// Once renamed, the time moves to the second line, ahead of the people.
-    private var detail: String? {
-        let parts = [entry.title == nil ? nil : Format.when(entry.started), peopleLine].compactMap { $0 }
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { copied = false }
     }
 
     private var peopleLine: String? {
@@ -107,37 +141,15 @@ struct RecentRow: View {
     }
 }
 
-/// Stands where a trashed recording was, with a way back.
-struct TrashedRow: View {
-    let entry: RecordingEntry
-    let undo: () -> Void
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "trash").font(.system(size: 11)).foregroundStyle(.secondary).frame(width: 16)
-            Text("Moved \(entry.title ?? Format.when(entry.started)) to the Trash")
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-            Spacer(minLength: 6)
-            Button("Undo", action: undo)
-                .buttonStyle(.plain)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(Color.accentColor)
-        }
-        .padding(.horizontal, 6)
-        .frame(height: 32)
-    }
-}
-
+/// App-wide settings, also on right-click of the menu-bar icon.
 struct MoreMenu: View {
     @Bindable var model: AppModel
 
     var body: some View {
         Menu {
             Button("People…", action: model.openPeople)
-            Button("Change Recordings Folder…", action: chooseFolder).disabled(model.phase != .idle)
+            Button("Change Recordings Folder…") { FolderChooser.choose(model: model) }
+                .disabled(model.phase != .idle)
             Toggle("Floating Controls While Recording", isOn: $model.showsFloatingControls)
             Toggle("Open at Login", isOn: launchAtLogin)
             Divider()
@@ -154,8 +166,8 @@ struct MoreMenu: View {
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
         .fixedSize()
-        .help("More")
-        .accessibilityLabel("More")
+        .help("TapeUp")
+        .accessibilityLabel("TapeUp menu")
     }
 
     private var launchAtLogin: Binding<Bool> {
@@ -166,8 +178,12 @@ struct MoreMenu: View {
             },
             set: { model.launchAtLogin = $0 })
     }
+}
 
-    private func chooseFolder() {
+/// Picks a new recordings folder and asks whether the recordings move with it.
+@MainActor
+enum FolderChooser {
+    static func choose(model: AppModel) {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
@@ -191,31 +207,5 @@ struct MoreMenu: View {
         case .alertSecondButtonReturn: model.changeRoot(to: url, moving: false)
         default: break
         }
-    }
-}
-
-/// Until there is a people list: one row that leads to it.
-struct SetupPeopleRow: View {
-    @Bindable var model: AppModel
-    @State private var hovering = false
-
-    var body: some View {
-        Button(action: model.openPeople) {
-            HStack(spacing: 8) {
-                Image(systemName: "person.2")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(Color.accentColor)
-                    .frame(width: 16)
-                Text("Add the people you meet").font(.system(size: 13))
-                Spacer()
-                Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold)).foregroundStyle(.tertiary)
-            }
-            .padding(.horizontal, 6)
-            .frame(height: 32)
-            .background(hovering ? Style.fill : .clear, in: .rect(cornerRadius: 6, style: .continuous))
-            .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-        .onHover { hovering = $0 }
     }
 }

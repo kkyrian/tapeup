@@ -12,7 +12,7 @@ final class FloatingControls {
 
     init(model: AppModel, stop: @escaping @MainActor () -> Void) {
         self.model = model
-        let size = NSSize(width: 168, height: 40)
+        let size = NSSize(width: FloatingControlsView.width, height: 40)
         panel = NSPanel(
             contentRect: NSRect(origin: .zero, size: size),
             styleMask: [.nonactivatingPanel, .borderless, .fullSizeContentView], backing: .buffered, defer: true)
@@ -75,25 +75,33 @@ final class FloatingControls {
 }
 
 struct FloatingControlsView: View {
+    /// Sized for the longest time it shows, so it never grows mid-recording.
+    static let width: CGFloat = {
+        let font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .semibold)
+        let time = ceil(("0:00:00" as NSString).size(withAttributes: [.font: font]).width)
+        return 10 + 8 + 6 + time + 8 + 28 + 2 + 28 + 6
+    }()
+
     @Bindable var model: AppModel
     let stop: () -> Void
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 0) {
             RecordingDot(active: !model.paused)
-                .padding(.leading, 6)
+                .padding(.leading, 10)
+                .padding(.trailing, 6)
             Text(Format.duration(model.elapsed))
                 .font(.system(size: 13, weight: .semibold).monospacedDigit())
                 .foregroundStyle(model.paused ? .secondary : .primary)
-                .frame(minWidth: 44, alignment: .leading)
-            Spacer(minLength: 0)
+            Spacer(minLength: 8)
             IconButton(
                 symbol: model.paused ? "play.fill" : "pause.fill", help: model.paused ? "Resume" : "Pause", size: 28,
                 action: model.togglePause)
-            IconButton(symbol: "stop.fill", help: "Stop and save", size: 28, action: stop)
+            IconButton(symbol: "stop.fill", help: "Stop and save", size: 28, tinted: true, action: stop)
+                .padding(.leading, 2)
+                .padding(.trailing, 6)
         }
-        .padding(.horizontal, 6)
-        .frame(width: 168, height: 40)
+        .frame(width: Self.width, height: 40)
         .focusEffectDisabled()
     }
 }

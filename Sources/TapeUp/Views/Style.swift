@@ -5,7 +5,10 @@ import SwiftUI
 /// gradients, no shadows, hover by a slightly stronger fill.
 enum Style {
     static let width: CGFloat = 300
+    /// The content edge; icons sit in a column from here to `textEdge`.
     static let inset: CGFloat = 12
+    /// Where text starts beside an icon column.
+    static let textEdge: CGFloat = 40
     static let corner: CGFloat = 8
     static let red = Color(nsColor: .systemRed)
     static let fill = Color.primary.opacity(0.07)
@@ -50,6 +53,8 @@ struct IconButton: View {
     let help: String
     var size: CGFloat = 24
     var active = false
+    /// On, shown by an accent glyph on a fill rather than a solid block.
+    var tinted = false
     let action: () -> Void
     @State private var hovering = false
 
@@ -58,9 +63,10 @@ struct IconButton: View {
             Image(systemName: symbol)
                 .font(.system(size: size * 0.46, weight: .semibold))
                 .frame(width: size, height: size)
-                .foregroundStyle(active ? Color.white : Color.secondary)
+                .foregroundStyle(active ? Color.white : tinted ? Color.accentColor : Color.secondary)
                 .background(
-                    active ? Color.accentColor : (hovering ? Style.fillHover : .clear),
+                    active
+                        ? Color.accentColor : tinted || hovering ? (hovering ? Style.fillHover : Style.fill) : .clear,
                     in: .rect(cornerRadius: size * 0.28, style: .continuous)
                 )
                 .contentShape(.rect)
@@ -95,13 +101,15 @@ struct Chip: View {
             HStack(spacing: 4) {
                 if let symbol, !trailingSymbol { icon(symbol) }
                 Text(text).font(.system(size: 12, weight: .medium)).monospacedDigit().lineLimit(1)
-                if let symbol, trailingSymbol { icon(symbol) }
+                if let symbol, trailingSymbol { icon(symbol).foregroundStyle(.secondary) }
             }
             .padding(.horizontal, 9)
             .frame(minWidth: 28, minHeight: 24)
             .foregroundStyle(foreground)
             .background(background, in: .capsule)
-            .overlay(Capsule().strokeBorder(Color.accentColor, lineWidth: look == .suggested ? 1 : 0))
+            .overlay(
+                Capsule().strokeBorder(Color.accentColor, lineWidth: look == .suggested || look == .token ? 1 : 0)
+            )
             .contentShape(.capsule)
         }
         .buttonStyle(Pressable())
@@ -116,7 +124,6 @@ struct Chip: View {
     private var foreground: Color {
         switch look {
         case .selected: .white
-        case .token: .accentColor
         default: .primary
         }
     }
@@ -124,7 +131,6 @@ struct Chip: View {
     private var background: Color {
         switch look {
         case .selected: .accentColor
-        case .token: Color.accentColor.opacity(hovering ? 0.22 : 0.14)
         default: hovering ? Style.fillHover : Style.fill
         }
     }
@@ -187,5 +193,31 @@ struct FlowLayout: Layout {
             rows[rows.count - 1] = row
         }
         return rows
+    }
+}
+
+/// Lays children out left to right on one line of fixed height; whatever
+/// does not fit is left out rather than wrapped.
+struct OneRowLayout: Layout {
+    var spacing: CGFloat = 6
+    var height: CGFloat = 24
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        CGSize(width: proposal.width ?? 0, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var x = bounds.minX
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x + size.width > bounds.maxX {
+                // Out of sight and out of reach.
+                subview.place(at: CGPoint(x: bounds.minX - 10_000, y: bounds.minY), proposal: .zero)
+                x = bounds.maxX + 1
+                continue
+            }
+            subview.place(at: CGPoint(x: x, y: bounds.midY - size.height / 2), proposal: ProposedViewSize(size))
+            x += size.width + spacing
+        }
     }
 }
