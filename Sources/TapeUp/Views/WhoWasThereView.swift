@@ -87,7 +87,7 @@ struct WhoWasThereView: View {
                     focusNames()
                 }
                 .accessibilityLabel(number == 1 ? "Just you" : "\(number) people")
-                .help(number == 1 ? "Just you" : "\(number) people, including you")
+                .hoverHelp(number == 1 ? "Just you" : "\(number) people, including you")
             }
             if editingOther {
                 TextField("6+", text: $otherText)

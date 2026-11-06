@@ -170,6 +170,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         outsideClickMonitor = nil
         keyMonitor = nil
         panel.orderOut(nil)
+        HoverHelp.shared.hide()
         model.panelVisible = false
         anchor?.highlight(false)
         // A card for a finished recording stays only until the panel closes.

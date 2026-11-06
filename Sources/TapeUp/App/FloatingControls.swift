@@ -88,6 +88,7 @@ final class FloatingControls {
             }
         } else if !wanted, panel.isVisible {
             panel.orderOut(nil)
+            HoverHelp.shared.hide()
         }
     }
 

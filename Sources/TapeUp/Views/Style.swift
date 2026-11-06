@@ -73,7 +73,7 @@ struct IconButton: View {
         }
         .buttonStyle(Pressable())
         .onHover { hovering = $0 }
-        .help(help)
+        .hoverHelp(help)
         .accessibilityLabel(help)
     }
 }
@@ -127,7 +127,7 @@ struct MoreButton<Items: View>: View {
         .fixedSize()
         .background(hovering ? Style.fillHover : .clear, in: .rect(cornerRadius: 24 * 0.28, style: .continuous))
         .onHover { hovering = $0 }
-        .help(help)
+        .hoverHelp(help)
         .accessibilityLabel(help)
     }
 }

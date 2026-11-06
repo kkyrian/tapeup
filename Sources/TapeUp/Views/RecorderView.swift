@@ -184,7 +184,7 @@ struct PauseButton: View {
         }
         .buttonStyle(Pressable())
         .onHover { hovering = $0 }
-        .help(paused ? "Resume" : "Pause")
+        .hoverHelp(paused ? "Resume" : "Pause")
         .accessibilityLabel(paused ? "Resume" : "Pause")
     }
 }

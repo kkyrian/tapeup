@@ -68,7 +68,7 @@ struct LaneView: View {
         .contentShape(.rect)
         .onHover { hovering = $0 }
         .onTapGesture(perform: tap)
-        .help(help)
+        .hoverHelp(help)
         .animation(.snappy(duration: 0.3), value: device)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(label)

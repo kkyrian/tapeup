@@ -32,7 +32,7 @@ struct PeopleView: View {
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                     } else {
-                        status.lineLimit(1).help(longNotice)
+                        status.lineLimit(1).hoverHelp(longNotice)
                     }
                     Spacer(minLength: 0)
                     textButton(copied ? "Copied" : "Copy request", action: model.copyAssistantPrompt)

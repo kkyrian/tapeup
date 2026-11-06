@@ -22,7 +22,7 @@ struct CardView: View {
                 }
             }
             .disabled(card.finishing)
-            .help(card.entry.clipboardText)
+            .hoverHelp(card.entry.clipboardText)
             Divider().padding(.vertical, 2)
             WhoWasThereView(model: model, people: card.entry.people)
         }
@@ -86,7 +86,7 @@ struct TitleField<Subtitle: View>: View {
                 // while the panel is not focused.
                 Button(action: begin) { block }
                     .buttonStyle(.plain)
-                    .help("Rename")
+                    .hoverHelp("Rename")
                     .accessibilityLabel(entry.title.map { "\($0), rename" } ?? "Add a title")
             }
         }
