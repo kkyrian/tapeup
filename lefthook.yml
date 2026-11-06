@@ -1,0 +1,4 @@
+# Project-specific hooks may live here; keep the universal floor in its own
+# generated fragment so setup refreshes do not overwrite project checks.
+extends:
+  - .config/lefthook/agent-workspace.yml

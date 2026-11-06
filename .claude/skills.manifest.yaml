@@ -1,0 +1,19 @@
+# Skills this repo opts into. Links are local state from `kk-skills sync`;
+# embedded skills are committed snapshots.
+skills:
+  - name: kk-artifact-publish
+    install: symlink
+  - name: unslop
+    install: symlink
+  - name: mattpocock-code-review
+    install: symlink
+  - name: mattpocock-tdd
+    install: symlink
+  - name: mattpocock-diagnosing-bugs
+    install: symlink
+  - name: mattpocock-codebase-design
+    install: symlink
+  - name: mattpocock-improve-codebase-architecture
+    install: symlink
+  - name: mattpocock-prototype
+    install: symlink

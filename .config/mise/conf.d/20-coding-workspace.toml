@@ -1,0 +1,12 @@
+# Coding-workspace tooling.
+#
+# Declared latest and resolved to exact versions in the workspace lockfile, the
+# same as the Git floor: `mise lock` covers every tool in the config scope, so a
+# second, floating tier is not something this setup can actually offer.
+#
+# Staying current is therefore an action, not a property. Run
+# `workspace-tooling.py update <workspace>` to re-resolve every declared tool to
+# current stable and rewrite the lockfile. That matters most for Gitleaks, whose
+# detection rules ship inside the binary.
+[tools]
+osv-scanner = "latest"

@@ -1,0 +1,8 @@
+# Latest stable is resolved when the workspace lockfile is created. The lockfile
+# carries exact versions and checksums for Linux and macOS on x64 and arm64.
+# Advance every tool with `workspace-tooling.py update <workspace>`.
+[tools]
+cocogitto = "latest"
+gitleaks = "latest"
+lefthook = "latest"
+ripgrep = "latest"

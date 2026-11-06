@@ -1,0 +1,20 @@
+# Universal, language-neutral Git checks. Project and coding-profile checks
+# belong in separate Lefthook fragments extended by the root config.
+pre-commit:
+  parallel: true
+  jobs:
+    - name: agent-workspace-whitespace
+      run: git diff --cached --check
+
+    - name: agent-workspace-secrets
+      run: python3 scripts/agent-workspace/secret-scan.py --staged
+
+pre-push:
+  jobs:
+    - name: agent-workspace-outgoing-secrets
+      run: python3 scripts/agent-workspace/secret-scan.py --pre-push
+
+commit-msg:
+  jobs:
+    - name: agent-workspace-conventional-commit
+      run: python3 scripts/agent-workspace/verify-commit-message.py "{1}"

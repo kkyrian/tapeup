@@ -1,0 +1,20 @@
+!CLAUDE.md
+!AGENTS.md
+!.claude/
+!.agents/
+/tmp/
+/_output/
+/.build/
+/.swiftpm/
+CLAUDE.local.md
+.DS_Store
+*.caf
+*.m4a
+*.wav
+
+# Skills (managed by kk-skill hub — see .claude/skills.manifest.yaml — regenerable)
+# Links are local state from `kk-skills sync`; embedded skills are re-included below.
+/.claude/skills/*
+/.agents/skills/*
+!/.claude/skills/.gitkeep
+!/.agents/skills/.gitkeep

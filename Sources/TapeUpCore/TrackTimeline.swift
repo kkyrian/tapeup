@@ -1,0 +1,66 @@
+/// One mono track placed on the recording's shared clock.
+///
+/// Capture callbacks arrive with host timestamps. Placing each chunk at the
+/// frame its timestamp names, rather than appending blindly, means a device
+/// reconnect leaves silence of the right length and later audio stays aligned
+/// with the other track.
+public struct TrackTimeline: Sendable {
+    /// Chunks that start within this many frames of the expected position are
+    /// treated as contiguous, absorbing timestamp jitter and slow clock drift.
+    public let toleranceFrames: Int64
+
+    /// Frames already handed to the writer.
+    public private(set) var writtenUpTo: Int64 = 0
+    /// Samples from `writtenUpTo` onward, zero-filled where gaps occurred.
+    private var pending: [Float] = []
+
+    public private(set) var insertedSilenceFrames: Int64 = 0
+    public private(set) var droppedFrames: Int64 = 0
+    public private(set) var corrections: Int = 0
+
+    public init(toleranceFrames: Int64) {
+        self.toleranceFrames = toleranceFrames
+    }
+
+    /// The frame after the last sample placed so far.
+    public var end: Int64 { writtenUpTo + Int64(pending.count) }
+
+    public mutating func append(startFrame: Int64, samples: [Float]) {
+        guard !samples.isEmpty else { return }
+        let offset = startFrame - end
+        if abs(offset) <= toleranceFrames {
+            pending.append(contentsOf: samples)
+        } else if offset > 0 {
+            pending.append(contentsOf: repeatElement(0, count: Int(offset)))
+            pending.append(contentsOf: samples)
+            insertedSilenceFrames += offset
+            corrections += 1
+        } else {
+            let overlap = -offset
+            corrections += 1
+            if overlap >= Int64(samples.count) {
+                droppedFrames += Int64(samples.count)
+                return
+            }
+            pending.append(contentsOf: samples[Int(overlap)...])
+            droppedFrames += overlap
+        }
+    }
+
+    /// Hands over every frame before `frame`, zero-filling what never arrived.
+    public mutating func take(upTo frame: Int64) -> [Float] {
+        let count = Int(frame - writtenUpTo)
+        guard count > 0 else { return [] }
+        var out: [Float]
+        if pending.count >= count {
+            out = Array(pending[..<count])
+            pending.removeFirst(count)
+        } else {
+            out = pending
+            out.append(contentsOf: repeatElement(0, count: count - pending.count))
+            pending.removeAll(keepingCapacity: true)
+        }
+        writtenUpTo = frame
+        return out
+    }
+}
