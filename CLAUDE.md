@@ -24,6 +24,12 @@ unless it is public-safe.
 Run `make verify-fast` after source changes. It covers the hook activation
 check, `swift format lint`, the debug build and the unit tests.
 
+After any change to the app's interface or recording flow, run
+`make uitest` on the Mac and look at the pictures it saves in `tmp/uitest`.
+It drives the real panel through every flow, records a few seconds for real,
+and fails on a panel that is cut off, see-through or jumping. Add a step to
+`Sources/TapeUp/App/UITest.swift` for every new flow.
+
 Run `make verify-full` before declaring work complete. It includes fast
 verification plus the signed app bundle build and the osv-scanner dependency
 audit.

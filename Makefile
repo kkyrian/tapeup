@@ -1,4 +1,4 @@
-.PHONY: verify-fast verify-full bundle install test
+.PHONY: verify-fast verify-full uitest bundle install test
 
 verify-fast:
 	python3 scripts/agent-workspace/install-hooks.py --check
@@ -9,6 +9,12 @@ verify-fast:
 verify-full: verify-fast
 	scripts/bundle.sh release
 	mise exec -- osv-scanner scan source --allow-no-lockfiles .
+
+# Drives the real panel through every flow on this Mac, recording a few
+# seconds for real; pictures of each step land in tmp/uitest.
+uitest:
+	scripts/bundle.sh
+	.build/TapeUp.app/Contents/MacOS/TapeUp uitest --record --out tmp/uitest
 
 bundle:
 	scripts/bundle.sh release

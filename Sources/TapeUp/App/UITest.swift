@@ -191,6 +191,27 @@ enum UITest {
             panel.show()
             check("reopened-after-recording")
             expect(abs(panel.window.frame.height - idleHeight) <= 8, "full list after recording")
+
+            // Mac audio only, stopped while paused.
+            model.toggleMicrophone()
+            model.start()
+            settle(2)
+            check("recording-mac-only")
+            model.togglePause()
+            settle(0.5)
+            model.stop()
+            for _ in 0..<40 where model.card?.finishing != false { settle(0.25) }
+            if let saved = model.card?.entry, let meta = MetaFile.read(saved.folder) {
+                expect(
+                    meta["sources"] as? [String] == ["computer audio"],
+                    "only Mac audio recorded (\(meta["sources"] ?? "none"))")
+                expect(saved.duration > 1, "stopping while paused keeps the audio (\(saved.duration)s)")
+            } else {
+                expect(false, "Mac-only recording saved")
+            }
+            model.toggleMicrophone()
+            model.closeCard()
+            check("after-mac-only")
         }
 
         let moved = base.appendingPathComponent("moved")
