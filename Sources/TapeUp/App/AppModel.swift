@@ -55,8 +55,55 @@ final class AppModel {
         var justRecorded: Bool
     }
 
+    /// True while the user is checking levels before recording. Off by
+    /// default: listening lights the mic indicator and puts AirPods into
+    /// call mode, which opening a menu should never do.
+    private(set) var testing = false
+
+    func toggleTesting() {
+        testing.toggle()
+        guard testing else {
+            resetLevels()
+            return updateLevelTimer()
+        }
+        // The first check asks for access, as recording would.
+        requestAccess { [weak self] in self?.updateLevelTimer() }
+    }
+
+    /// Which sources the next recording takes. Kept across launches; at least
+    /// one stays on.
+    private(set) var microphoneOn = UserDefaults.standard.object(forKey: "recordMicrophone") as? Bool ?? true
+    private(set) var computerOn = UserDefaults.standard.object(forKey: "recordComputer") as? Bool ?? true
+
+    func toggleMicrophone() {
+        guard phase == .idle, !(microphoneOn && !computerOn) else { return }
+        microphoneOn.toggle()
+        UserDefaults.standard.set(microphoneOn, forKey: "recordMicrophone")
+        restartMonitor()
+    }
+
+    func toggleComputer() {
+        guard phase == .idle, !(computerOn && !microphoneOn) else { return }
+        computerOn.toggle()
+        UserDefaults.standard.set(computerOn, forKey: "recordComputer")
+        restartMonitor()
+    }
+
+    private func restartMonitor() {
+        stopMonitor()
+        resetLevels()
+        updateLevelTimer()
+    }
+
+    /// The last recording moved to the Trash, until it is put back or the panel closes.
+    private(set) var trashed: (entry: RecordingEntry, location: URL)?
+
     var panelVisible = false {
         didSet {
+            if !panelVisible {
+                testing = false
+                trashed = nil
+            }
             updateLevelTimer()
             updatePeopleWatch()
         }
@@ -92,10 +139,13 @@ final class AppModel {
     private var recorder: Recorder?
     private var clockTimer: Timer?
     private var levelTimer: Timer?
+    private let monitor = LevelMonitor()
+    private var monitoring = false
     private var activity: NSObjectProtocol?
     private var deviceObservation: AudioDevices.Observation?
     /// Who was there, entered while the recording is still saving.
     private var pendingPeople: (folder: URL, people: RecordingEntry.People)?
+    private var pendingTitle: (folder: URL, title: String?)?
     /// The folder being recorded or saved; kept out of Recent until it is final.
     private var activeFolder: URL?
     /// The shortcut shown on the buttons, or nil when another app holds it.
@@ -135,8 +185,10 @@ final class AppModel {
 
     private func begin() {
         guard phase == .idle else { return }
+        stopMonitor()
         let missing = [
-            microphoneAccess == .denied ? "your mic" : nil, computerAccess == .denied ? "your Mac's audio" : nil,
+            microphoneOn && microphoneAccess == .denied ? "your mic" : nil,
+            computerOn && computerAccess == .denied ? "your Mac's audio" : nil,
         ].compactMap { $0 }
         guard missing.isEmpty else {
             problem =
@@ -147,6 +199,8 @@ final class AppModel {
             let folder = try library.newFolder()
             var options = Recorder.Options(folder: folder)
             options.you = peopleList.you
+            options.microphoneOn = microphoneOn
+            options.computerOn = computerOn
             let recorder = try Recorder(options: options)
             try recorder.start()
             self.recorder = recorder
@@ -154,7 +208,11 @@ final class AppModel {
             card = nil
             showingPeople = false
             phase = .recording(started: recorder.started)
+            testing = false
             elapsed = 0
+            paused = false
+            pausedTotal = 0
+            pausedSince = nil
             activity = ProcessInfo.processInfo.beginActivity(
                 options: [.idleSystemSleepDisabled, .userInitiated], reason: "Recording")
             clockTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
@@ -163,12 +221,16 @@ final class AppModel {
             updateLevelTimer()
         } catch {
             problem = "Could not start recording: \(error.localizedDescription)"
+            updateLevelTimer()
         }
     }
 
     /// Stops and saves. The card appears at once; the audio finishes in the background.
     func stop(then completion: (@MainActor () -> Void)? = nil) {
         guard case .recording(let started) = phase, let recorder else { return }
+        tickClock()
+        paused = false
+        pausedSince = nil
         phase = .saving(started: started)
         clockTimer?.invalidate()
         clockTimer = nil
@@ -183,6 +245,7 @@ final class AppModel {
                 status: "recording", people: .init()),
             finishing: true, justRecorded: true)
         pendingPeople = nil
+        pendingTitle = nil
         Task.detached(priority: .userInitiated) {
             let outcome = Result { try recorder.stop() }
             await MainActor.run { [weak self] in
@@ -196,12 +259,17 @@ final class AppModel {
         recorder = nil
         activeFolder = nil
         phase = .idle
+        updateLevelTimer()
         if case .failure(let error) = outcome {
             problem = "\(error)"
         }
         if let pending = pendingPeople, pending.folder == folder {
             try? RecordingLibrary.save(people: pending.people, in: folder)
             pendingPeople = nil
+        }
+        if let pending = pendingTitle, pending.folder == folder {
+            try? RecordingLibrary.save(title: pending.title, in: folder)
+            pendingTitle = nil
         }
         reload()
         if var card, card.entry.folder == folder, let entry = RecordingLibrary.entry(at: folder) {
@@ -213,13 +281,41 @@ final class AppModel {
 
     private func tickClock() {
         guard case .recording(let started) = phase else { return }
-        elapsed = Date().timeIntervalSince(started)
+        let pausedNow = pausedSince.map { Date().timeIntervalSince($0) } ?? 0
+        elapsed = Date().timeIntervalSince(started) - pausedTotal - pausedNow
+    }
+
+    /// True while a recording is paused: nothing is added to the file.
+    private(set) var paused = false
+    private var pausedTotal: TimeInterval = 0
+    private var pausedSince: Date?
+
+    func togglePause() {
+        guard isRecording, let recorder else { return }
+        if paused {
+            recorder.resume()
+            pausedTotal += pausedSince.map { Date().timeIntervalSince($0) } ?? 0
+            pausedSince = nil
+        } else {
+            recorder.pause()
+            pausedSince = Date()
+        }
+        paused.toggle()
+        tickClock()
+    }
+
+    /// Whether the small recording controls float over other windows while recording.
+    var showsFloatingControls = UserDefaults.standard.object(forKey: "floatingControls") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(showsFloatingControls, forKey: "floatingControls") }
     }
 
     // MARK: - Levels
 
+    /// Levels move whenever the panel is open: from the recorder while
+    /// recording, otherwise from a monitor that listens without recording.
     private func updateLevelTimer() {
-        let wanted = panelVisible && isRecording
+        let wanted = panelVisible && (isRecording || testing)
+        if panelVisible, testing, phase == .idle { startMonitor() } else { stopMonitor() }
         if wanted, levelTimer == nil {
             levelTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 20, repeats: true) { [weak self] _ in
                 MainActor.assumeIsolated { self?.tickLevels() }
@@ -227,11 +323,37 @@ final class AppModel {
         } else if !wanted {
             levelTimer?.invalidate()
             levelTimer = nil
+            if !isRecording { resetLevels() }
         }
     }
 
+    private var isSaving: Bool {
+        if case .saving = phase { return true }
+        return false
+    }
+
+    private func startMonitor() {
+        guard !monitoring else { return }
+        let microphone = microphoneOn && microphoneAccess == .granted
+        let computer = computerOn && computerAccess == .granted
+        guard microphone || computer else { return }
+        monitoring = true
+        monitor.start(microphone: microphone, computer: computer)
+    }
+
+    private func stopMonitor() {
+        guard monitoring else { return }
+        monitoring = false
+        monitor.stop()
+    }
+
     private func tickLevels() {
-        guard let recorder else { return }
+        guard let recorder else {
+            let peaks = monitor.take()
+            push(&microphoneLevels, Self.meter(peaks.microphone))
+            push(&computerLevels, Self.meter(peaks.computer))
+            return
+        }
         let live = recorder.takeLive()
         push(&microphoneLevels, Self.meter(live.microphoneLevel))
         push(&computerLevels, Self.meter(live.computerLevel))
@@ -429,11 +551,51 @@ final class AppModel {
     /// Moves a recording's folder to the Trash, where it can still be restored.
     func trash(_ entry: RecordingEntry) {
         do {
-            try FileManager.default.trashItem(at: entry.folder, resultingItemURL: nil)
+            var location: NSURL?
+            try FileManager.default.trashItem(at: entry.folder, resultingItemURL: &location)
             if card?.entry.folder == entry.folder { card = nil }
+            trashed = location.map { (entry, $0 as URL) }
             reload()
         } catch {
             problem = "Could not move the recording to the Trash: \(error.localizedDescription)"
+        }
+    }
+
+    /// Switches the recordings folder; with `moving`, the recordings already
+    /// made go along. Never while recording, so no folder is mid-write.
+    func changeRoot(to destination: URL, moving: Bool) {
+        guard phase == .idle, destination.standardizedFileURL != root.standardizedFileURL else { return }
+        guard moving else {
+            root = destination
+            return
+        }
+        let library = library
+        Task.detached(priority: .userInitiated) {
+            let outcome = Result { try library.move(to: destination) }
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                root = destination
+                switch outcome {
+                case .success(let result) where !result.skipped.isEmpty:
+                    problem =
+                        "\(result.skipped.count) recording\(result.skipped.count == 1 ? "" : "s") stayed in \(library.root.lastPathComponent): the new folder already has one with the same name."
+                case .failure(let error):
+                    problem = "Some recordings could not be moved: \(error.localizedDescription)"
+                default: break
+                }
+            }
+        }
+    }
+
+    /// Puts the last trashed recording back where it was.
+    func undoTrash() {
+        guard let trashed else { return }
+        self.trashed = nil
+        do {
+            try FileManager.default.moveItem(at: trashed.location, to: trashed.entry.folder)
+            reload()
+        } catch {
+            problem = "Could not put the recording back: \(error.localizedDescription)"
         }
     }
 
@@ -463,6 +625,24 @@ final class AppModel {
         }
     }
 
+    /// Names the open recording; the folder keeps its dated name.
+    func setTitle(_ title: String) {
+        guard var card else { return }
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        card.entry.title = trimmed.isEmpty ? nil : trimmed
+        self.card = card
+        if card.entry.folder == activeFolder {
+            pendingTitle = (card.entry.folder, card.entry.title)
+            return
+        }
+        do {
+            try RecordingLibrary.save(title: trimmed, in: card.entry.folder)
+            reload()
+        } catch {
+            problem = "Could not save the title: \(error.localizedDescription)"
+        }
+    }
+
     func suggestions(matching query: String, excluding chosen: [String], limit: Int = 6) -> [String] {
         suggester.suggestions(matching: query, excluding: chosen, limit: limit)
     }
@@ -478,16 +658,15 @@ final class AppModel {
     /// the panel offscreen so its design can be checked without recording.
     func stage(
         phase: Phase, elapsed: TimeInterval = 0, microphone: String, output: String, levels: ([Float], [Float])? = nil,
-        notice: PeopleNotice? = nil, problem: String? = nil
+        notice: PeopleNotice? = nil, problem: String? = nil, testing: Bool = false
     ) {
         self.phase = phase
+        self.testing = testing
         self.elapsed = elapsed
         microphoneDevice = microphone
         outputDevice = output
-        if let levels {
-            microphoneLevels = levels.0
-            computerLevels = levels.1
-        }
+        microphoneLevels = levels?.0 ?? [Float](repeating: 0, count: Self.laneLength)
+        computerLevels = levels?.1 ?? [Float](repeating: 0, count: Self.laneLength)
         microphoneAccess = .granted
         computerAccess = .granted
         peopleNotice = notice

@@ -13,6 +13,8 @@ final class PanelController: NSObject, NSWindowDelegate {
     private var keyMonitor: Any?
     /// The display the panel opened on, kept while it stays open.
     private var target: NSScreen?
+    /// The height the SwiftUI content asks for; the window always matches it.
+    private(set) var contentHeight: CGFloat = 200
 
     init(model: AppModel, anchor: NSStatusBarButton) {
         self.model = model
@@ -33,10 +35,10 @@ final class PanelController: NSObject, NSWindowDelegate {
         panel.hidesOnDeactivate = false
         panel.delegate = self
 
-        var reposition: @MainActor () -> Void = {}
+        var resized: @MainActor (CGFloat) -> Void = { _ in }
         let host = NSHostingView(
-            rootView: PanelView(model: model, close: { [weak self] in self?.close() }, resized: { reposition() }))
-        host.sizingOptions = [.intrinsicContentSize]
+            rootView: PanelView(model: model, close: { [weak self] in self?.close() }, resized: { resized($0) }))
+        host.sizingOptions = []
         let background = NSVisualEffectView()
         background.material = .popover
         background.blendingMode = .behindWindow
@@ -45,22 +47,23 @@ final class PanelController: NSObject, NSWindowDelegate {
         background.layer?.cornerRadius = 14
         background.layer?.cornerCurve = .continuous
         background.layer?.masksToBounds = true
+        // Plain autoresizing, no constraints: constraints let the hosting view
+        // resize the window's content on top of each window resize, so the
+        // panel drew one height change too far (cut off, or see-through).
+        background.frame = NSRect(x: 0, y: 0, width: PanelView.width, height: 200)
+        host.frame = background.bounds
+        host.autoresizingMask = [.width, .height]
         background.addSubview(host)
-        host.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            host.leadingAnchor.constraint(equalTo: background.leadingAnchor),
-            host.trailingAnchor.constraint(equalTo: background.trailingAnchor),
-            host.topAnchor.constraint(equalTo: background.topAnchor),
-            host.bottomAnchor.constraint(equalTo: background.bottomAnchor),
-        ])
         panel.contentView = background
-        reposition = { [weak self] in
-            guard let self, isVisible else { return }
-            position()
+        resized = { [weak self] height in
+            guard let self, abs(height - contentHeight) > 0.5 else { return }
+            contentHeight = height
+            if isVisible { position() }
         }
     }
 
     var isVisible: Bool { panel.isVisible }
+    var window: NSPanel { panel }
 
     func toggle() { isVisible ? close() : show() }
 
@@ -122,7 +125,7 @@ final class PanelController: NSObject, NSWindowDelegate {
             target = NSScreen.screens.first { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) } ?? home
         }
         let screen = target ?? home
-        let size = panel.contentView?.fittingSize ?? panel.frame.size
+        let size = NSSize(width: PanelView.width, height: contentHeight)
         let buttonFrame = window.convertToScreen(button.convert(button.bounds, to: nil))
         let fromRight = home.frame.maxX - buttonFrame.midX
         // Menu bars differ in height (a notched display's is taller).
@@ -133,6 +136,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         x = min(max(x, visible.minX + 8), visible.maxX - size.width - 8)
         let top = screen.frame.maxY - belowTop - 6
         panel.setFrame(NSRect(x: x, y: top - size.height, width: size.width, height: size.height), display: true)
+        panel.contentView?.frame = NSRect(origin: .zero, size: size)
     }
 }
 

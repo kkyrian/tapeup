@@ -9,8 +9,14 @@ public struct RecordingEntry: Sendable, Identifiable, Equatable {
     public let audio: URL
     public let status: String
     public var people: People
+    /// The name the user gave it; the folder keeps its dated name.
+    public var title: String?
 
-    public init(folder: URL, started: Date, duration: Double, audio: URL, status: String, people: People) {
+    public init(
+        folder: URL, started: Date, duration: Double, audio: URL, status: String, people: People,
+        title: String? = nil
+    ) {
+        self.title = title
         self.folder = folder
         self.started = started
         self.duration = duration
@@ -77,6 +83,40 @@ public struct RecordingLibrary: Sendable {
         try Self.agentsGuide.write(to: guide, atomically: true, encoding: .utf8)
     }
 
+    /// Moves every recording, and `people.json` and `AGENTS.md` when the new
+    /// root has none, into `destination`. A recording whose folder name is
+    /// already taken there stays where it is. Other files at the old root stay.
+    public func move(to destination: URL) throws -> (moved: Int, skipped: [String]) {
+        let target = RecordingLibrary(root: destination)
+        try target.prepareRootFolder()
+        let manager = FileManager.default
+        var moved = 0
+        var skipped: [String] = []
+        for entry in entries() {
+            let name = entry.folder.lastPathComponent
+            let to = destination.appendingPathComponent(name, isDirectory: true)
+            guard !manager.fileExists(atPath: to.path) else {
+                skipped.append(name)
+                continue
+            }
+            try manager.moveItem(at: entry.folder, to: to)
+            moved += 1
+        }
+        for file in [PeopleList.fileName, "AGENTS.md"] {
+            let from = root.appendingPathComponent(file)
+            let to = destination.appendingPathComponent(file)
+            if manager.fileExists(atPath: from.path), !manager.fileExists(atPath: to.path) {
+                try manager.moveItem(at: from, to: to)
+            }
+        }
+        try target.prepareRoot()
+        return (moved, skipped)
+    }
+
+    private func prepareRootFolder() throws {
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    }
+
     /// Recordings newest first. Folders without a readable `meta.json` are skipped.
     public func entries(limit: Int = .max) -> [RecordingEntry] {
         let folders =
@@ -105,7 +145,13 @@ public struct RecordingLibrary: Sendable {
         return RecordingEntry(
             folder: folder, started: started, duration: meta["duration_seconds"] as? Double ?? 0,
             audio: folder.appendingPathComponent(audioName), status: meta["status"] as? String ?? "recording",
-            people: people)
+            people: people, title: (meta["title"] as? String).flatMap { $0.isEmpty ? nil : $0 })
+    }
+
+    /// Saves the recording's title into `meta.json`; an empty title removes it.
+    public static func save(title: String?, in folder: URL) throws {
+        let trimmed = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        try MetaFile.update(folder) { meta in meta["title"] = trimmed.isEmpty ? nil : trimmed }
     }
 
     /// Saves who was there into the recording's `meta.json`, keeping every other field.
@@ -132,8 +178,12 @@ public struct RecordingLibrary: Sendable {
         - `audio.m4a`: stereo AAC. **Left channel: the microphone** (the person at
           this Mac). **Right channel: everything the Mac played** (the other people
           on a call, a video, a lecture). Never modified once written; write
-          derived files beside it.
+          derived files beside it. When the user recorded only one source, the
+          other channel is silent.
         - `meta.json`: `started` (ISO 8601), `duration_seconds`, `status`,
+          `title` when the user named the recording, `sources` (what was
+          recorded: `microphone`, `computer audio` or both), `paused_seconds`
+          when the user paused (paused time is left out of the audio),
           `devices` (inputs and outputs used, in order), `timeline` (silence
           inserted where a device switched), and, when the user filled it in,
           `who_was_there` with an optional `count` (including the user) and

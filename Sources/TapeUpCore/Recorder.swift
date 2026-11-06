@@ -26,6 +26,9 @@ public final class Recorder: @unchecked Sendable {
         public var settleDelay: Double = 0.3
         /// The user's name, recorded in `meta.json` so agents know whose mic the left channel is.
         public var you: String?
+        /// Which sources to record. A source left out keeps its channel, silent.
+        public var microphoneOn = true
+        public var computerOn = true
 
         public init(folder: URL) { self.folder = folder }
     }
@@ -87,6 +90,12 @@ public final class Recorder: @unchecked Sendable {
     private var accepting = true
     /// The frame of the first audio from either track; the file starts here.
     private var origin: Int64?
+    /// Paused spans, in clock frames: audio inside them is dropped and later
+    /// audio moves earlier by their length, so the file has no paused time.
+    private var pauses: [(start: Int64, end: Int64)] = []
+    private var pausedAt: Int64?
+    private let pausedFlag = OSAllocatedUnfairLock(initialState: false)
+    private var latencyFrames: Int64 { Int64(options.writeLatency * options.sampleRate) }
 
     private var cafURL: URL { options.folder.appendingPathComponent("audio.caf") }
     private var m4aURL: URL { options.folder.appendingPathComponent("audio.m4a") }
@@ -121,8 +130,8 @@ public final class Recorder: @unchecked Sendable {
 
         control.sync {
             writeMeta(status: "recording")
-            startMicrophone(reason: "start")
-            startComputer(reason: "start")
+            if options.microphoneOn { startMicrophone(reason: "start") }
+            if options.computerOn { startComputer(reason: "start") }
             defaultListeners = [
                 CoreAudioSystem.Listener(
                     object: CoreAudioSystem.system, selector: kAudioHardwarePropertyDefaultInputDevice,
@@ -142,7 +151,7 @@ public final class Recorder: @unchecked Sendable {
         data.sync {
             writeTimer = repeating(on: data) { [weak self] in
                 guard let self else { return }
-                write(upTo: clock.nowFrame() - Int64(options.writeLatency * options.sampleRate))
+                write(upTo: place(clock.nowFrame() - latencyFrames, clamped: true) ?? 0)
             }
         }
     }
@@ -162,6 +171,10 @@ public final class Recorder: @unchecked Sendable {
         // delivered is already queued on `data` ahead of this.
         let stats: [String: Any] = data.sync {
             accepting = false
+            if let start = pausedAt {
+                pauses.append((start, clock.nowFrame()))
+                pausedAt = nil
+            }
             writeTimer?.cancel()
             write(upTo: max(microphoneTrack.end, computerTrack.end))
             file?.close()
@@ -271,7 +284,7 @@ public final class Recorder: @unchecked Sendable {
     }
 
     private func scheduleRebuild(_ track: Track, reason: String) {
-        guard !stopping else { return }
+        guard !stopping, enabledTracks.contains(track) else { return }
         pendingRebuild[track]?.cancel()
         let work = DispatchWorkItem { [weak self] in self?.rebuild(track, reason: reason) }
         pendingRebuild[track] = work
@@ -293,7 +306,7 @@ public final class Recorder: @unchecked Sendable {
         guard !stopping else { return }
         let now = AudioGetCurrentHostTime()
         let heard = lastAudio.withLock { $0 }
-        for track in [Track.microphone, .computer] where pendingRebuild[track] == nil {
+        for track in enabledTracks where pendingRebuild[track] == nil {
             let current = generation[track] ?? 0
             if let last = heard[track], last.generation == current {
                 let quiet = clock.seconds(atHostTime: now) - clock.seconds(atHostTime: last.host)
@@ -318,20 +331,32 @@ public final class Recorder: @unchecked Sendable {
         }
     }
 
+    private var enabledTracks: [Track] {
+        (options.microphoneOn ? [Track.microphone] : []) + (options.computerOn ? [.computer] : [])
+    }
+
     private func sink(_ track: Track, generation: Int) -> DeviceInputReader.Sink {
         { [weak self] host, samples in
             guard let self, !samples.isEmpty else { return }
             lastAudio.withLock { $0[track] = (generation, AudioGetCurrentHostTime()) }
-            let peak = vDSP.maximumMagnitude(samples)
+            let peak = pausedFlag.withLock { $0 } ? 0 : vDSP.maximumMagnitude(samples)
             live.withLock {
                 switch track {
                 case .microphone: $0.microphoneLevel = max($0.microphoneLevel, peak)
                 case .computer: $0.computerLevel = max($0.computerLevel, peak)
                 }
             }
-            let frame = host.map { clock.frame(atHostTime: $0) }
+            let timed = host.map { clock.frame(atHostTime: $0) }
             data.async { [self] in
                 guard accepting else { return }
+                let frame: Int64?
+                if let timed {
+                    guard let placed = place(timed) else { return }
+                    frame = placed
+                } else {
+                    guard pausedAt == nil else { return }
+                    frame = nil
+                }
                 if origin == nil {
                     // The file starts at the first audio with a timestamp;
                     // anything untimed before it has no place yet.
@@ -346,6 +371,41 @@ public final class Recorder: @unchecked Sendable {
                 }
             }
         }
+    }
+
+    /// Where a clock frame lands in the file's timeline. A frame inside a
+    /// pause has no place (nil), or with `clamped` the place where the pause began.
+    private func place(_ frame: Int64, clamped: Bool = false) -> Int64? {
+        var shift: Int64 = 0
+        for pause in pauses + (pausedAt.map { [($0, Int64.max)] } ?? []) {
+            if frame >= pause.end {
+                shift += pause.end - pause.start
+            } else if frame >= pause.start {
+                return clamped ? pause.start - shift : nil
+            }
+        }
+        return frame - shift
+    }
+
+    /// Stops adding audio until `resume()`. The devices stay open, so
+    /// resuming is instant and AirPods do not switch modes.
+    public func pause() {
+        data.sync {
+            guard pausedAt == nil, accepting else { return }
+            pausedAt = clock.nowFrame()
+            pausedFlag.withLock { $0 = true }
+        }
+        log.record("paused", [:])
+    }
+
+    public func resume() {
+        data.sync {
+            guard let start = pausedAt else { return }
+            pauses.append((start, clock.nowFrame()))
+            pausedAt = nil
+            pausedFlag.withLock { $0 = false }
+        }
+        log.record("resumed", [:])
     }
 
     private func issueLogger(_ track: Track) -> @Sendable (String) -> Void {
@@ -395,6 +455,7 @@ public final class Recorder: @unchecked Sendable {
             "duration_seconds": (Double(microphoneTrack.writtenUpTo - (origin ?? 0)) / options.sampleRate * 10)
                 .rounded() / 10,
             "write_errors": writeErrors,
+            "paused_seconds": Double(pauses.reduce(0) { $0 + $1.end - $1.start }) / options.sampleRate,
             "microphone": stats(microphoneTrack),
             "computer_audio": stats(computerTrack),
         ]
@@ -428,6 +489,7 @@ public final class Recorder: @unchecked Sendable {
         let started = ISO8601DateFormatter().string(from: started)
         let devices = ["inputs": inputsSeen, "outputs": outputsSeen]
         let you = options.you
+        let sources = enabledTracks.map { $0 == .microphone ? "microphone" : "computer audio" }
         do {
             try MetaFile.update(options.folder) { meta in
                 meta["format"] = "tapeup-recording/0"
@@ -435,11 +497,15 @@ public final class Recorder: @unchecked Sendable {
                 meta["started"] = started
                 meta["audio"] = audio
                 meta["channels"] = ["left": "microphone", "right": "computer audio"]
+                meta["sources"] = sources
                 meta["devices"] = devices
                 if let you { meta["you"] = you }
                 if let stats {
                     meta["duration_seconds"] = stats["duration_seconds"]
                     meta["write_errors"] = stats["write_errors"]
+                    if let paused = stats["paused_seconds"] as? Double, paused > 0 {
+                        meta["paused_seconds"] = (paused * 10).rounded() / 10
+                    }
                     meta["timeline"] = ["microphone": stats["microphone"], "computer_audio": stats["computer_audio"]]
                 }
             }

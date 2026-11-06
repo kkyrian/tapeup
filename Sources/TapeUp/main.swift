@@ -4,6 +4,7 @@ import AppKit
 //   TapeUp record --out <dir> [--seconds N]
 //   TapeUp permissions [--out <file>]
 //   TapeUp snapshot [--out <dir>]   renders every panel state to PNGs for design review
+//   TapeUp uitest [--out <dir>] [--record]   drives the real panel through every flow and checks it
 // `record` stops on SIGTERM or SIGINT, or after N seconds, then prints the result as JSON.
 
 let arguments = CommandLine.arguments
@@ -14,6 +15,12 @@ app.setActivationPolicy(.accessory)
 switch command {
 case "snapshot":
     MainActor.assumeIsolated { Snapshot.run(out: Launcher.value(after: "--out", in: arguments) ?? "tmp/snapshots") }
+case "uitest":
+    MainActor.assumeIsolated {
+        UITest.run(
+            out: Launcher.value(after: "--out", in: arguments) ?? "tmp/uitest",
+            record: arguments.contains("--record"))
+    }
 case "permissions":
     Launcher.reportPermissions(to: Launcher.value(after: "--out", in: arguments))
 case "record":

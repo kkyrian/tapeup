@@ -1,62 +1,66 @@
 import SwiftUI
 import TapeUpCore
 
-/// The top of the panel: what TapeUp does, the two sources, and Record or Stop.
+/// The two sources and the one button. While recording, the timer sits on top.
 struct RecorderView: View {
     @Bindable var model: AppModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            header
-            VStack(spacing: 0) {
-                LaneView(
-                    symbol: "speaker.wave.2.fill", title: "Mac audio", device: model.outputDevice,
-                    levels: model.computerLevels, live: model.isRecording, access: model.computerAccess,
-                    allow: { model.openPrivacySettings(for: "computer") })
-                Divider().padding(.leading, 28).padding(.vertical, 10)
-                LaneView(
-                    symbol: "mic.fill", title: "Your mic", device: model.microphoneDevice,
-                    levels: model.microphoneLevels, live: model.isRecording, access: model.microphoneAccess,
-                    allow: { model.openPrivacySettings(for: "microphone") })
+        VStack(alignment: .leading, spacing: 12) {
+            if model.phase != .idle {
+                HStack(spacing: 8) {
+                    RecordingDot(active: model.isRecording && !model.paused)
+                    Text(Format.duration(model.elapsed))
+                        .font(.system(size: 22, weight: .semibold).monospacedDigit())
+                        .contentTransition(.numericText())
+                        .animation(.snappy(duration: 0.2), value: Int(model.elapsed))
+                        .foregroundStyle(model.paused ? .secondary : .primary)
+                    if model.paused {
+                        Text("Paused").font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
+                    }
+                }
+                .accessibilityElement(children: .combine)
             }
-            RecordButton(model: model)
+            LaneView(
+                symbol: "speaker.wave.2.fill", label: "Mac audio", device: model.outputDevice,
+                levels: model.computerLevels, live: model.isRecording || model.testing,
+                access: model.computerAccess, on: model.computerOn,
+                canToggle: model.phase == .idle && (model.microphoneOn || !model.computerOn),
+                toggle: model.toggleComputer, allow: { model.openPrivacySettings(for: "computer") })
+            LaneView(
+                symbol: "mic.fill", label: "Your mic", device: model.microphoneDevice,
+                levels: model.microphoneLevels, live: model.isRecording || model.testing,
+                access: model.microphoneAccess, on: model.microphoneOn,
+                canToggle: model.phase == .idle && (model.computerOn || !model.microphoneOn),
+                toggle: model.toggleMicrophone, allow: { model.openPrivacySettings(for: "microphone") })
+            HStack(spacing: 8) {
+                RecordButton(model: model)
+                if model.isRecording {
+                    IconButton(
+                        symbol: model.paused ? "play.fill" : "pause.fill", help: model.paused ? "Resume" : "Pause",
+                        size: 32, action: model.togglePause)
+                }
+                if model.phase == .idle {
+                    IconButton(
+                        symbol: "waveform", help: model.testing ? "Stop checking levels" : "Check levels",
+                        size: 32, active: model.testing, action: model.toggleTesting)
+                }
+            }
+            .padding(.top, 2)
         }
-        .padding(14)
-    }
-
-    @ViewBuilder private var header: some View {
-        switch model.phase {
-        case .idle:
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Record your Mac and your mic").font(.system(size: 13, weight: .semibold))
-                Text("One file, ready to hand to your agents").font(.system(size: 12)).foregroundStyle(.secondary)
-            }
-        case .recording, .saving:
-            HStack(alignment: .center, spacing: 8) {
-                RecordingDot(saving: model.phase != .idle && !model.isRecording)
-                Text(Format.duration(model.elapsed))
-                    .font(.system(size: 26, weight: .semibold, design: .rounded).monospacedDigit())
-                    .contentTransition(.numericText(countsDown: false))
-                    .animation(.snappy(duration: 0.2), value: Int(model.elapsed))
-                Spacer()
-                Text(model.isRecording ? "Recording both" : "Saving…")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-            }
-            .accessibilityElement(children: .combine)
-        }
+        .padding(Style.inset)
     }
 }
 
 struct RecordingDot: View {
-    let saving: Bool
+    let active: Bool
     @State private var dim = false
 
     var body: some View {
         Circle()
-            .fill(saving ? Color.secondary : Color.red)
-            .frame(width: 9, height: 9)
-            .opacity(dim ? 0.35 : 1)
+            .fill(active ? Style.red : Color.secondary)
+            .frame(width: 8, height: 8)
+            .opacity(dim && active ? 0.3 : 1)
             .onAppear {
                 withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { dim = true }
             }
@@ -65,30 +69,21 @@ struct RecordingDot: View {
 
 struct RecordButton: View {
     @Bindable var model: AppModel
-    @State private var hovering = false
 
     var body: some View {
-        Button(action: model.toggle) {
-            HStack(spacing: 8) {
-                Image(systemName: model.isRecording ? "stop.fill" : "circle.fill")
-                    .font(.system(size: model.isRecording ? 10 : 9, weight: .bold))
-                Text(title).font(.system(size: 14, weight: .semibold))
+        FlatButton(kind: model.phase == .idle ? .destructive : .plain, action: model.toggle) {
+            HStack(spacing: 7) {
+                Image(systemName: model.phase == .idle ? "circle.fill" : "stop.fill")
+                    .font(.system(size: 8, weight: .bold))
+                Text(title)
                 Spacer()
                 if let shortcut = model.shortcutLabel {
-                    Text(shortcut)
-                        .font(.system(size: 12, weight: .medium))
-                        .opacity(0.7)
+                    Text(shortcut).font(.system(size: 11, weight: .medium)).opacity(0.65)
                 }
             }
-            .padding(.horizontal, 14)
-            .frame(height: 38)
-            .foregroundStyle(model.phase == .idle ? Color.white : Color.primary)
-            .background(fill, in: .rect(cornerRadius: 9, style: .continuous))
-            .contentShape(.rect)
+            .padding(.horizontal, 12)
         }
-        .buttonStyle(PressStyle())
         .disabled(isSaving)
-        .onHover { hovering = $0 }
         .accessibilityLabel(title)
     }
 
@@ -100,24 +95,8 @@ struct RecordButton: View {
     private var title: String {
         switch model.phase {
         case .idle: "Record"
-        case .recording: "Stop and save"
+        case .recording: "Stop"
         case .saving: "Saving…"
         }
-    }
-
-    private var fill: AnyShapeStyle {
-        switch model.phase {
-        case .idle: AnyShapeStyle(Color(nsColor: .systemRed).mix(with: .black, by: hovering ? 0.08 : 0).gradient)
-        default: AnyShapeStyle(Color.primary.opacity(hovering ? 0.12 : 0.08))
-        }
-    }
-}
-
-/// Scales down slightly while pressed, so clicks feel physical.
-struct PressStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .scaleEffect(configuration.isPressed ? 0.98 : 1)
-            .animation(.snappy(duration: 0.12), value: configuration.isPressed)
     }
 }

@@ -37,6 +37,10 @@ enum Snapshot {
         }
         model.root = full
         shoot("02-idle") { model.stage(phase: .idle, microphone: devices.microphone, output: devices.output) }
+        shoot("02-idle-checking") {
+            model.stage(
+                phase: .idle, microphone: devices.microphone, output: devices.output, levels: wave, testing: true)
+        }
         shoot("03-recording") {
             model.stage(
                 phase: .recording(started: Date()), elapsed: 2526, microphone: devices.microphone,
@@ -76,7 +80,7 @@ enum Snapshot {
     }
 
     private static func render(model: AppModel, dark: Bool, to url: URL) {
-        let view = PanelView(model: model, close: {}, resized: {})
+        let view = PanelView(model: model, close: {}, resized: { _ in })
             .background(Color(nsColor: .windowBackgroundColor))
         let host = NSHostingView(rootView: view)
         let window = NSWindow(
@@ -96,7 +100,7 @@ enum Snapshot {
         window.orderOut(nil)
     }
 
-    private static func seed(_ root: URL) {
+    static func seed(_ root: URL) {
         let library = RecordingLibrary(root: root)
         try? library.prepareRoot()
         let now = Date()
@@ -116,6 +120,7 @@ enum Snapshot {
             ]
             try? JSONSerialization.data(withJSONObject: meta).write(to: folder.appendingPathComponent("meta.json"))
             try? RecordingLibrary.save(people: people, in: folder)
+            if offset == -26 * 3600 { try? RecordingLibrary.save(title: "Lab sync", in: folder) }
         }
         try? PeopleList(
             you: "Sam",

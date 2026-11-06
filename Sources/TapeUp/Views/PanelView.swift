@@ -1,47 +1,52 @@
 import SwiftUI
 import TapeUpCore
 
-/// Everything inside the drop-down panel: the recorder with its two lanes and
-/// Recent, or the card for one recording in the same place.
+/// Everything inside the drop-down panel. One page at a time: the recorder
+/// with Recent, a recording's card, or People. Pages swap without a
+/// cross-fade, so the window never sizes itself to two pages at once.
 struct PanelView: View {
-    static let width: CGFloat = 320
+    static let width = Style.width
 
     @Bindable var model: AppModel
     let close: () -> Void
-    let resized: () -> Void
+    /// Reports the content's own height, which the window then takes.
+    let resized: (CGFloat) -> Void
+    /// The height SwiftUI last laid the whole panel out at, for `TapeUp uitest`.
+    @MainActor static var laidOutHeight: CGFloat = 0
 
     var body: some View {
-        VStack(spacing: 0) {
-            if model.showingPeople {
-                PeopleView(model: model)
-                    .transition(.opacity)
-            } else if let card = model.card {
-                CardView(model: model, card: card)
-                    .transition(
-                        .asymmetric(
-                            insertion: .opacity.combined(with: .scale(scale: 0.98, anchor: .top)), removal: .opacity))
-            } else {
+        page
+            .frame(width: Self.width)
+            .fixedSize(horizontal: false, vertical: true)
+            .onGeometryChange(for: CGFloat.self) {
+                $0.size.height
+            } action: {
+                resized($0)
+            }
+            .frame(maxHeight: .infinity, alignment: .top)
+            .onGeometryChange(for: CGFloat.self) {
+                $0.size.height
+            } action: {
+                Self.laidOutHeight = $0
+            }
+            .focusEffectDisabled()
+    }
+
+    @ViewBuilder private var page: some View {
+        if model.showingPeople {
+            PeopleView(model: model)
+        } else if let card = model.card {
+            CardView(model: model, card: card)
+        } else {
+            VStack(spacing: 0) {
                 RecorderView(model: model)
-                    .transition(.opacity)
                 if let problem = model.problem {
                     ProblemBanner(text: problem, dismiss: model.dismissProblem)
-                        .padding(.horizontal, 14)
-                        .padding(.bottom, 12)
+                        .padding([.horizontal, .bottom], Style.inset)
                 }
-                Divider().padding(.horizontal, 14)
+                Divider()
                 RecentView(model: model)
             }
-        }
-        .frame(width: Self.width)
-        .focusEffectDisabled()
-        .animation(.snappy(duration: 0.28), value: model.card?.entry.folder)
-        .animation(.snappy(duration: 0.28), value: model.phase)
-        .animation(.snappy(duration: 0.28), value: model.showingPeople)
-        .animation(.snappy(duration: 0.2), value: model.problem)
-        .onGeometryChange(for: CGFloat.self) {
-            $0.size.height
-        } action: { _ in
-            resized()
         }
     }
 }
@@ -51,16 +56,13 @@ struct ProblemBanner: View {
     let dismiss: () -> Void
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-            Text(text).font(.callout).fixedSize(horizontal: false, vertical: true)
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.circle.fill").foregroundStyle(.orange)
+            Text(text).font(.system(size: 12)).fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
-            Button(action: dismiss) { Image(systemName: "xmark").font(.caption.weight(.semibold)) }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .accessibilityLabel("Dismiss")
+            IconButton(symbol: "xmark", help: "Dismiss", size: 18, action: dismiss)
         }
         .padding(10)
-        .background(.orange.opacity(0.12), in: .rect(cornerRadius: 8, style: .continuous))
+        .background(Color.orange.opacity(0.12), in: .rect(cornerRadius: Style.corner, style: .continuous))
     }
 }
