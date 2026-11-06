@@ -5,6 +5,8 @@ import TapeUpCore
 struct CardView: View {
     @Bindable var model: AppModel
     let card: AppModel.Card
+    /// "Saved" confirms a recording that just stopped, for two seconds.
+    @State private var savedShown = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -27,6 +29,15 @@ struct CardView: View {
             WhoWasThereView(model: model, people: card.entry.people)
         }
         .padding(Style.inset)
+        .onAppear { if card.justRecorded, !card.finishing { flashSaved() } }
+        .onChange(of: card.finishing) { was, now in if was, !now { flashSaved() } }
+    }
+
+    private func flashSaved() {
+        savedShown = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            withAnimation(.easeOut(duration: 0.3)) { savedShown = false }
+        }
     }
 
     private var header: some View {
@@ -41,9 +52,12 @@ struct CardView: View {
                     if card.finishing {
                         ProgressView().controlSize(.mini)
                         Text("Saving…")
-                    } else if card.justRecorded {
-                        Image(systemName: "checkmark").font(.system(size: 9, weight: .bold)).foregroundStyle(.green)
-                        Text("Saved ·")
+                    } else if savedShown {
+                        Group {
+                            Image(systemName: "checkmark").font(.system(size: 9, weight: .bold)).foregroundStyle(.green)
+                            Text("Saved ·")
+                        }
+                        .transition(.opacity)
                     }
                     Text("\(Format.when(card.entry.started)) · \(Format.length(card.entry.duration))")
                         .monospacedDigit()
