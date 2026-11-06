@@ -116,7 +116,7 @@ public final class Recorder: @unchecked Sendable {
             sampleRate: options.sampleRate,
             sink: { [weak self] host, samples in self?.receive(.microphone, host: host, samples: samples) },
             onConfigurationChange: { [weak self] in
-                self?.queue.async { self?.scheduleRebuild(.microphone, reason: "engine configuration changed") }
+                self?.queue.async { self?.microphoneConfigurationChanged() }
             })
         do {
             try capture.start()
@@ -135,6 +135,8 @@ public final class Recorder: @unchecked Sendable {
         let capture = SystemAudioCapture(mode: mode, sampleRate: options.sampleRate) { [weak self] host, samples in
             self?.receive(.computer, host: host, samples: samples)
         }
+        let log = self.log
+        capture.diagnostic = { log.record("computer audio diagnostic", ["detail": $0]) }
         do {
             try capture.start()
             computer = capture
@@ -145,6 +147,11 @@ public final class Recorder: @unchecked Sendable {
             computer = nil
             log.record("computer audio failed", ["error": "\(error)", "reason": reason])
         }
+    }
+
+    private func microphoneConfigurationChanged() {
+        guard let microphone, microphone.needsRebuild else { return }
+        scheduleRebuild(.microphone, reason: "engine configuration changed")
     }
 
     private func scheduleRebuild(_ track: Track, reason: String) {

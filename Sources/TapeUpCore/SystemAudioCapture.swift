@@ -23,6 +23,7 @@ final class SystemAudioCapture: @unchecked Sendable {
 
     private let mode: Mode
     private let sink: @Sendable (UInt64, [Float]) -> Void
+    var diagnostic: @Sendable (String) -> Void = { _ in }
     private let ioQueue = DispatchQueue(label: "tapeup.system-audio.io", qos: .userInteractive)
     private let resampler: MonoResampler
     private var tapID = AudioObjectID(kAudioObjectUnknown)
@@ -41,7 +42,7 @@ final class SystemAudioCapture: @unchecked Sendable {
         let description = CATapDescription(stereoGlobalTapButExcludeProcesses: [])
         description.uuid = UUID()
         description.name = "TapeUp"
-        description.isPrivate = true
+        description.isPrivate = false
         description.muteBehavior = .unmuted
         try check("create process tap", AudioHardwareCreateProcessTap(description, &tapID))
 
@@ -61,7 +62,7 @@ final class SystemAudioCapture: @unchecked Sendable {
         var aggregate: [String: Any] = [
             kAudioAggregateDeviceNameKey: "TapeUp",
             kAudioAggregateDeviceUIDKey: "tapeup-\(UUID().uuidString)",
-            kAudioAggregateDeviceIsPrivateKey: true,
+            kAudioAggregateDeviceIsPrivateKey: false,
             kAudioAggregateDeviceIsStackedKey: false,
             kAudioAggregateDeviceTapAutoStartKey: true,
             kAudioAggregateDeviceTapListKey: [
@@ -78,11 +79,23 @@ final class SystemAudioCapture: @unchecked Sendable {
 
         let resampler = self.resampler
         let sink = self.sink
+        let diagnostic = self.diagnostic
+        nonisolated(unsafe) var reported = false
         try check(
             "create IO proc",
             AudioDeviceCreateIOProcIDWithBlock(&procID, aggregateID, ioQueue) { _, input, inputTime, _, _ in
+                if !reported {
+                    reported = true
+                    let list = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: input))
+                    diagnostic(
+                        "first callback: \(list.count) buffer(s), bytes \(list.map { $0.mDataByteSize }), "
+                            + "channels \(list.map { $0.mNumberChannels }), tap format \(format)")
+                }
                 guard let buffer = AVAudioPCMBuffer(pcmFormat: format, bufferListNoCopy: input, deallocator: nil)
-                else { return }
+                else {
+                    sink(AudioGetCurrentHostTime(), [])
+                    return
+                }
                 let time = inputTime.pointee
                 let host =
                     time.mFlags.contains(.hostTimeValid) ? time.mHostTime : AudioGetCurrentHostTime()

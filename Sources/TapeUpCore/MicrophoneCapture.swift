@@ -17,6 +17,16 @@ final class MicrophoneCapture: @unchecked Sendable {
     private var observer: NSObjectProtocol?
 
     private(set) var inputName = "none"
+    private var boundDevice = AudioDeviceID(kAudioObjectUnknown)
+
+    /// Whether a configuration change actually needs a new engine: the
+    /// default input moved, or the engine stopped. Binding the engine to a
+    /// device itself posts a configuration change, so most changes do not.
+    var needsRebuild: Bool {
+        guard let engine else { return true }
+        return !engine.isRunning
+            || CoreAudioSystem.defaultDevice(kAudioHardwarePropertyDefaultInputDevice) != boundDevice
+    }
 
     init(
         sampleRate: Double, sink: @escaping @Sendable (UInt64, [Float]) -> Void,
@@ -31,6 +41,7 @@ final class MicrophoneCapture: @unchecked Sendable {
         var device = CoreAudioSystem.defaultDevice(kAudioHardwarePropertyDefaultInputDevice)
         guard device != kAudioObjectUnknown else { throw NoInput() }
         inputName = CoreAudioSystem.name(of: device)
+        boundDevice = device
 
         let engine = AVAudioEngine()
         let input = engine.inputNode
