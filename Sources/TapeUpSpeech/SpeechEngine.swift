@@ -1,0 +1,234 @@
+import AVFoundation
+import AudioCommon
+import Foundation
+import Qwen3ASR
+import SpeechVAD
+import TapeUpCore
+import os
+
+/// Where the models live and how they arrive: in TapeUp's own Application
+/// Support folder, so macOS never clears them as it may clear caches.
+public enum ModelStore {
+    static var base: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("TapeUp", isDirectory: true)
+    }
+
+    static func directory(for id: String) throws -> URL {
+        try HuggingFaceDownloader.getCacheDirectory(for: id, basePath: base)
+    }
+
+    private static let tokenizerFiles = ["vocab.json", "merges.txt", "tokenizer_config.json"]
+
+    private static func marker(for model: SpeechModel) -> URL {
+        base.appendingPathComponent("models/.\(model.rawValue)-complete")
+    }
+
+    public static func isDownloaded(_ model: SpeechModel) -> Bool {
+        FileManager.default.fileExists(atPath: marker(for: model).path)
+    }
+
+    /// Downloads the model and the voice detector, resuming any partial file;
+    /// `progress` gets the bytes so far. Cancelling the task pauses it.
+    public static func download(_ model: SpeechModel, progress: @escaping @Sendable (Int64) -> Void) async throws {
+        let speechBytes = model.downloadBytes - SpeechModel.voiceDetectorBytes
+        try await HuggingFaceDownloader.downloadWeights(
+            modelId: model.id, to: directory(for: model.id), additionalFiles: tokenizerFiles,
+            progressHandler: { progress(Int64(Double(speechBytes) * $0)) })
+        try await HuggingFaceDownloader.downloadWeights(
+            modelId: SileroVADModel.defaultModelId, to: directory(for: SileroVADModel.defaultModelId),
+            progressHandler: { progress(speechBytes + Int64(Double(SpeechModel.voiceDetectorBytes) * $0)) })
+        try Data().write(to: marker(for: model))
+    }
+}
+
+/// A loaded model and the one queue everything it runs on. MLX models are
+/// not thread safe, so every pipeline that uses them is fed on `queue`.
+public final class SpeechEngine: @unchecked Sendable {
+    public let model: SpeechModel
+    let queue = DispatchQueue(label: "tapeup.speech", qos: .userInitiated)
+    private let recognizer: QwenRecognizer
+
+    private init(model: SpeechModel, recognizer: QwenRecognizer) {
+        self.model = model
+        self.recognizer = recognizer
+    }
+
+    public static func load(_ model: SpeechModel) async throws -> SpeechEngine {
+        let asr = try await Qwen3ASRModel.fromPretrained(
+            modelId: model.id, cacheDir: ModelStore.directory(for: model.id), offlineMode: true)
+        return SpeechEngine(model: model, recognizer: QwenRecognizer(model: asr))
+    }
+
+    /// A new transcript, fed live or from a file. Each session has its own
+    /// voice detectors, since a detector carries state from chunk to chunk.
+    public func session(names: String?, microphone: Bool, computer: Bool) async throws -> TranscriptSession {
+        let directory = try ModelStore.directory(for: SileroVADModel.defaultModelId)
+        var detectors: [SileroVADModel] = []
+        for _ in 0..<2 {
+            detectors.append(try await SileroVADModel.fromPretrained(cacheDir: directory, offlineMode: true))
+        }
+        return TranscriptSession(
+            engine: self, detectors: detectors, hints: model.takesHints ? names : nil, microphone: microphone,
+            computer: computer)
+    }
+
+    fileprivate var speechRecognizer: SpeechRecognizer { recognizer }
+}
+
+/// One transcript in the making. Feed it from any thread; the work happens
+/// in order on the engine's queue.
+public final class TranscriptSession: @unchecked Sendable {
+    public struct Outcome: Sendable {
+        public let lines: [TranscriptLine]
+        /// Pieces the model failed on, out of all pieces heard.
+        public let failures: Int
+        public let pieces: Int
+    }
+
+    private let engine: SpeechEngine
+    private let pipeline: TranscriptPipeline
+    private let latestLines = OSAllocatedUnfairLock(initialState: [TranscriptLine]())
+
+    fileprivate init(
+        engine: SpeechEngine, detectors: [SileroVADModel], hints: String?, microphone: Bool, computer: Bool
+    ) {
+        self.engine = engine
+        var pool = detectors
+        // At most two detectors are in use at once (one per side); a mode
+        // change finishes the old ones before making new ones.
+        pipeline = TranscriptPipeline(
+            makeDetector: {
+                let model = pool.removeFirst()
+                pool.append(model)
+                return SileroDetector(model: model)
+            }, recognizer: engine.speechRecognizer, hints: hints, microphone: microphone, computer: computer)
+    }
+
+    public var model: SpeechModel { engine.model }
+
+    /// The last two lines heard, for the panel while recording.
+    public var latest: [TranscriptLine] { latestLines.withLock { $0 } }
+
+    public func feed(left: [Float], right: [Float], headphones: Bool) {
+        engine.queue.async { [self] in
+            pipeline.feed(left: left, right: right, headphones: headphones)
+            let last = Array(pipeline.lines.suffix(2))
+            latestLines.withLock { $0 = last }
+        }
+    }
+
+    public func finish() async -> Outcome {
+        await withCheckedContinuation { continuation in
+            engine.queue.async { [self] in
+                let lines = pipeline.finish()
+                continuation.resume(
+                    returning: Outcome(lines: lines, failures: pipeline.failures, pieces: pipeline.pieces))
+            }
+        }
+    }
+
+    /// Transcribes a finished recording, a slice at a time so a live
+    /// recording sharing the queue is never held up for long.
+    public func transcribe(file: URL, headphones: Bool) async throws -> Outcome {
+        let source = try AVAudioFile(forReading: file)
+        guard Int(source.processingFormat.sampleRate) == TranscriptPipeline.fileRate,
+            source.processingFormat.channelCount == 2,
+            let buffer = AVAudioPCMBuffer(pcmFormat: source.processingFormat, frameCapacity: 48_000 * 30)
+        else { throw CocoaError(.fileReadCorruptFile) }
+        let reader = FileSlices(source: source, buffer: buffer)
+        while true {
+            let more: Bool = try await withCheckedThrowingContinuation { continuation in
+                engine.queue.async { [self] in
+                    do {
+                        guard let (left, right) = try reader.next() else {
+                            return continuation.resume(returning: false)
+                        }
+                        pipeline.feed(left: left, right: right, headphones: headphones)
+                        continuation.resume(returning: true)
+                    } catch {
+                        continuation.resume(throwing: error)
+                    }
+                }
+            }
+            guard more else { break }
+        }
+        return await finish()
+    }
+}
+
+/// Reads a stereo file thirty seconds at a time.
+private final class FileSlices: @unchecked Sendable {
+    let source: AVAudioFile
+    let buffer: AVAudioPCMBuffer
+
+    init(source: AVAudioFile, buffer: AVAudioPCMBuffer) {
+        self.source = source
+        self.buffer = buffer
+    }
+
+    func next() throws -> ([Float], [Float])? {
+        guard source.framePosition < source.length else { return nil }
+        try source.read(into: buffer)
+        let count = Int(buffer.frameLength)
+        guard count > 0, let data = buffer.floatChannelData else { return nil }
+        return (
+            Array(UnsafeBufferPointer(start: data[0], count: count)),
+            Array(UnsafeBufferPointer(start: data[1], count: count))
+        )
+    }
+}
+
+final class QwenRecognizer: SpeechRecognizer {
+    private let model: Qwen3ASRModel
+
+    init(model: Qwen3ASRModel) { self.model = model }
+
+    func transcribe(_ samples: [Float], hints: String?) throws -> String {
+        try model.transcribeThrowing(audio: samples, sampleRate: 16_000, options: Qwen3DecodingOptions(context: hints))
+    }
+}
+
+/// Silero voice detection, set to cut only at pauses of 0.8 s or more and to
+/// skip sounds shorter than half a second, as tested on real meetings.
+final class SileroDetector: VoiceDetector {
+    static let config = VADConfig(
+        onset: 0.5, offset: 0.35, minSpeechDuration: 0.5, minSilenceDuration: 0.8, windowDuration: 0.032,
+        stepRatio: 1.0)
+
+    private let processor: StreamingVADProcessor
+
+    init(model: SileroVADModel) {
+        model.resetState()
+        processor = StreamingVADProcessor(model: model, config: Self.config)
+    }
+
+    func process(_ samples: [Float]) -> [VoiceEvent] { processor.process(samples: samples).map(Self.event) }
+
+    func flush() -> [VoiceEvent] { processor.flush().map(Self.event) }
+
+    private static func event(_ event: VADEvent) -> VoiceEvent {
+        switch event {
+        case .speechStarted(let time): .started(Double(time))
+        case .speechEnded(let segment): .ended(Double(segment.endTime))
+        }
+    }
+}
+
+/// Transcribes a recording that is already saved: made before the model
+/// arrived, interrupted, retried after a failure, or asked for later.
+public enum FolderTranscriber {
+    public static func run(folder: URL, engine: SpeechEngine, names: String?) async throws {
+        guard let meta = MetaFile.read(folder) else { throw CocoaError(.fileNoSuchFile) }
+        let sources = meta["sources"] as? [String] ?? ["microphone", "computer audio"]
+        let audio = folder.appendingPathComponent(meta["audio"] as? String ?? "audio.m4a")
+        try RecordingLibrary.markTranscript("transcribing", model: engine.model.name, in: folder)
+        let session = try await engine.session(
+            names: names, microphone: sources.contains("microphone"), computer: sources.contains("computer audio"))
+        let outcome = try await session.transcribe(
+            file: audio, headphones: meta["output_headphones"] as? Bool == true)
+        try TranscriptDocument.save(
+            lines: outcome.lines, failures: outcome.failures, pieces: outcome.pieces, model: engine.model,
+            in: folder)
+    }
+}

@@ -12,6 +12,7 @@ import TapeUpCore
 enum UITest {
     private static let keys = [
         "recordingsRoot", "recordMicrophone", "recordComputer", "floatingControls", "floatingControlsOrigin",
+        "transcribe",
     ]
 
     static func run(out: String, record: Bool) {
@@ -123,6 +124,26 @@ enum UITest {
         model.toggleMicrophone()
         check("mic-on")
 
+        model.transcription.toggle()
+        check("transcript-off")
+        expect(!model.transcription.enabled && model.transcription.status == "Off", "transcript row says Off")
+        model.transcription.toggle()
+        check("transcript-on")
+        expect(model.transcription.enabled, "transcripts back on")
+
+        // An old recording with no audio: Transcribe, then the failure turns
+        // the button into Try again.
+        if let old = model.recent.last {
+            model.open(old)
+            check("card-no-transcript")
+            expect(old.transcript == .none, "old recording has no transcript")
+            model.makeTranscript(old)
+            for _ in 0..<80 where model.card?.entry.transcript != .failed { settle(0.25) }
+            check("card-transcript-failed")
+            expect(model.card?.entry.transcript == .failed, "a recording with no audio fails and offers Try again")
+            model.closeCard()
+        }
+
         let entry = model.recent[1]
         model.open(entry)
         check("card")
@@ -157,10 +178,19 @@ enum UITest {
 
         if record {
             let began = Date()
+            // A busy main thread delays the start of a recording; the model
+            // loading beside it must never cause one.
+            let beats = Beats()
+            let beat = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { _ in
+                MainActor.assumeIsolated { beats.times.append(Date().timeIntervalSince(began)) }
+            }
             model.start()
             settle(3)
             check("recording")
             expect(model.isRecording, "recording started")
+            if model.transcription.download == .ready {
+                expect(model.transcription.liveRunning, "transcribing while recording")
+            }
             expect(floating.window.isVisible, "floating controls show")
             let pausedAt = Date()
             model.togglePause()
@@ -170,10 +200,28 @@ enum UITest {
             let pausedFor = Date().timeIntervalSince(pausedAt)
             settle(2)
             let wall = Date().timeIntervalSince(began)
+            beat.invalidate()
+            let stalls = zip(beats.times, beats.times.dropFirst()).filter { $1 - $0 > 0.25 }
+            expect(
+                stalls.isEmpty,
+                "main thread never stalls while recording \(stalls.map { String(format: "%.1fs at %.1fs", $1 - $0, $0) })"
+            )
             model.stop()
             check("saving")
             for _ in 0..<40 where model.card?.finishing == true { settle(0.25) }
             check("saved")
+            if model.transcription.download == .ready {
+                for _ in 0..<120 where model.card?.entry.transcript != .done { settle(0.25) }
+                check("saved-transcribed")
+                let transcript = model.card?.entry.transcriptFile
+                expect(model.card?.entry.transcript == .done, "transcript written after stop")
+                expect(
+                    transcript.map { FileManager.default.fileExists(atPath: $0.path) } == true,
+                    "transcript.md beside the audio")
+                expect(
+                    model.card?.entry.clipboardText.contains("\ntranscript: ") == true, "Copy path names the transcript"
+                )
+            }
             expect(!floating.window.isVisible, "floating controls hide after stop")
             if let saved = model.card?.entry, let meta = MetaFile.read(saved.folder) {
                 let duration = meta["duration_seconds"] as? Double ?? 0
@@ -241,4 +289,9 @@ enum UITest {
         let host = NSHostingView(rootView: PanelView(model: model, close: {}, resized: { _ in }))
         return host.fittingSize.height
     }
+}
+
+/// When the main thread was free, for the stall check while recording.
+@MainActor private final class Beats {
+    var times: [Double] = []
 }

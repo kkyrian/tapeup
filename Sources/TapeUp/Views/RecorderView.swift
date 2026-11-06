@@ -16,6 +16,7 @@ struct RecorderView: View {
                 symbol: "mic.fill", label: "Microphone", device: model.microphoneDevice,
                 levels: model.microphoneLevels, access: model.microphoneAccess, on: model.microphoneOn,
                 canTurnOff: model.computerOn, toggle: model.toggleMicrophone, pane: "microphone")
+            TranscriptLane(transcription: model.transcription, recording: model.isRecording)
             HStack(spacing: 8) {
                 RecordButton(model: model)
                 if model.isRecording {
@@ -26,6 +27,10 @@ struct RecorderView: View {
                 }
             }
             .padding(.top, 8)
+            if model.isRecording, model.transcription.enabled {
+                LiveLines(transcription: model.transcription)
+                    .padding(.top, 8)
+            }
         }
         .padding(Style.inset)
     }
@@ -208,5 +213,89 @@ struct PausableTime: View {
                     withAnimation(.default) { dim = false }
                 }
             }
+    }
+}
+
+/// The third row: whether recordings are transcribed on this Mac, and by
+/// which model, or how far its download has got.
+struct TranscriptLane: View {
+    let transcription: Transcription
+    let recording: Bool
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Image(systemName: "text.quote")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(transcription.enabled ? Color.secondary : Color.secondary.opacity(0.6))
+                .frame(width: Style.textEdge - Style.inset, alignment: .leading)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Transcript")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(transcription.enabled ? .primary : .secondary)
+                Text(transcription.status)
+                    .font(.system(size: 11).monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .contentTransition(.numericText())
+                    .animation(.snappy(duration: 0.2), value: transcription.status)
+            }
+            Spacer(minLength: 8)
+            MiniSwitch(on: transcription.enabled)
+                .opacity(recording ? 0.35 : 1)
+        }
+        .frame(height: 36)
+        .padding(.horizontal, 6)
+        .background(
+            hovering && !recording ? Style.fill : .clear, in: .rect(cornerRadius: Style.corner, style: .continuous)
+        )
+        .padding(.horizontal, -6)
+        .contentShape(.rect)
+        .onHover { hovering = $0 }
+        .onTapGesture(perform: tap)
+        .hoverHelp(help)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Transcript")
+        .accessibilityValue(transcription.enabled ? "On, \(transcription.status)" : "Off")
+        .accessibilityAddTraits(.isToggle)
+        .accessibilityAction(.default, tap)
+    }
+
+    private var help: String {
+        if recording { return "Transcript" }
+        return transcription.enabled
+            ? "Don't transcribe new recordings" : "Transcribe new recordings on this Mac, nothing leaves it"
+    }
+
+    private func tap() {
+        guard !recording else { return }
+        transcription.toggle()
+    }
+}
+
+/// While recording, the last words heard, under the timer. The space is
+/// kept at two lines, so the panel does not jump as lines arrive.
+struct LiveLines: View {
+    let transcription: Transcription
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 12))
+            .foregroundStyle(transcription.latest.isEmpty ? .tertiary : .secondary)
+            .lineLimit(2, reservesSpace: true)
+            .truncationMode(.head)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .animation(.easeOut(duration: 0.2), value: text)
+            .accessibilityLabel("Transcript so far")
+            .accessibilityValue(text)
+    }
+
+    private var text: String {
+        if !transcription.liveRunning {
+            return "The transcript is made once \(transcription.model.name) has downloaded."
+        }
+        let lines = transcription.latest.map(\.text)
+        return lines.isEmpty ? "Words appear here a few seconds after they are said." : lines.joined(separator: " ")
     }
 }

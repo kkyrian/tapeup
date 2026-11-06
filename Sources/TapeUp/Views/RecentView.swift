@@ -85,10 +85,17 @@ struct RecentRow: View {
             // One fixed slot: the length at rest, the actions on hover, so
             // the title never narrows as the pointer passes.
             ZStack(alignment: .trailing) {
-                Text(Format.length(entry.duration))
-                    .font(.system(size: 11))
-                    .foregroundStyle(.tertiary)
-                    .opacity(hovering || copied ? 0 : 1)
+                Group {
+                    if model.transcription.isWorking(on: entry) {
+                        ProgressView().controlSize(.small).scaleEffect(0.7).frame(width: 16, height: 16)
+                            .hoverHelp("Transcribing")
+                    } else {
+                        Text(Format.length(entry.duration))
+                            .font(.system(size: 11))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .opacity(hovering || copied ? 0 : 1)
                 HStack(spacing: 0) {
                     IconButton(symbol: copied ? "checkmark" : "doc.on.doc", help: "Copy path", size: 22, action: copy)
                     IconButton(symbol: "folder", help: "Show in Finder", size: 22) { model.reveal(entry) }

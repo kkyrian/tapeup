@@ -3,6 +3,7 @@ import AppKit
 import Observation
 import ServiceManagement
 import TapeUpCore
+import TapeUpSpeech
 
 /// Everything the panel and the menu-bar item show, and the actions behind them.
 @MainActor @Observable
@@ -47,6 +48,9 @@ final class AppModel {
     /// The card on screen: the recording just saved, or one opened from Recent.
     var card: Card?
     private(set) var copiedFlash = false
+    private(set) var transcriptCopiedFlash = false
+    /// Transcripts: the model, live transcription, saved recordings waiting.
+    let transcription: Transcription
     /// True when the panel was opened by the user and holds the keyboard, so
     /// a field may take the cursor at once. False after a shortcut stop, so
     /// the card never takes typing away from a call.
@@ -121,6 +125,7 @@ final class AppModel {
         didSet {
             UserDefaults.standard.set(root.path, forKey: "recordingsRoot")
             library = RecordingLibrary(root: root)
+            transcription.library = library
             reload()
         }
     }
@@ -161,12 +166,16 @@ final class AppModel {
     init() {
         let saved = UserDefaults.standard.string(forKey: "recordingsRoot").map { URL(fileURLWithPath: $0) }
         root = saved ?? RecordingLibrary.defaultRoot
-        library = RecordingLibrary(root: saved ?? RecordingLibrary.defaultRoot)
+        let library = RecordingLibrary(root: saved ?? RecordingLibrary.defaultRoot)
+        self.library = library
+        transcription = Transcription(library: library)
         refreshAccess()
         deviceObservation = AudioDevices.observeDefaults(queue: .main) { [weak self] in
             MainActor.assumeIsolated { self?.refreshDevices() }
         }
         reload()
+        transcription.finished = { [weak self] stamp in self?.transcriptFinished(stamp) }
+        transcription.names = { [weak self] in self?.nameHints() }
     }
 
     var isRecording: Bool {
@@ -208,8 +217,11 @@ final class AppModel {
             options.you = peopleList.you
             options.microphoneOn = microphoneOn
             options.computerOn = computerOn
+            let feed = transcription.prepareLive()
+            if let feed { options.onAudio = { feed.feed(left: $0, right: $1, headphones: $2) } }
             let recorder = try Recorder(options: options)
             try recorder.start()
+            transcription.began(folder: folder, feed: feed, microphone: microphoneOn, computer: computerOn)
             self.recorder = recorder
             activeFolder = folder
             card = nil
@@ -279,6 +291,7 @@ final class AppModel {
             saved = (try? RecordingLibrary.save(title: pending.title, in: folder)) ?? folder
             pendingTitle = nil
         }
+        transcription.saved(folder: saved)
         reload()
         if var card, card.entry.folder == folder, let entry = RecordingLibrary.entry(at: saved) {
             card.entry = entry
@@ -291,6 +304,7 @@ final class AppModel {
         guard case .recording(let started) = phase else { return }
         let pausedNow = pausedSince.map { Date().timeIntervalSince($0) } ?? 0
         elapsed = Date().timeIntervalSince(started) - pausedTotal - pausedNow
+        transcription.refreshLatest()
     }
 
     /// True while a recording is paused: nothing is added to the file.
@@ -534,11 +548,12 @@ final class AppModel {
         Task.detached(priority: .utility) {
             AudioDevices.removeLeftovers()
             let folders = library.recordingFolders()
-            var recovered = false
-            for folder in folders {
-                if (try? Recorder.recover(folder: folder, startedBefore: launched)) == true { recovered = true }
+            for folder in folders { _ = try? Recorder.recover(folder: folder, startedBefore: launched) }
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                reload()
+                transcription.start(pending: allEntries)
             }
-            if recovered { await MainActor.run { [weak self] in self?.reload() } }
         }
     }
 
@@ -560,6 +575,43 @@ final class AppModel {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
             if self?.card?.entry.folder == folder { self?.copiedFlash = false }
         }
+    }
+
+    /// Copies the transcript's text, the labeled one once it exists.
+    func copyTranscript(_ entry: RecordingEntry) {
+        let labeled = entry.folder.appendingPathComponent("transcript-with-speaker-labels.md")
+        let file = FileManager.default.fileExists(atPath: labeled.path) ? labeled : entry.transcriptFile
+        guard let text = try? String(contentsOf: file, encoding: .utf8) else {
+            problem = "Could not read the transcript."
+            return
+        }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        transcriptCopiedFlash = true
+        let folder = entry.folder
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+            if self?.card?.entry.folder == folder { self?.transcriptCopiedFlash = false }
+        }
+    }
+
+    /// Makes a transcript for a recording without one, or tries a failed one again.
+    func makeTranscript(_ entry: RecordingEntry) { transcription.make(entry) }
+
+    /// A transcript was written or failed: refresh the list and the open card.
+    private func transcriptFinished(_ stamp: String) {
+        reload()
+        guard let card, RecordingLibrary.stamp(of: card.entry.folder) == stamp, !card.finishing,
+            let folder = library.folder(withStamp: stamp), let entry = RecordingLibrary.entry(at: folder)
+        else { return }
+        self.card?.entry = entry
+    }
+
+    /// Names and terms for the speech model: the people list, who was at
+    /// recent recordings, and distinctive words from titles.
+    private func nameHints() -> String? {
+        let recent = allEntries.prefix(100)
+        return NameHints.make(
+            names: peopleList.allNames + recent.flatMap(\.people.names), titles: recent.compactMap(\.title))
     }
 
     /// Moves a recording's folder to the Trash, where it can still be restored.

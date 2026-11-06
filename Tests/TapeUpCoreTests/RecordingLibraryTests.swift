@@ -112,3 +112,80 @@ struct RecordingLibraryTests {
         #expect(RecordingLibrary.entry(at: folder)?.title == "Call")
     }
 }
+
+struct TranscriptStateTests {
+    private func folder() throws -> (root: URL, folder: URL) {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("tapeup-test-\(UUID().uuidString)")
+        let folder = root.appendingPathComponent("2026/2026-11-06-1000")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let meta: [String: Any] = [
+            "status": "recorded", "audio": "audio.m4a", "started": "2026-11-06T10:00:00Z",
+            "sources": ["microphone", "computer audio"], "output_headphones": true,
+        ]
+        try JSONSerialization.data(withJSONObject: meta).write(to: folder.appendingPathComponent("meta.json"))
+        return (root, folder)
+    }
+
+    @Test func transcriptMovesThroughItsStates() throws {
+        let (root, folder) = try folder()
+        defer { try? FileManager.default.removeItem(at: root) }
+        #expect(RecordingLibrary.entry(at: folder)?.transcript == RecordingEntry.Transcript.none)
+        try RecordingLibrary.markTranscript("transcribing", model: "Qwen3-ASR 1.7B", in: folder)
+        #expect(RecordingLibrary.entry(at: folder)?.transcript == .pending)
+        try TranscriptDocument.save(
+            lines: [.init(start: 1, end: 2, side: .microphone, text: "Hello.")], failures: 0, pieces: 1,
+            model: .large, in: folder)
+        let entry = try #require(RecordingLibrary.entry(at: folder))
+        #expect(entry.transcript == .done)
+        #expect(entry.clipboardText.hasSuffix("\ntranscript: \(folder.path)/transcript.md"))
+        let meta = try #require(MetaFile.read(folder))
+        #expect(meta["status"] as? String == "transcribed")
+        #expect((meta["transcript"] as? [String: Any])?["side_labels"] as? Bool == true)
+        let text = try String(contentsOf: entry.transcriptFile, encoding: .utf8)
+        #expect(text.contains("Microphone: Hello."))
+    }
+
+    @Test func everyPieceFailingIsAFailureWithNoFile() throws {
+        let (root, folder) = try folder()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try TranscriptDocument.save(lines: [], failures: 3, pieces: 3, model: .small, in: folder)
+        #expect(RecordingLibrary.entry(at: folder)?.transcript == .failed)
+        #expect(!FileManager.default.fileExists(atPath: folder.appendingPathComponent("transcript.md").path))
+    }
+
+    @Test func doneWithoutTheFileCountsAsFailed() throws {
+        let (root, folder) = try folder()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try RecordingLibrary.markTranscript("done", in: folder)
+        #expect(RecordingLibrary.entry(at: folder)?.transcript == .failed)
+    }
+
+    @Test func aRenamedFolderIsFoundByItsStamp() throws {
+        let (root, folder) = try folder()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let renamed = try RecordingLibrary.save(title: "Lab sync", in: folder)
+        let library = RecordingLibrary(root: root)
+        #expect(library.folder(withStamp: "2026-11-06-1000")?.lastPathComponent == renamed.lastPathComponent)
+        #expect(library.folder(withStamp: "2026-11-06-1001") == nil)
+    }
+
+    @Test func markingAMissingFolderFails() {
+        let gone = FileManager.default.temporaryDirectory.appendingPathComponent("tapeup-gone-\(UUID().uuidString)")
+        #expect(throws: (any Error).self) { try RecordingLibrary.markTranscript("done", in: gone) }
+        #expect(!FileManager.default.fileExists(atPath: gone.path))
+    }
+
+    @Test func untouchedGuideIsUpgradedAndAnEditedOneKept() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("tapeup-test-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let guide = root.appendingPathComponent("AGENTS.md")
+        try RecordingLibrary.earlierAgentsGuides[0].write(to: guide, atomically: true, encoding: .utf8)
+        try RecordingLibrary(root: root).prepareRoot()
+        #expect(try String(contentsOf: guide, encoding: .utf8) == RecordingLibrary.agentsGuide)
+        let edited = RecordingLibrary.earlierAgentsGuides[0] + "Summaries go in notes/.\n"
+        try edited.write(to: guide, atomically: true, encoding: .utf8)
+        try RecordingLibrary(root: root).prepareRoot()
+        #expect(try String(contentsOf: guide, encoding: .utf8) == edited)
+    }
+}

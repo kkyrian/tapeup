@@ -74,4 +74,17 @@ enum Format {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         return url.path.hasPrefix(home) ? "~" + url.path.dropFirst(home.count) : url.path
     }
+
+    /// "2.5 GB".
+    static func gigabytes(_ bytes: Int64) -> String { "\(gigabytes(bytes, of: bytes)) GB" }
+
+    /// The number alone, "0.8", for "0.8 of 2.5 GB".
+    static func gigabytes(_ bytes: Int64, of total: Int64) -> String {
+        String(format: "%.1f", Double(min(bytes, total)) / 1e9)
+    }
+
+    /// "32%", never 100% before it is done.
+    static func percent(_ done: Int64, of total: Int64) -> String {
+        "\(min(99, Int(Double(done) / Double(max(total, 1)) * 100)))%"
+    }
 }

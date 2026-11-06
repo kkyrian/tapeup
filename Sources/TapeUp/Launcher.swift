@@ -1,6 +1,7 @@
 import AVFoundation
 import Foundation
 import TapeUpCore
+import TapeUpSpeech
 
 @MainActor
 enum Launcher {
@@ -24,6 +25,61 @@ enum Launcher {
         if let path { try? line.write(toFile: path, atomically: true, encoding: .utf8) }
         print(line, terminator: "")
         exit(0)
+    }
+
+    /// Downloads the model if needed, transcribes one recording, prints how long it took.
+    static func transcribe(folder: URL, model: SpeechModel?, live: Bool = false) {
+        let model = model ?? SpeechModel.forThisMac()
+        let names = NameHints.make(
+            names: PeopleList.load(from: folder.deletingLastPathComponent().deletingLastPathComponent()).allNames,
+            titles: [])
+        Task.detached {
+            let began = Date()
+            do {
+                if !ModelStore.isDownloaded(model) {
+                    try await ModelStore.download(model) { bytes in
+                        FileHandle.standardError.write(Data("\rdownloading \(bytes / 1_000_000) MB".utf8))
+                    }
+                }
+                let engine = try await SpeechEngine.load(model)
+                let loaded = Date()
+                if live {
+                    try await feedLive(folder: folder, engine: engine, names: names)
+                } else {
+                    try await FolderTranscriber.run(folder: folder, engine: engine, names: names)
+                }
+                let seconds = { (date: Date) in (date.timeIntervalSince(began) * 10).rounded() / 10 }
+                print(
+                    #"{"transcript":"\#(folder.appendingPathComponent(TranscriptDocument.fileName).path)","model":"\#(model.name)","load_seconds":\#(seconds(loaded)),"total_seconds":\#(seconds(Date()))}"#
+                )
+                exit(0)
+            } catch {
+                FileHandle.standardError.write(Data("transcribe failed: \(error)\n".utf8))
+                exit(1)
+            }
+        }
+    }
+
+    /// Feeds a saved recording through the live path, a quarter second at a
+    /// time from another thread as the recorder does, to test it on real speech.
+    private nonisolated static func feedLive(folder: URL, engine: SpeechEngine, names: String?) async throws {
+        let meta = MetaFile.read(folder) ?? [:]
+        let headphones = meta["output_headphones"] as? Bool == true
+        let session = try await engine.session(
+            names: engine.model.takesHints ? names : nil, microphone: true, computer: true)
+        let file = try AVAudioFile(forReading: folder.appendingPathComponent("audio.m4a"))
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: 12_000) else { return }
+        while file.framePosition < file.length {
+            try file.read(into: buffer)
+            let count = Int(buffer.frameLength)
+            guard count > 0, let data = buffer.floatChannelData else { break }
+            session.feed(
+                left: Array(UnsafeBufferPointer(start: data[0], count: count)),
+                right: Array(UnsafeBufferPointer(start: data[1], count: count)), headphones: headphones)
+        }
+        let outcome = await session.finish()
+        try TranscriptDocument.save(
+            lines: outcome.lines, failures: outcome.failures, pieces: outcome.pieces, model: engine.model, in: folder)
     }
 
     static func record(out: String, arguments: [String]) {

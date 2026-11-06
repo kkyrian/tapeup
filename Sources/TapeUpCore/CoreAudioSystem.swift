@@ -84,6 +84,27 @@ enum CoreAudioSystem {
         value(device, kAudioDevicePropertyNominalSampleRate, default: 0)
     }
 
+    /// Whether an output plays into the listener's ears, so the microphone
+    /// cannot hear it: wired headphones, AirPods and most Bluetooth audio.
+    /// Speakers, displays and AirPlay count as not.
+    static func isHeadphones(_ device: AudioDeviceID) -> Bool {
+        guard device != kAudioObjectUnknown else { return false }
+        let name = name(of: device).lowercased()
+        if ["airpods", "headphone", "headset", "earbud", "buds", "beats", "earphone"].contains(where: name.contains) {
+            return true
+        }
+        switch value(device, kAudioDevicePropertyTransportType, default: UInt32(0)) {
+        case kAudioDeviceTransportTypeBuiltIn:
+            let source = value(
+                device, kAudioDevicePropertyDataSource, kAudioObjectPropertyScopeOutput, default: UInt32(0))
+            return source == 0x6864_706E  // 'hdpn'
+        case kAudioDeviceTransportTypeBluetooth, kAudioDeviceTransportTypeBluetoothLE:
+            return !["speaker", "homepod", "soundbar", "boom", "sonos"].contains(where: name.contains)
+        default:
+            return false
+        }
+    }
+
     static func builtInInput() -> AudioDeviceID? {
         objects(system, kAudioHardwarePropertyDevices).first { device in
             value(device, kAudioDevicePropertyTransportType, default: UInt32(0)) == kAudioDeviceTransportTypeBuiltIn

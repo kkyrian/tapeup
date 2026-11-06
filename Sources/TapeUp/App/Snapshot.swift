@@ -36,22 +36,56 @@ enum Snapshot {
             model.stage(phase: .idle, microphone: devices.microphone, output: devices.output)
         }
         model.root = full
+        model.transcription.stage(download: .ready)
         shoot("02-idle") { model.stage(phase: .idle, microphone: devices.microphone, output: devices.output) }
+        shoot("02-idle-downloading") { model.transcription.stage(download: .downloading(812_000_000)) }
+        shoot("02-idle-transcript-off") { model.transcription.stage(download: .ready, enabled: false) }
+        model.transcription.stage(download: .ready)
         shoot("02-idle-checking") {
             model.stage(
                 phase: .idle, microphone: devices.microphone, output: devices.output, levels: wave, testing: true)
         }
         shoot("03-recording") {
+            model.transcription.stage(
+                download: .ready, live: true,
+                latest: [
+                    "So the second study block runs after the survey.",
+                    "Right, and we keep the pilot to five participants before the IRB amendment goes in.",
+                ])
             model.stage(
                 phase: .recording(started: Date()), elapsed: 2526, microphone: devices.microphone,
                 output: devices.output, levels: wave)
         }
+        shoot("03-recording-first-words") { model.transcription.stage(download: .ready, live: true) }
+        shoot("03-recording-waiting-for-model") {
+            model.transcription.stage(download: .downloading(812_000_000), live: false)
+        }
+        model.transcription.stage(download: .ready)
         let latest = model.recent[0]
         shoot("04-saving") {
             model.stage(phase: .idle, microphone: devices.microphone, output: devices.output)
             model.card = .init(entry: latest, finishing: true, justRecorded: true)
         }
-        shoot("05-saved") { model.card = .init(entry: latest, finishing: false, justRecorded: true) }
+        shoot("05-saved") {
+            var entry = latest
+            entry.transcript = .pending
+            model.card = .init(entry: entry, finishing: false, justRecorded: true)
+        }
+        shoot("05-saved-transcript-done") {
+            var entry = latest
+            entry.transcript = .done
+            model.card = .init(entry: entry, finishing: false, justRecorded: true)
+        }
+        shoot("05-saved-transcript-failed") {
+            var entry = latest
+            entry.transcript = .failed
+            model.card = .init(entry: entry, finishing: false, justRecorded: false)
+        }
+        shoot("05-saved-no-transcript") {
+            var entry = latest
+            entry.transcript = .none
+            model.card = .init(entry: entry, finishing: false, justRecorded: false)
+        }
         shoot("06-saved-copied") {
             model.card = .init(entry: latest, finishing: false, copied: true, justRecorded: true)
         }
@@ -120,7 +154,8 @@ enum Snapshot {
             ]
             try? JSONSerialization.data(withJSONObject: meta).write(to: folder.appendingPathComponent("meta.json"))
             try? RecordingLibrary.save(people: people, in: folder)
-            if offset == -26 * 3600 { try? RecordingLibrary.save(title: "Lab sync", in: folder) }
+            if offset == -60 { try? RecordingLibrary.markTranscript("transcribing", in: folder) }
+            if offset == -26 * 3600 { _ = try? RecordingLibrary.save(title: "Lab sync", in: folder) }
         }
         try? PeopleList(
             you: "Sam",

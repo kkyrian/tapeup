@@ -1,10 +1,13 @@
 import AppKit
+import TapeUpCore
 
 // TapeUp runs as a menu-bar app. Two commands remain for scripted testing:
 //   TapeUp record --out <dir> [--seconds N]
 //   TapeUp permissions [--out <file>]
 //   TapeUp snapshot [--out <dir>]   renders every panel state to PNGs for design review
 //   TapeUp uitest [--out <dir>] [--record]   drives the real panel through every flow and checks it
+//   TapeUp transcribe <recording folder> [--model large|small] [--live]   writes its transcript.md;
+//     --live feeds it in quarter seconds, as while recording
 // `record` stops on SIGTERM or SIGINT, or after N seconds, then prints the result as JSON.
 
 let arguments = CommandLine.arguments
@@ -23,6 +26,15 @@ case "uitest":
     }
 case "permissions":
     Launcher.reportPermissions(to: Launcher.value(after: "--out", in: arguments))
+case "transcribe":
+    guard arguments.count > 2 else {
+        Launcher.fail("usage: TapeUp transcribe <recording folder> [--model large|small]", code: 2)
+    }
+    Launcher.transcribe(
+        folder: URL(fileURLWithPath: arguments[2]),
+        model: Launcher.value(after: "--model", in: arguments).flatMap(SpeechModel.init(rawValue:)),
+        live: arguments.contains("--live"))
+    app.run()
 case "record":
     guard let out = Launcher.value(after: "--out", in: arguments) else {
         Launcher.fail("usage: TapeUp record --out <dir> [--seconds N]", code: 2)

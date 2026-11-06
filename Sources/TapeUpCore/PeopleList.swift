@@ -26,6 +26,9 @@ public struct PeopleList: Sendable, Equatable {
 
     public var isEmpty: Bool { people.isEmpty && (you ?? "").isEmpty }
 
+    /// You first, then everyone listed.
+    public var allNames: [String] { [you].compactMap { $0 } + people.map(\.name) }
+
     public struct ParseError: Error, CustomStringConvertible {
         public let description: String
     }

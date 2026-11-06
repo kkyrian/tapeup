@@ -29,6 +29,10 @@ public final class Recorder: @unchecked Sendable {
         /// Which sources to record. A source left out keeps its channel, silent.
         public var microphoneOn = true
         public var computerOn = true
+        /// Receives every stretch of audio as it is written to the file, on
+        /// the recorder's data queue: microphone, computer audio, and whether
+        /// the computer audio is playing into headphones. Must return quickly.
+        public var onAudio: (@Sendable (_ left: [Float], _ right: [Float], _ headphones: Bool) -> Void)?
 
         public init(folder: URL) { self.folder = folder }
     }
@@ -74,6 +78,9 @@ public final class Recorder: @unchecked Sendable {
     private var stallTimer: DispatchSourceTimer?
     private var inputsSeen: [String] = []
     private var outputsSeen: [String] = []
+    /// False once any output used was not headphones.
+    private var headphonesThroughout = true
+    private let headphonesNow = OSAllocatedUnfairLock(initialState: false)
     private var stopping = false
     private var folderLock: FolderLock?
 
@@ -246,8 +253,16 @@ public final class Recorder: @unchecked Sendable {
                 listener(capture.aggregateID, kAudioDevicePropertyNominalSampleRate, .computer, "tap rate changed"),
             ]
             note(output: capture.outputName)
+            let headphones = CoreAudioSystem.isHeadphones(
+                CoreAudioSystem.defaultDevice(kAudioHardwarePropertyDefaultOutputDevice))
+            headphonesNow.withLock { $0 = headphones }
+            if !headphones { headphonesThroughout = false }
             log.record(
-                "computer audio started", ["output": capture.outputName, "reason": reason, "generation": generation])
+                "computer audio started",
+                [
+                    "output": capture.outputName, "headphones": headphonesNow.withLock { $0 }, "reason": reason,
+                    "generation": generation,
+                ])
         } catch {
             log.record("computer audio failed", ["error": "\(error)", "reason": reason])
         }
@@ -434,6 +449,9 @@ public final class Recorder: @unchecked Sendable {
         buffer.frameLength = AVAudioFrameCount(count)
         left.withUnsafeBufferPointer { buffer.floatChannelData![0].update(from: $0.baseAddress!, count: count) }
         right.withUnsafeBufferPointer { buffer.floatChannelData![1].update(from: $0.baseAddress!, count: count) }
+        options.onAudio?(
+            left.count == count ? left : Array(left.prefix(count)),
+            right.count == count ? right : Array(right.prefix(count)), headphonesNow.withLock { $0 })
         do {
             try file.write(from: buffer)
         } catch {
@@ -488,6 +506,7 @@ public final class Recorder: @unchecked Sendable {
     private func writeMeta(status: String, audio: String = "audio.caf", stats: [String: Any]? = nil) {
         let started = ISO8601DateFormatter().string(from: started)
         let devices = ["inputs": inputsSeen, "outputs": outputsSeen]
+        let headphonesThroughout = headphonesThroughout
         let you = options.you
         let sources = enabledTracks.map { $0 == .microphone ? "microphone" : "computer audio" }
         do {
@@ -499,6 +518,7 @@ public final class Recorder: @unchecked Sendable {
                 meta["channels"] = ["left": "microphone", "right": "computer audio"]
                 meta["sources"] = sources
                 meta["devices"] = devices
+                if sources.contains("computer audio") { meta["output_headphones"] = headphonesThroughout }
                 if let you { meta["you"] = you }
                 if let stats {
                     meta["duration_seconds"] = stats["duration_seconds"]

@@ -1,0 +1,437 @@
+import AppKit
+import Observation
+import TapeUpCore
+import TapeUpSpeech
+
+/// Transcripts: getting the model, transcribing while recording, and
+/// transcribing saved recordings that still need it, one at a time.
+@MainActor @Observable
+final class Transcription {
+    enum Download: Equatable {
+        case downloading(Int64)
+        /// The switch was turned off part way.
+        case paused(Int64)
+        /// The network failed; it tries again on its own.
+        case retrying(Int64)
+        case ready
+    }
+
+    /// Whether new recordings are transcribed. Off means audio only.
+    private(set) var enabled = UserDefaults.standard.object(forKey: "transcribe") as? Bool ?? true
+    /// The model this Mac's memory allows; downloaded first.
+    let model = SpeechModel.forThisMac()
+    private(set) var download: Download
+    /// Stamps of recordings being transcribed now or waiting their turn.
+    private(set) var working: Set<String> = []
+    /// The last lines heard in the recording running now.
+    private(set) var latest: [TranscriptLine] = []
+    /// True while the recording running now is transcribed as it goes.
+    private(set) var liveRunning = false
+
+    /// Called with a recording's stamp when its transcript is written or fails.
+    var finished: (String) -> Void = { _ in }
+    /// The names to give the model: people, participants, title words.
+    var names: () -> String? = { nil }
+    var library: RecordingLibrary
+
+    private var downloadTask: Task<Void, Never>?
+    private var engine: (model: SpeechModel, task: Task<SpeechEngine, Error>)?
+    private var unload: Task<Void, Never>?
+    /// Saved recordings waiting for a file transcription, oldest first.
+    private var queue: [String] = []
+    private var processing = false
+    private var live: (stamp: String, feed: LiveFeed)?
+
+    init(library: RecordingLibrary) {
+        self.library = library
+        download = ModelStore.isDownloaded(SpeechModel.forThisMac()) ? .ready : .downloading(0)
+    }
+
+    /// Starts the download if the model is missing, and picks up recordings
+    /// left waiting: made before the model arrived, or cut off by a quit.
+    func start(pending: [RecordingEntry]) {
+        if enabled { fetchIfNeeded() }
+        for entry in pending.reversed() where entry.transcript == .pending {
+            enqueue(RecordingLibrary.stamp(of: entry.folder))
+        }
+    }
+
+    func toggle() {
+        enabled.toggle()
+        UserDefaults.standard.set(enabled, forKey: "transcribe")
+        if enabled {
+            fetchIfNeeded()
+            processQueue()
+        } else {
+            downloadTask?.cancel()
+        }
+    }
+
+    // MARK: - Download
+
+    private func fetchIfNeeded() {
+        guard downloadTask == nil else { return }
+        if ModelStore.isDownloaded(model) {
+            download = .ready
+            return fetchLighterIfUseful()
+        }
+        let model = model
+        let start: Int64 =
+            switch download {
+            case .downloading(let bytes), .paused(let bytes), .retrying(let bytes): bytes
+            case .ready: 0
+            }
+        download = .downloading(start)
+        downloadTask = Task { [weak self] in
+            let reporter = ProgressReporter { bytes in Task { @MainActor in self?.progress(bytes) } }
+            do {
+                try await ModelStore.download(model, progress: reporter.report)
+                self?.downloaded()
+            } catch {
+                self?.downloadFailed(cancelled: Task.isCancelled)
+            }
+        }
+    }
+
+    private func progress(_ bytes: Int64) {
+        if case .downloading = download { download = .downloading(bytes) }
+    }
+
+    private func downloaded() {
+        downloadTask = nil
+        download = .ready
+        processQueue()
+        fetchLighterIfUseful()
+    }
+
+    private func downloadFailed(cancelled: Bool) {
+        downloadTask = nil
+        let bytes: Int64 = if case .downloading(let done) = download { done } else { 0 }
+        download = cancelled ? .paused(bytes) : .retrying(bytes)
+        guard !cancelled else { return }
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(30))
+            guard let self, enabled, case .retrying = download else { return }
+            fetchIfNeeded()
+        }
+    }
+
+    /// Laptops also keep the lighter model, for recordings on battery. It
+    /// comes quietly after the main one; until then the main one is used.
+    private func fetchLighterIfUseful() {
+        let lighter = SpeechModel.small
+        guard model != lighter, PowerSource.hasBattery(), !ModelStore.isDownloaded(lighter) else { return }
+        Task.detached(priority: .background) { try? await ModelStore.download(lighter) { _ in } }
+    }
+
+    /// The model a recording starting now uses: the lighter one on battery
+    /// when it is there, else the main one. Nil until a model is downloaded.
+    private func modelForNow() -> SpeechModel? {
+        let wanted = SpeechModel.forNow()
+        if ModelStore.isDownloaded(wanted) { return wanted }
+        return ModelStore.isDownloaded(model) ? model : nil
+    }
+
+    // MARK: - Engine
+
+    private func engine(for model: SpeechModel) -> Task<SpeechEngine, Error> {
+        unload?.cancel()
+        if let engine, engine.model == model { return engine.task }
+        let task = Task { try await SpeechEngine.load(model) }
+        engine = (model, task)
+        return task
+    }
+
+    /// Drops an engine that failed, so the next transcript loads it afresh
+    /// instead of reusing the failure.
+    private func forgetEngine(_ model: SpeechModel) {
+        if engine?.model == model { release() }
+    }
+
+    /// Lets go of the loaded model away from the main thread: freeing a few
+    /// gigabytes takes long enough to delay a recording that starts meanwhile.
+    private func release() {
+        guard let old = engine?.task else { return }
+        engine = nil
+        Task.detached(priority: .background) { _ = try? await old.value }
+    }
+
+    /// Frees the model's memory a minute after the last transcript.
+    private func scheduleUnload() {
+        guard live == nil, !processing else { return }
+        unload?.cancel()
+        unload = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(60))
+            guard !Task.isCancelled, let self, live == nil, !processing else { return }
+            release()
+        }
+    }
+
+    // MARK: - While recording
+
+    /// A feed for the recorder's audio when the next recording should be
+    /// transcribed as it goes; nil when transcripts are off.
+    func prepareLive() -> LiveFeed? {
+        enabled ? LiveFeed() : nil
+    }
+
+    /// Called once the recorder has written `meta.json`: marks the
+    /// recording and starts its session, or leaves it waiting for the model.
+    func began(folder: URL, feed: LiveFeed?, microphone: Bool, computer: Bool) {
+        guard let feed else { return }
+        let stamp = RecordingLibrary.stamp(of: folder)
+        latest = []
+        guard let model = modelForNow() else {
+            try? RecordingLibrary.markTranscript("waiting", model: self.model.name, in: folder)
+            liveRunning = false
+            return
+        }
+        try? RecordingLibrary.markTranscript("transcribing", model: model.name, in: folder)
+        live = (stamp, feed)
+        liveRunning = true
+        working.insert(stamp)
+        let names = model.takesHints ? names() : nil
+        let loading = engine(for: model)
+        Task {
+            do {
+                let session = try await loading.value.session(names: names, microphone: microphone, computer: computer)
+                feed.attach(session)
+            } catch {
+                forgetEngine(model)
+                feed.fail()
+            }
+        }
+    }
+
+    /// The panel reads this while recording.
+    func refreshLatest() {
+        guard let live, let lines = live.feed.latest, lines != latest else { return }
+        latest = lines
+    }
+
+    /// The recording is saved: finish its transcript from what was heard,
+    /// or from the file when the live session could not keep up.
+    func saved(folder: URL) {
+        let stamp = RecordingLibrary.stamp(of: folder)
+        if let current = live, current.stamp == stamp {
+            live = nil
+            liveRunning = false
+            let feed = current.feed
+            Task {
+                guard let outcome = await feed.finish() else {
+                    working.remove(stamp)
+                    return enqueue(stamp)
+                }
+                let folder = library.folder(withStamp: stamp)
+                do {
+                    guard let folder else { throw CocoaError(.fileNoSuchFile) }
+                    try TranscriptDocument.save(
+                        lines: outcome.lines, failures: outcome.failures, pieces: outcome.pieces, model: outcome.model,
+                        in: folder)
+                } catch {
+                    if let folder { try? RecordingLibrary.markTranscript("failed", error: "\(error)", in: folder) }
+                }
+                working.remove(stamp)
+                finished(stamp)
+                scheduleUnload()
+            }
+        } else if (MetaFile.read(folder)?["transcript"] as? [String: Any])?["status"] as? String == "waiting" {
+            enqueue(stamp)
+        }
+    }
+
+    // MARK: - Saved recordings
+
+    /// One click: make a transcript for a recording that has none or whose
+    /// transcript failed. Works with transcripts off; the click is the ask.
+    func make(_ entry: RecordingEntry) {
+        let stamp = RecordingLibrary.stamp(of: entry.folder)
+        try? RecordingLibrary.markTranscript("waiting", model: model.name, in: entry.folder)
+        explicit.insert(stamp)
+        enqueue(stamp)
+        finished(stamp)
+    }
+
+    /// Recordings asked for by a click, made even while transcripts are off.
+    private var explicit: Set<String> = []
+
+    private func enqueue(_ stamp: String) {
+        guard !queue.contains(stamp) else { return }
+        queue.append(stamp)
+        working.insert(stamp)
+        processQueue()
+    }
+
+    private func processQueue() {
+        guard !processing, let index = queue.firstIndex(where: { enabled || explicit.contains($0) }) else { return }
+        guard let model = modelForNow() else {
+            // Waiting for the model; a click asks for the download too.
+            if !enabled, downloadTask == nil, explicit.contains(queue[index]) { forceFetch() }
+            return
+        }
+        let stamp = queue.remove(at: index)
+        processing = true
+        let names = model.takesHints ? names() : nil
+        let loading = engine(for: model)
+        Task {
+            if let folder = library.folder(withStamp: stamp) {
+                do {
+                    try await FolderTranscriber.run(folder: folder, engine: loading.value, names: names)
+                } catch {
+                    forgetEngine(model)
+                    try? RecordingLibrary.markTranscript("failed", model: model.name, error: "\(error)", in: folder)
+                }
+            }
+            explicit.remove(stamp)
+            working.remove(stamp)
+            processing = false
+            finished(stamp)
+            processQueue()
+            scheduleUnload()
+        }
+    }
+
+    /// Downloads for a recording the user asked to transcribe while transcripts are off.
+    private func forceFetch() {
+        let wasEnabled = enabled
+        enabled = true
+        fetchIfNeeded()
+        enabled = wasEnabled
+    }
+
+    func isWorking(on entry: RecordingEntry) -> Bool {
+        working.contains(RecordingLibrary.stamp(of: entry.folder)) || entry.transcript == .pending
+    }
+
+    /// Puts the row and the live lines in a given state for `TapeUp snapshot`.
+    func stage(download: Download, enabled: Bool = true, live: Bool = false, latest: [String] = []) {
+        self.download = download
+        self.enabled = enabled
+        liveRunning = live
+        self.latest = latest.enumerated().map { TranscriptLine(start: Double($0.offset), end: 0, text: $0.element) }
+    }
+
+    // MARK: - What the panel says
+
+    /// The Transcript row's second line.
+    var status: String {
+        switch download {
+        case .downloading(let bytes) where enabled || downloadTask != nil:
+            return "Downloading \(model.name) · \(Format.percent(bytes, of: model.downloadBytes))"
+        case .ready where enabled:
+            let waiting = queue.count + (processing ? 1 : 0)
+            return waiting > 0 && !liveRunning
+                ? "\(model.name) · transcribing \(waiting) recording\(waiting == 1 ? "" : "s")" : model.name
+        case .retrying(let bytes) where enabled:
+            return "No connection, retrying · \(Format.percent(bytes, of: model.downloadBytes))"
+        default:
+            return "Off"
+        }
+    }
+}
+
+/// Carries the recorder's audio to the live session, holding it while the
+/// model loads. Called on the recorder's data queue.
+final class LiveFeed: @unchecked Sendable {
+    struct Outcome {
+        let lines: [TranscriptLine]
+        let failures: Int
+        let pieces: Int
+        let model: SpeechModel
+    }
+
+    private let lock = NSLock()
+    private var session: TranscriptSession?
+    private var model: SpeechModel?
+    private var held: [(left: [Float], right: [Float], headphones: Bool)] = []
+    private var heldFrames = 0
+    /// True when audio was lost before the session started, or it never did:
+    /// the transcript is then made from the file instead.
+    private var broken = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var settled = false
+
+    /// Two minutes of audio may wait for the model to load.
+    private static let holdLimit = 48_000 * 120
+
+    func feed(left: [Float], right: [Float], headphones: Bool) {
+        lock.lock()
+        defer { lock.unlock() }
+        if let session { return session.feed(left: left, right: right, headphones: headphones) }
+        guard !broken else { return }
+        guard heldFrames < Self.holdLimit else {
+            broken = true
+            held = []
+            return
+        }
+        held.append((left, right, headphones))
+        heldFrames += left.count
+    }
+
+    func attach(_ session: TranscriptSession) {
+        lock.lock()
+        if !broken {
+            for chunk in held { session.feed(left: chunk.left, right: chunk.right, headphones: chunk.headphones) }
+            self.session = session
+        }
+        held = []
+        settle()
+        lock.unlock()
+    }
+
+    func fail() {
+        lock.lock()
+        broken = true
+        held = []
+        settle()
+        lock.unlock()
+    }
+
+    /// Must hold the lock.
+    private func settle() {
+        settled = true
+        for waiter in waiters { waiter.resume() }
+        waiters = []
+    }
+
+    var latest: [TranscriptLine]? {
+        lock.lock()
+        defer { lock.unlock() }
+        return session?.latest
+    }
+
+    /// The lines heard, or nil when the transcript must come from the file.
+    func finish() async -> Outcome? {
+        await withCheckedContinuation { continuation in
+            lock.lock()
+            if settled {
+                lock.unlock()
+                continuation.resume()
+            } else {
+                waiters.append(continuation)
+                lock.unlock()
+            }
+        }
+        guard let session = lock.withLock({ broken ? nil : session }) else { return nil }
+        let outcome = await session.finish()
+        return Outcome(lines: outcome.lines, failures: outcome.failures, pieces: outcome.pieces, model: session.model)
+    }
+}
+
+/// Passes download progress on at most a few times a second.
+private final class ProgressReporter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var last = Date.distantPast
+    private let send: @Sendable (Int64) -> Void
+
+    init(send: @escaping @Sendable (Int64) -> Void) { self.send = send }
+
+    func report(_ bytes: Int64) {
+        lock.lock()
+        let now = Date()
+        let due = now.timeIntervalSince(last) > 0.2
+        if due { last = now }
+        lock.unlock()
+        if due { send(bytes) }
+    }
+}
