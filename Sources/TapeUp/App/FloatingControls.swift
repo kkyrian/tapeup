@@ -80,14 +80,19 @@ final class FloatingControls {
         let wanted = model.isRecording && model.showsFloatingControls
         if wanted, !panel.isVisible {
             panel.setFrameOrigin(origin())
+            panel.alphaValue = 0
             panel.orderFrontRegardless()
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.25
+                panel.animator().alphaValue = 1
+            }
         } else if !wanted, panel.isVisible {
             panel.orderOut(nil)
         }
     }
 
-    /// The remembered place if it is still on a screen, otherwise the top
-    /// right of the main screen.
+    /// The remembered place if it is still on a screen, otherwise centered
+    /// just under the menu bar, where the eye already goes.
     private func origin() -> NSPoint {
         let size = panel.frame.size
         if let text = UserDefaults.standard.string(forKey: Self.originKey) {
@@ -96,7 +101,7 @@ final class FloatingControls {
             if NSScreen.screens.contains(where: { $0.visibleFrame.contains(frame) }) { return saved }
         }
         let visible = (NSScreen.main ?? NSScreen.screens[0]).visibleFrame
-        return NSPoint(x: visible.maxX - size.width - 16, y: visible.maxY - size.height - 16)
+        return NSPoint(x: visible.midX - size.width / 2, y: visible.maxY - size.height - 10)
     }
 }
 

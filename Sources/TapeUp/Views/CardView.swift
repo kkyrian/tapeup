@@ -35,7 +35,7 @@ struct CardView: View {
                 symbol: card.justRecorded ? "xmark" : "chevron.left", help: card.justRecorded ? "Close" : "Back",
                 action: model.closeCard
             )
-            .frame(width: Style.textEdge - Style.inset, alignment: .leading)
+            .padding(.trailing, 6)
             TitleField(entry: card.entry, model: model) {
                 HStack(spacing: 4) {
                     if card.finishing {
@@ -133,7 +133,6 @@ struct TitleField<Subtitle: View>: View {
             editing ? Style.fill : hovering ? Style.fillHover : .clear,
             in: .rect(cornerRadius: Style.corner - 2, style: .continuous)
         )
-        .padding(.leading, -6)
         .contentShape(.rect)
     }
 

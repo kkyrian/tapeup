@@ -108,14 +108,14 @@ struct LevelCheckButton: View {
     @State private var hovering = false
     @State private var progress: CGFloat = 0
     @State private var pending: Task<Void, Never>?
-    @State private var labeled = false
 
     var body: some View {
         Button(action: toggle) {
             ZStack {
-                // Halfway through the hold, the button says what it is about to do.
-                if labeled && !on {
-                    Text("Check levels").font(.system(size: 11, weight: .medium)).lineLimit(1).fixedSize()
+                // On the pointer, the button says what it does; at rest it is an icon.
+                if hovering {
+                    Text(on ? "Checking" : "Check levels").font(.system(size: 11, weight: .medium)).lineLimit(1)
+                        .fixedSize()
                         .transition(.opacity)
                 } else {
                     Image(systemName: "waveform").font(.system(size: 14, weight: .semibold)).transition(.opacity)
@@ -136,29 +136,31 @@ struct LevelCheckButton: View {
         }
         .buttonStyle(Pressable())
         .onHover(perform: hover)
-        .onChange(of: on) { _, _ in reset() }
-        .help(on ? "Stop checking levels" : "")
+        .onChange(of: on) { _, _ in cancelHold() }
         .accessibilityLabel(on ? "Stop checking levels" : "Check levels")
     }
 
+    /// Resting on the button starts the check after a moment, so passing over
+    /// never opens the microphone; leaving it stops the check.
     private func hover(_ inside: Bool) {
-        hovering = inside
-        guard inside, !on else { return reset() }
+        withAnimation(.easeOut(duration: 0.12)) { hovering = inside }
+        guard inside else {
+            cancelHold()
+            if on { toggle() }
+            return
+        }
+        guard !on else { return }
         withAnimation(.linear(duration: Self.hold)) { progress = 1 }
         pending = Task { @MainActor in
-            try? await Task.sleep(for: .seconds(Self.hold / 2))
-            guard !Task.isCancelled, hovering, !on else { return }
-            withAnimation(.easeOut(duration: 0.15)) { labeled = true }
-            try? await Task.sleep(for: .seconds(Self.hold / 2))
+            try? await Task.sleep(for: .seconds(Self.hold))
             guard !Task.isCancelled, hovering, !on else { return }
             toggle()
         }
     }
 
-    private func reset() {
+    private func cancelHold() {
         pending?.cancel()
         pending = nil
-        withAnimation(.easeOut(duration: 0.15)) { labeled = false }
         withAnimation(.easeOut(duration: 0.15)) { progress = 0 }
     }
 }

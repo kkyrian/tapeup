@@ -7,6 +7,7 @@ import SwiftUI
 @MainActor
 final class PanelController: NSObject, NSWindowDelegate {
     private let panel: Panel
+    private var content: NSView!
     private let model: AppModel
     private weak var anchor: NSStatusBarButton?
     private var outsideClickMonitor: Any?
@@ -24,6 +25,12 @@ final class PanelController: NSObject, NSWindowDelegate {
     private func animate(to frame: NSRect) {
         resizeTimer?.invalidate()
         let start = panel.frame
+        // While the window moves, the content keeps the taller of the two
+        // heights and hangs from the top, so a page that grows is never
+        // squeezed and never slides down into view; the bottom edge reveals it.
+        let tall = max(start.height, frame.height)
+        content.autoresizingMask = [.width, .minYMargin]
+        content.frame = NSRect(x: 0, y: start.height - tall, width: frame.width, height: tall)
         let began = Date()
         let duration = 0.2
         resizeTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 120, repeats: true) { [weak self] _ in
@@ -37,10 +44,18 @@ final class PanelController: NSObject, NSWindowDelegate {
                 if t >= 1 {
                     self.resizeTimer?.invalidate()
                     self.resizeTimer = nil
+                    self.fitContent()
                 }
             }
         }
         RunLoop.main.add(resizeTimer!, forMode: .common)
+    }
+
+    /// The content fills the window exactly again once it stops moving.
+    private func fitContent() {
+        guard let bounds = panel.contentView?.bounds else { return }
+        content.autoresizingMask = [.width, .height]
+        content.frame = bounds
     }
 
     init(model: AppModel, anchor: NSStatusBarButton) {
@@ -81,6 +96,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         host.frame = background.bounds
         host.autoresizingMask = [.width, .height]
         background.addSubview(host)
+        content = host
         panel.contentView = background
         model.focusPanel = { [weak self] in
             self?.panel.makeKey()
@@ -187,10 +203,14 @@ final class PanelController: NSObject, NSWindowDelegate {
         // A change of page moves the bottom edge smoothly; the top stays put
         // and the content, laid out from the top, never moves.
         targetFrame = frame
-        if !animated { resizeTimer?.invalidate() }
         guard animated, panel.isVisible, abs(panel.frame.height - frame.height) > 0.5,
             abs(panel.frame.maxY - frame.maxY) < 1
-        else { return panel.setFrame(frame, display: true) }
+        else {
+            resizeTimer?.invalidate()
+            resizeTimer = nil
+            panel.setFrame(frame, display: true)
+            return fitContent()
+        }
         animate(to: frame)
     }
 }
