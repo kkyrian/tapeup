@@ -11,6 +11,10 @@ public enum AudioDevices {
         CoreAudioSystem.name(of: CoreAudioSystem.defaultDevice(kAudioHardwarePropertyDefaultOutputDevice))
     }
 
+    /// Removes audio devices a crashed TapeUp left behind; returns how many.
+    @discardableResult
+    public static func removeLeftovers() -> Int { CoreAudioSystem.removeLeftovers() }
+
     /// Calls `handler` on `queue` whenever the default input or output changes,
     /// until the returned observation is cancelled or released.
     public static func observeDefaults(queue: DispatchQueue, _ handler: @escaping @Sendable () -> Void)

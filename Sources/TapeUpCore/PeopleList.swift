@@ -33,15 +33,26 @@ public struct PeopleList: Sendable, Equatable {
     /// Reads a list from an assistant's reply: the JSON alone, inside a code
     /// block, or with prose around it.
     public static func parse(_ text: String) throws -> PeopleList {
-        guard let start = text.firstIndex(of: "{"), let end = text.lastIndex(of: "}"), start < end else {
-            throw ParseError(description: "no list found")
+        // Answers may repeat the template, wrap the list in prose with braces,
+        // or add text after it: take the last complete object with people.
+        let objects = jsonObjects(in: text).compactMap { candidate -> [String: Any]? in
+            guard let data = candidate.data(using: .utf8),
+                let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+                object["people"] != nil || object["you"] != nil
+            else { return nil }
+            return object
         }
-        guard let data = String(text[start...end]).data(using: .utf8),
-            let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
-        else { throw ParseError(description: "the list is not valid JSON") }
-        let entries = object["people"] as? [Any] ?? []
+        guard !objects.isEmpty else { throw ParseError(description: "no list found") }
+        for object in objects.reversed() {
+            let list = build(from: object)
+            if !list.isEmpty { return list }
+        }
+        throw ParseError(description: "the list has no names")
+    }
+
+    private static func build(from object: [String: Any]) -> PeopleList {
         var list = PeopleList(you: clean(object["you"] as? String))
-        for entry in entries {
+        for entry in object["people"] as? [Any] ?? [] {
             switch entry {
             case let name as String:
                 list.add(Person(name: name))
@@ -52,8 +63,43 @@ public struct PeopleList: Sendable, Equatable {
             default: continue
             }
         }
-        guard !list.isEmpty else { throw ParseError(description: "the list has no names") }
+        // A template copied back unchanged is not a list.
+        if list.you?.hasPrefix("<") == true { list.you = nil }
+        list.people.removeAll { $0.name.hasPrefix("<") }
         return list
+    }
+
+    /// Every balanced top-level `{...}` in the text, skipping braces inside strings.
+    static func jsonObjects(in text: String) -> [String] {
+        var objects: [String] = []
+        var depth = 0
+        var start: String.Index?
+        var inString = false
+        var escaped = false
+        for index in text.indices {
+            let character = text[index]
+            if inString {
+                if escaped {
+                    escaped = false
+                } else if character == "\\" {
+                    escaped = true
+                } else if character == "\"" {
+                    inString = false
+                }
+                continue
+            }
+            switch character {
+            case "\"" where depth > 0: inString = true
+            case "{":
+                if depth == 0 { start = index }
+                depth += 1
+            case "}" where depth > 0:
+                depth -= 1
+                if depth == 0, let begin = start { objects.append(String(text[begin...index])) }
+            default: break
+            }
+        }
+        return objects
     }
 
     /// Adds a person unless the name is already there (ignoring case), in
@@ -84,8 +130,22 @@ public struct PeopleList: Sendable, Equatable {
     public static func url(in root: URL) -> URL { root.appendingPathComponent(fileName) }
 
     public static func load(from root: URL) -> PeopleList {
+        (try? loadChecked(from: root)) ?? PeopleList()
+    }
+
+    /// Like `load`, but throws when a file exists and cannot be read as a
+    /// list, so callers never save over a list they failed to understand.
+    public static func loadChecked(from root: URL) throws -> PeopleList {
         guard let text = try? String(contentsOf: url(in: root), encoding: .utf8) else { return PeopleList() }
-        return (try? parse(text)) ?? PeopleList()
+        return try parse(text)
+    }
+
+    /// Moves an unreadable `people.json` aside so it is kept, not overwritten.
+    public static func setAsideUnreadable(in root: URL) throws -> URL {
+        let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "")
+        let aside = root.appendingPathComponent("people-unreadable-\(stamp).json")
+        try FileManager.default.moveItem(at: url(in: root), to: aside)
+        return aside
     }
 
     public func save(to root: URL) throws {

@@ -19,6 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         button.setAccessibilityLabel("TapeUp")
         panel = PanelController(model: model, anchor: button)
         hotKey = HotKey.record { [weak self] in self?.shortcutPressed() }
+        if hotKey == nil { model.shortcutLabel = nil }
         renderStatusItem()
         model.recoverLeftovers()
 
@@ -35,7 +36,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard model.isRecording || model.card?.finishing == true else { return .terminateNow }
+        guard model.phase != .idle else { return .terminateNow }
         if model.isRecording {
             model.stop { NSApp.reply(toApplicationShouldTerminate: true) }
         } else {
@@ -45,7 +46,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func waitForSave(_ done: @escaping @MainActor () -> Void) {
-        guard model.card?.finishing == true else { return done() }
+        guard model.phase != .idle else { return done() }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in self?.waitForSave(done) }
     }
 
@@ -57,7 +58,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let wasRecording = model.isRecording
         model.toggle()
         // Show the saved card without taking focus; starting stays quiet.
-        if wasRecording, !panel.isVisible { panel.show() }
+        if wasRecording, !panel.isVisible { panel.show(takingFocus: false) }
     }
 
     /// Redraws the menu-bar item whenever the phase or the clock changes.

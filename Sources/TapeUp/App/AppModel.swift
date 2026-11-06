@@ -94,7 +94,12 @@ final class AppModel {
     private var levelTimer: Timer?
     private var activity: NSObjectProtocol?
     private var deviceObservation: AudioDevices.Observation?
-    private var pendingPeople: RecordingEntry.People?
+    /// Who was there, entered while the recording is still saving.
+    private var pendingPeople: (folder: URL, people: RecordingEntry.People)?
+    /// The folder being recorded or saved; kept out of Recent until it is final.
+    private var activeFolder: URL?
+    /// The shortcut shown on the buttons, or nil when another app holds it.
+    var shortcutLabel: String? = HotKey.recordShortcutLabel
 
     init() {
         let saved = UserDefaults.standard.string(forKey: "recordingsRoot").map { URL(fileURLWithPath: $0) }
@@ -130,6 +135,14 @@ final class AppModel {
 
     private func begin() {
         guard phase == .idle else { return }
+        let missing = [
+            microphoneAccess == .denied ? "your mic" : nil, computerAccess == .denied ? "your Mac's audio" : nil,
+        ].compactMap { $0 }
+        guard missing.isEmpty else {
+            problem =
+                "TapeUp can't hear \(missing.joined(separator: " or ")). Choose Allow access, turn TapeUp on, then record."
+            return
+        }
         do {
             let folder = try library.newFolder()
             var options = Recorder.Options(folder: folder)
@@ -137,6 +150,7 @@ final class AppModel {
             let recorder = try Recorder(options: options)
             try recorder.start()
             self.recorder = recorder
+            activeFolder = folder
             card = nil
             showingPeople = false
             phase = .recording(started: recorder.started)
@@ -180,12 +194,13 @@ final class AppModel {
 
     private func finishedSaving(folder: URL, outcome: Result<Recorder.Result, Error>) {
         recorder = nil
+        activeFolder = nil
         phase = .idle
         if case .failure(let error) = outcome {
             problem = "\(error)"
         }
-        if let people = pendingPeople {
-            try? RecordingLibrary.save(people: people, in: folder)
+        if let pending = pendingPeople, pending.folder == folder {
+            try? RecordingLibrary.save(people: pending.people, in: folder)
             pendingPeople = nil
         }
         reload()
@@ -288,7 +303,7 @@ final class AppModel {
     // MARK: - Library
 
     func reload() {
-        allEntries = library.entries()
+        allEntries = library.entries().filter { $0.folder != activeFolder }
         recent = Array(allEntries.prefix(5))
         loadPeople()
     }
@@ -340,7 +355,7 @@ final class AppModel {
             return
         }
         let before = peopleList.people.count
-        let merged = peopleList.merged(with: list)
+        let merged = currentPeopleFile().merged(with: list)
         do {
             try library.prepareRoot()
             try merged.save(to: root)
@@ -351,8 +366,21 @@ final class AppModel {
         }
     }
 
+    /// The list as it is on disk now, which an assistant may have just
+    /// changed. A file that cannot be read is set aside, never overwritten.
+    private func currentPeopleFile() -> PeopleList {
+        do {
+            return try PeopleList.loadChecked(from: root)
+        } catch {
+            if let aside = try? PeopleList.setAsideUnreadable(in: root) {
+                problem = "The old people list couldn't be read, so it was kept as \(aside.lastPathComponent)."
+            }
+            return PeopleList()
+        }
+    }
+
     func removePerson(_ name: String) {
-        var list = peopleList
+        var list = currentPeopleFile()
         list.remove(name)
         try? list.save(to: root)
         loadPeople()
@@ -372,12 +400,14 @@ final class AppModel {
     /// Finishes recordings a crash left behind, then refreshes the list.
     func recoverLeftovers() {
         let root = self.root
+        let launched = Date()
         Task.detached(priority: .utility) {
+            AudioDevices.removeLeftovers()
             let folders =
                 (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? []
             var recovered = false
             for folder in folders {
-                if (try? Recorder.recover(folder: folder)) == true { recovered = true }
+                if (try? Recorder.recover(folder: folder, startedBefore: launched)) == true { recovered = true }
             }
             if recovered { await MainActor.run { [weak self] in self?.reload() } }
         }
@@ -396,6 +426,17 @@ final class AppModel {
         if card?.entry.folder == entry.folder { card?.copied = true }
     }
 
+    /// Moves a recording's folder to the Trash, where it can still be restored.
+    func trash(_ entry: RecordingEntry) {
+        do {
+            try FileManager.default.trashItem(at: entry.folder, resultingItemURL: nil)
+            if card?.entry.folder == entry.folder { card = nil }
+            reload()
+        } catch {
+            problem = "Could not move the recording to the Trash: \(error.localizedDescription)"
+        }
+    }
+
     func reveal(_ entry: RecordingEntry) {
         let target = FileManager.default.fileExists(atPath: entry.audio.path) ? entry.audio : entry.folder
         NSWorkspace.shared.activateFileViewerSelecting([target])
@@ -410,8 +451,8 @@ final class AppModel {
         guard var card else { return }
         card.entry.people = people
         self.card = card
-        if card.finishing {
-            pendingPeople = people
+        if card.entry.folder == activeFolder {
+            pendingPeople = (card.entry.folder, people)
             return
         }
         do {

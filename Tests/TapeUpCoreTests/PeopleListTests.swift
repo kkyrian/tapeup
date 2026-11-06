@@ -55,4 +55,33 @@ struct PeopleListTests {
         #expect(prompt.contains("/Users/x/TapeUp/people.json"))
         #expect(prompt.contains(PeopleList.format))
     }
+
+    @Test func takesTheFilledListAfterARepeatedTemplate() throws {
+        let answer = """
+            You asked for {"format": "tapeup-people/1", "you": "<my name>", "people": [{"name": "<name>"}]}.
+            Here it is {as requested}:
+            {"format": "tapeup-people/1", "you": "Sam", "people": [{"name": "Ana {the TA}"}]}
+            Hope that helps!}
+            """
+        let list = try PeopleList.parse(answer)
+        #expect(list.you == "Sam")
+        #expect(list.people.map(\.name) == ["Ana {the TA}"])
+    }
+
+    @Test func rejectsTheBareTemplate() {
+        #expect(throws: PeopleList.ParseError.self) {
+            try PeopleList.parse(#"{"you": "<my name>", "people": [{"name": "<name>"}]}"#)
+        }
+    }
+
+    @Test func refusesToLoadAnUnreadableFile() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try #"{"people": [{"name": "Ana"}"#.write(to: PeopleList.url(in: root), atomically: true, encoding: .utf8)
+        #expect(throws: (any Error).self) { try PeopleList.loadChecked(from: root) }
+        let aside = try PeopleList.setAsideUnreadable(in: root)
+        #expect(FileManager.default.fileExists(atPath: aside.path))
+        #expect(try PeopleList.loadChecked(from: root).isEmpty)
+    }
 }

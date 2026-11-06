@@ -54,14 +54,18 @@ public struct RecordingLibrary: Sendable {
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd-HHmm"
         let name = formatter.string(from: date)
-        var folder = root.appendingPathComponent(name, isDirectory: true)
-        var suffix = 2
-        while FileManager.default.fileExists(atPath: folder.path) {
-            folder = root.appendingPathComponent("\(name)-\(suffix)", isDirectory: true)
-            suffix += 1
+        // Creating is the check: another recorder may take a name between a
+        // look and a create.
+        for suffix in 1...999 {
+            let folder = root.appendingPathComponent(suffix == 1 ? name : "\(name)-\(suffix)", isDirectory: true)
+            do {
+                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
+                return folder
+            } catch CocoaError.fileWriteFileExists {
+                continue
+            }
         }
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
-        return folder
+        throw CocoaError(.fileWriteFileExists)
     }
 
     /// Creates the root and its `AGENTS.md` when missing. An existing
@@ -106,23 +110,18 @@ public struct RecordingLibrary: Sendable {
 
     /// Saves who was there into the recording's `meta.json`, keeping every other field.
     public static func save(people: RecordingEntry.People, in folder: URL) throws {
-        var meta = readMeta(folder) ?? [:]
-        if people.isEmpty {
-            meta["who_was_there"] = nil
-        } else {
-            var who: [String: Any] = ["names": people.names]
-            if let count = people.count { who["count"] = count }
-            meta["who_was_there"] = who
+        try MetaFile.update(folder) { meta in
+            if people.isEmpty {
+                meta["who_was_there"] = nil
+            } else {
+                var who: [String: Any] = ["names": people.names]
+                if let count = people.count { who["count"] = count }
+                meta["who_was_there"] = who
+            }
         }
-        let data = try JSONSerialization.data(
-            withJSONObject: meta, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
-        try data.write(to: folder.appendingPathComponent("meta.json"), options: .atomic)
     }
 
-    static func readMeta(_ folder: URL) -> [String: Any]? {
-        guard let data = try? Data(contentsOf: folder.appendingPathComponent("meta.json")) else { return nil }
-        return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
-    }
+    static func readMeta(_ folder: URL) -> [String: Any]? { MetaFile.read(folder) }
 
     static let agentsGuide = """
         # TapeUp recordings

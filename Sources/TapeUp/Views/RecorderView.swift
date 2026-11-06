@@ -74,9 +74,11 @@ struct RecordButton: View {
                     .font(.system(size: model.isRecording ? 10 : 9, weight: .bold))
                 Text(title).font(.system(size: 14, weight: .semibold))
                 Spacer()
-                Text(HotKey.recordShortcutLabel)
-                    .font(.system(size: 12, weight: .medium))
-                    .opacity(0.7)
+                if let shortcut = model.shortcutLabel {
+                    Text(shortcut)
+                        .font(.system(size: 12, weight: .medium))
+                        .opacity(0.7)
+                }
             }
             .padding(.horizontal, 14)
             .frame(height: 38)

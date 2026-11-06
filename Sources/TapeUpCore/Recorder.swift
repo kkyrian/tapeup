@@ -72,6 +72,7 @@ public final class Recorder: @unchecked Sendable {
     private var inputsSeen: [String] = []
     private var outputsSeen: [String] = []
     private var stopping = false
+    private var folderLock: FolderLock?
 
     /// Last host time each track delivered samples, keyed by capture generation.
     private let lastAudio = OSAllocatedUnfairLock(initialState: [Track: (generation: Int, host: UInt64)]())
@@ -111,6 +112,7 @@ public final class Recorder: @unchecked Sendable {
             AVLinearPCMIsBigEndianKey: false,
             AVLinearPCMIsNonInterleaved: false,
         ]
+        folderLock = FolderLock(folder: options.folder)
         file = try AVAudioFile(
             forWriting: cafURL, settings: settings, commonFormat: .pcmFormatFloat32, interleaved: false)
         let leftovers = CoreAudioSystem.removeLeftovers()
@@ -167,17 +169,20 @@ public final class Recorder: @unchecked Sendable {
             return trackStats()
         }
         log.record("stop", stats)
+        defer { folderLock?.release() }
         do {
             try Self.encode(caf: cafURL, to: m4aURL)
         } catch {
-            try? FileManager.default.removeItem(at: m4aURL)
+            if FileManager.default.fileExists(atPath: cafURL.path) { try? FileManager.default.removeItem(at: m4aURL) }
             let failure = EncodeFailure(detail: "\(error)")
             log.record("encode failed", ["error": failure.detail])
             control.sync { writeMeta(status: "recorded", audio: "audio.caf", stats: stats) }
             throw failure
         }
-        try FileManager.default.removeItem(at: cafURL)
+        // Name the finished file before removing the raw one, so no moment
+        // leaves meta.json pointing at a file that is gone.
         control.sync { writeMeta(status: "recorded", audio: "audio.m4a", stats: stats) }
+        try? FileManager.default.removeItem(at: cafURL)
         log.record("finalized", ["audio": m4aURL.lastPathComponent])
         return Result(folder: options.folder, audio: m4aURL)
     }
@@ -327,7 +332,10 @@ public final class Recorder: @unchecked Sendable {
             let frame = host.map { clock.frame(atHostTime: $0) }
             data.async { [self] in
                 guard accepting else { return }
-                if origin == nil, let frame {
+                if origin == nil {
+                    // The file starts at the first audio with a timestamp;
+                    // anything untimed before it has no place yet.
+                    guard let frame else { return }
                     origin = frame
                     microphoneTrack.begin(at: frame)
                     computerTrack.begin(at: frame)
@@ -414,27 +422,27 @@ public final class Recorder: @unchecked Sendable {
         }
     }
 
+    /// Updates the fields the recorder owns and keeps everything else, such
+    /// as who was there, which the card may have saved meanwhile.
     private func writeMeta(status: String, audio: String = "audio.caf", stats: [String: Any]? = nil) {
-        var meta: [String: Any] = [
-            "format": "tapeup-recording/0",
-            "status": status,
-            "started": ISO8601DateFormatter().string(from: started),
-            "audio": audio,
-            "channels": ["left": "microphone", "right": "computer audio"],
-            "devices": ["inputs": inputsSeen, "outputs": outputsSeen],
-        ]
-        if let you = options.you { meta["you"] = you }
-        if let stats {
-            meta["duration_seconds"] = stats["duration_seconds"]
-            meta["write_errors"] = stats["write_errors"]
-            meta["timeline"] = ["microphone": stats["microphone"], "computer_audio": stats["computer_audio"]]
-        }
-        guard
-            let data = try? JSONSerialization.data(
-                withJSONObject: meta, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
-        else { return }
+        let started = ISO8601DateFormatter().string(from: started)
+        let devices = ["inputs": inputsSeen, "outputs": outputsSeen]
+        let you = options.you
         do {
-            try data.write(to: options.folder.appendingPathComponent("meta.json"), options: .atomic)
+            try MetaFile.update(options.folder) { meta in
+                meta["format"] = "tapeup-recording/0"
+                meta["status"] = status
+                meta["started"] = started
+                meta["audio"] = audio
+                meta["channels"] = ["left": "microphone", "right": "computer audio"]
+                meta["devices"] = devices
+                if let you { meta["you"] = you }
+                if let stats {
+                    meta["duration_seconds"] = stats["duration_seconds"]
+                    meta["write_errors"] = stats["write_errors"]
+                    meta["timeline"] = ["microphone": stats["microphone"], "computer_audio": stats["computer_audio"]]
+                }
+            }
         } catch {
             log.record("meta write failed", ["error": "\(error)"])
         }
@@ -442,26 +450,34 @@ public final class Recorder: @unchecked Sendable {
 
     /// Finishes a recording a crash left behind: encodes its `audio.caf` and
     /// marks it recorded. Returns false when the folder needs nothing.
-    public static func recover(folder: URL) throws -> Bool {
-        let metaURL = folder.appendingPathComponent("meta.json")
+    /// Only recordings started before `cutoff` are touched, so one this
+    /// process is making now is never mistaken for a crashed one.
+    public static func recover(folder: URL, startedBefore cutoff: Date = .distantFuture) throws -> Bool {
         let caf = folder.appendingPathComponent("audio.caf")
         let m4a = folder.appendingPathComponent("audio.m4a")
-        guard let data = try? Data(contentsOf: metaURL),
-            var meta = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-            meta["status"] as? String == "recording", FileManager.default.fileExists(atPath: caf.path)
+        guard let meta = MetaFile.read(folder), meta["status"] as? String == "recording",
+            let startedText = meta["started"] as? String,
+            let started = ISO8601DateFormatter().date(from: startedText), started < cutoff,
+            let lock = FolderLock(folder: folder)
         else { return false }
-        let frames = try AVAudioFile(forReading: caf)
-        let duration = Double(frames.length) / frames.fileFormat.sampleRate
-        try? FileManager.default.removeItem(at: m4a)
-        try encode(caf: caf, to: m4a)
-        try FileManager.default.removeItem(at: caf)
-        meta["status"] = "recorded"
-        meta["audio"] = "audio.m4a"
-        meta["recovered"] = true
-        meta["duration_seconds"] = (duration * 10).rounded() / 10
-        let out = try JSONSerialization.data(
-            withJSONObject: meta, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
-        try out.write(to: metaURL, options: .atomic)
+        defer { lock.release() }
+        let fileManager = FileManager.default
+        var duration = meta["duration_seconds"] as? Double
+        if fileManager.fileExists(atPath: caf.path) {
+            let source = try AVAudioFile(forReading: caf)
+            duration = Double(source.length) / source.fileFormat.sampleRate
+            try? fileManager.removeItem(at: m4a)
+            try encode(caf: caf, to: m4a)
+        } else if !fileManager.fileExists(atPath: m4a.path) {
+            return false
+        }
+        try MetaFile.update(folder) { meta in
+            meta["status"] = "recorded"
+            meta["audio"] = "audio.m4a"
+            meta["recovered"] = true
+            if let duration { meta["duration_seconds"] = (duration * 10).rounded() / 10 }
+        }
+        try? fileManager.removeItem(at: caf)
         return true
     }
 

@@ -41,6 +41,15 @@ struct CardView: View {
             }
             Divider()
             WhoWasThereView(model: model, people: card.entry.people)
+            if !card.finishing {
+                HStack {
+                    Spacer()
+                    Button("Move to Trash") { model.trash(card.entry) }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.tertiary)
+                }
+            }
         }
         .padding(14)
         .animation(.snappy(duration: 0.25), value: card.copied)

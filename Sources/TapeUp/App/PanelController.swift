@@ -29,6 +29,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         panel.hasShadow = true
         panel.animationBehavior = .utilityWindow
         panel.isReleasedWhenClosed = false
+        panel.becomesKeyOnlyIfNeeded = true
         panel.hidesOnDeactivate = false
         panel.delegate = self
 
@@ -63,7 +64,9 @@ final class PanelController: NSObject, NSWindowDelegate {
 
     func toggle() { isVisible ? close() : show() }
 
-    func show() {
+    /// - Parameter takingFocus: false when the panel appears on its own (after
+    ///   a shortcut stop): it then becomes key only if the user clicks a field.
+    func show(takingFocus: Bool = true) {
         model.refreshAccess()
         model.reload()
         if model.card?.justRecorded == false, !isVisible { model.closeCard() }
@@ -72,7 +75,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         position()
         panel.alphaValue = 0
         panel.orderFrontRegardless()
-        panel.makeKey()
+        if takingFocus { panel.makeKey() }
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.12
             panel.animator().alphaValue = 1
@@ -122,7 +125,9 @@ final class PanelController: NSObject, NSWindowDelegate {
         let size = panel.contentView?.fittingSize ?? panel.frame.size
         let buttonFrame = window.convertToScreen(button.convert(button.bounds, to: nil))
         let fromRight = home.frame.maxX - buttonFrame.midX
-        let belowTop = home.frame.maxY - buttonFrame.minY
+        // Menu bars differ in height (a notched display's is taller).
+        let menuBar = screen.frame.maxY - screen.visibleFrame.maxY
+        let belowTop = menuBar > 0 ? menuBar : home.frame.maxY - buttonFrame.minY
         let visible = screen.visibleFrame
         var x = screen.frame.maxX - fromRight - size.width / 2
         x = min(max(x, visible.minX + 8), visible.maxX - size.width - 8)
