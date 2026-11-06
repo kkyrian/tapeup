@@ -69,6 +69,8 @@ public final class Recorder: @unchecked Sendable {
         file = try AVAudioFile(
             forWriting: cafURL, settings: settings, commonFormat: .pcmFormatFloat32, interleaved: false)
         writeMeta(status: "recording")
+        let leftovers = CoreAudioSystem.removeLeftovers(aggregatePrefix: "tapeup-", tapName: "TapeUp")
+        if leftovers > 0 { log.record("removed leftover devices", ["count": leftovers]) }
         log.record("start", ["sample_rate": options.sampleRate, "system_audio_mode": options.systemAudioMode])
 
         queue.sync {
