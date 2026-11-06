@@ -17,7 +17,7 @@ No AI inside. TapeUp records; your own agents transcribe, label and file.
   Both lanes move while recording, so you can see both sources are alive.
 - **Stop and save** (or ⌥⌘R again). The card offers **Copy path**, which
   copies `folder: …` and `audio: …` for your agent, and **Open in Finder**.
-- **Who was there** is optional: tap a count, add names. Names are suggested
+- **How many people in the meeting** is optional: tap a count, add participant names. Names are suggested
   from past recordings and from your people list, with forgiving search
   ("ps" finds Priya Shah).
 - **People:** let your own AI assistant write the list. TapeUp copies one

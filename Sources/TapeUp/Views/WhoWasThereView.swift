@@ -16,7 +16,7 @@ struct WhoWasThereView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
-                SectionLabel(text: "Who was there")
+                SectionLabel(text: "How many people in the meeting")
                 Spacer()
                 if savedFlash {
                     Label("Saved", systemImage: "checkmark")
@@ -134,7 +134,7 @@ struct WhoWasThereView: View {
                 Chip(text: name, symbol: "xmark", look: .token, trailingSymbol: true) { remove(name) }
                     .accessibilityLabel("Remove \(name)")
             }
-            TextField(people.names.isEmpty ? "Names" : "", text: $query)
+            TextField(people.names.isEmpty ? "Participant names" : "", text: $query)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
                 .frame(minWidth: 24, minHeight: 24)
