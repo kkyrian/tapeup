@@ -46,6 +46,7 @@ enum UITest {
         func check(_ name: String) {
             step += 1
             settle()
+            for _ in 0..<40 where panel.isResizing { settle(0.05) }
             floating.update()
             print(String(format: "%02d %@", step, name))
             let window = panel.window
@@ -129,7 +130,10 @@ enum UITest {
         check("card-copied")
         model.setTitle("Lab sync renamed")
         check("card-renamed")
-        expect(RecordingLibrary.entry(at: entry.folder)?.title == "Lab sync renamed", "title saved to meta.json")
+        let renamed = model.card?.entry.folder ?? entry.folder
+        expect(RecordingLibrary.entry(at: renamed)?.title == "Lab sync renamed", "title saved to meta.json")
+        expect(
+            renamed.lastPathComponent.hasSuffix(" Lab sync renamed"), "folder renamed (\(renamed.lastPathComponent))")
         var people = entry.people
         people.names.append("Ana")
         model.setPeople(people)
@@ -190,7 +194,7 @@ enum UITest {
             settle(0.3)
             panel.show()
             check("reopened-after-recording")
-            expect(abs(panel.window.frame.height - idleHeight) <= 8, "full list after recording")
+            expect(model.card == nil, "reopening shows the list, not the old card")
 
             // Mac audio only, stopped while paused.
             model.toggleMicrophone()

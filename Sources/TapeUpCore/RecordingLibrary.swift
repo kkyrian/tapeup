@@ -148,13 +148,38 @@ public struct RecordingLibrary: Sendable {
             people: people, title: (meta["title"] as? String).flatMap { $0.isEmpty ? nil : $0 })
     }
 
-    /// Saves the recording's title into `meta.json`; an empty title removes it.
-    public static func save(title: String?, in folder: URL) throws {
+    /// Saves the recording's title into `meta.json` and names the folder
+    /// after it, after the time it started (`2026-11-06-1430 Lab sync`), so
+    /// Finder shows familiar names. An empty title removes both. Returns the
+    /// folder's new location; it stays put when the new name is taken.
+    @discardableResult
+    public static func save(title: String?, in folder: URL) throws -> URL {
         let trimmed = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         try MetaFile.update(folder) { meta in meta["title"] = trimmed.isEmpty ? nil : trimmed }
+        let name = folderName(stamp: stamp(of: folder.lastPathComponent), title: trimmed)
+        guard name != folder.lastPathComponent else { return folder }
+        let renamed = folder.deletingLastPathComponent().appendingPathComponent(name, isDirectory: true)
+        do {
+            try FileManager.default.moveItem(at: folder, to: renamed)
+            return renamed
+        } catch CocoaError.fileWriteFileExists {
+            return folder
+        }
     }
 
-    /// Saves who was there into the recording's `meta.json`, keeping every other field.
+    /// The `yyyy-MM-dd-HHmm` start of a folder name, with its `-2` suffix.
+    static func stamp(of name: String) -> String {
+        let pattern = /^\d{4}-\d{2}-\d{2}-\d{4}(-\d+)?/
+        return name.prefixMatch(of: pattern).map { String($0.output.0) } ?? name
+    }
+
+    static func folderName(stamp: String, title: String) -> String {
+        let safe = title.map { "/:".contains($0) || $0.isNewline ? "-" : $0 }
+        let clipped = String(String(safe).prefix(60)).trimmingCharacters(in: .whitespaces)
+        let visible = clipped.hasPrefix(".") ? String(clipped.drop { $0 == "." }) : clipped
+        return visible.isEmpty ? stamp : "\(stamp) \(visible)"
+    }
+
     public static func save(people: RecordingEntry.People, in folder: URL) throws {
         try MetaFile.update(folder) { meta in
             if people.isEmpty {
@@ -173,7 +198,9 @@ public struct RecordingLibrary: Sendable {
         # TapeUp recordings
 
         Each folder here is one recording made by TapeUp, named for the minute it
-        started (`YYYY-MM-DD-HHMM`, with `-2`, `-3` when two start in the same minute).
+        started (`YYYY-MM-DD-HHMM`, with `-2`, `-3` when two start in the same minute),
+        then its title once the user names it (`2026-11-06-1430 Lab sync`). A
+        rename moves the folder, so look recordings up by folder, not by a saved path.
 
         - `audio.m4a`: stereo AAC. **Left channel: the microphone** (the person at
           this Mac). **Right channel: everything the Mac played** (the other people

@@ -5,7 +5,8 @@ import Testing
 
 struct RecordingLibraryTests {
     private func folder() throws -> URL {
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("tapeup-test-\(UUID().uuidString)")
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tapeup-test-\(UUID().uuidString)/2026-11-06-1000")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let meta: [String: Any] = [
             "status": "recorded", "audio": "audio.m4a", "duration_seconds": 61.0,
@@ -16,9 +17,10 @@ struct RecordingLibraryTests {
     }
 
     @Test func titleSavesTrimmedAndKeepsOtherFields() throws {
-        let folder = try folder()
-        defer { try? FileManager.default.removeItem(at: folder) }
-        try RecordingLibrary.save(title: "  Lab sync \n", in: folder)
+        var folder = try folder()
+        defer { try? FileManager.default.removeItem(at: folder.deletingLastPathComponent()) }
+        folder = try RecordingLibrary.save(title: "  Lab sync \n", in: folder)
+        #expect(folder.lastPathComponent == "2026-11-06-1000 Lab sync")
         try RecordingLibrary.save(people: .init(count: 3, names: ["Bea"]), in: folder)
         let entry = try #require(RecordingLibrary.entry(at: folder))
         #expect(entry.title == "Lab sync")
@@ -28,10 +30,11 @@ struct RecordingLibraryTests {
     }
 
     @Test func emptyTitleRemovesIt() throws {
-        let folder = try folder()
-        defer { try? FileManager.default.removeItem(at: folder) }
-        try RecordingLibrary.save(title: "Call", in: folder)
-        try RecordingLibrary.save(title: "   ", in: folder)
+        var folder = try folder()
+        defer { try? FileManager.default.removeItem(at: folder.deletingLastPathComponent()) }
+        folder = try RecordingLibrary.save(title: "Call", in: folder)
+        folder = try RecordingLibrary.save(title: "   ", in: folder)
+        #expect(folder.lastPathComponent == "2026-11-06-1000")
         #expect(RecordingLibrary.entry(at: folder)?.title == nil)
         #expect(MetaFile.read(folder)?["title"] == nil)
     }
@@ -64,5 +67,22 @@ struct RecordingLibraryTests {
         #expect(try String(contentsOf: new.appendingPathComponent("AGENTS.md"), encoding: .utf8) == "mine")
         #expect(PeopleList.load(from: new).people.map(\.name) == ["Bea"])
         #expect(manager.fileExists(atPath: old.root.appendingPathComponent("summary.md").path))
+    }
+
+    @Test func folderNamesStayValidAndKeepTheirStamp() {
+        #expect(RecordingLibrary.stamp(of: "2026-11-06-1000-2 Old name") == "2026-11-06-1000-2")
+        #expect(RecordingLibrary.folderName(stamp: "2026-11-06-1000", title: "a/b: c") == "2026-11-06-1000 a-b- c")
+        #expect(RecordingLibrary.folderName(stamp: "2026-11-06-1000", title: "..") == "2026-11-06-1000")
+    }
+
+    @Test func renameKeepsTheFolderWhenTheNameIsTaken() throws {
+        var folder = try folder()
+        let parent = folder.deletingLastPathComponent()
+        defer { try? FileManager.default.removeItem(at: parent) }
+        try FileManager.default.createDirectory(
+            at: parent.appendingPathComponent("2026-11-06-1000 Call"), withIntermediateDirectories: false)
+        folder = try RecordingLibrary.save(title: "Call", in: folder)
+        #expect(folder.lastPathComponent == "2026-11-06-1000")
+        #expect(RecordingLibrary.entry(at: folder)?.title == "Call")
     }
 }

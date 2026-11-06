@@ -7,13 +7,13 @@ struct RecorderView: View {
     @Bindable var model: AppModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 2) {
             lane(
-                symbol: "speaker.wave.2.fill", label: "Mac audio", device: model.outputDevice,
+                symbol: "speaker.wave.2.fill", label: "Computer audio", device: model.outputDevice,
                 levels: model.computerLevels, access: model.computerAccess, on: model.computerOn,
                 canTurnOff: model.microphoneOn, toggle: model.toggleComputer, pane: "computer")
             lane(
-                symbol: "mic.fill", label: "Mic", device: model.microphoneDevice,
+                symbol: "mic.fill", label: "Microphone", device: model.microphoneDevice,
                 levels: model.microphoneLevels, access: model.microphoneAccess, on: model.microphoneOn,
                 canTurnOff: model.computerOn, toggle: model.toggleMicrophone, pane: "microphone")
             HStack(spacing: 8) {
@@ -25,7 +25,7 @@ struct RecorderView: View {
                         .disabled(model.phase != .idle)
                 }
             }
-            .padding(.top, 4)
+            .padding(.top, 8)
         }
         .padding(Style.inset)
     }

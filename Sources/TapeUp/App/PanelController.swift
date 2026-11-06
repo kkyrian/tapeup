@@ -15,6 +15,33 @@ final class PanelController: NSObject, NSWindowDelegate {
     private var target: NSScreen?
     /// The height the SwiftUI content asks for; the window always matches it.
     private(set) var contentHeight: CGFloat = 200
+    /// The frame the window is heading to.
+    private var targetFrame: NSRect?
+    private var resizeTimer: Timer?
+
+    /// Moves the bottom edge to `frame` over a fifth of a second, frame by
+    /// frame, always ending exactly there; a new target takes over smoothly.
+    private func animate(to frame: NSRect) {
+        resizeTimer?.invalidate()
+        let start = panel.frame
+        let began = Date()
+        let duration = 0.2
+        resizeTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 120, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                let t = min(1, Date().timeIntervalSince(began) / duration)
+                let eased = 1 - pow(1 - t, 3)
+                let height = start.height + (frame.height - start.height) * eased
+                self.panel.setFrame(
+                    NSRect(x: frame.minX, y: frame.maxY - height, width: frame.width, height: height), display: true)
+                if t >= 1 {
+                    self.resizeTimer?.invalidate()
+                    self.resizeTimer = nil
+                }
+            }
+        }
+        RunLoop.main.add(resizeTimer!, forMode: .common)
+    }
 
     init(model: AppModel, anchor: NSStatusBarButton) {
         self.model = model
@@ -67,6 +94,8 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     var isVisible: Bool { panel.isVisible }
+    /// True while the window is still moving to its new height.
+    var isResizing: Bool { resizeTimer != nil }
     var window: NSPanel { panel }
 
     /// When a click outside last closed the panel. A click on the menu-bar
@@ -109,7 +138,8 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self, event.window === panel else { return event }
-            if event.keyCode == 53 {  // Escape
+            // Escape while renaming puts the old name back instead of closing.
+            if event.keyCode == 53, !model.renaming {  // Escape
                 MainActor.assumeIsolated { self.close() }
                 return nil
             }
@@ -156,14 +186,12 @@ final class PanelController: NSObject, NSWindowDelegate {
         let frame = NSRect(x: x, y: top - size.height, width: size.width, height: size.height)
         // A change of page moves the bottom edge smoothly; the top stays put
         // and the content, laid out from the top, never moves.
+        targetFrame = frame
+        if !animated { resizeTimer?.invalidate() }
         guard animated, panel.isVisible, abs(panel.frame.height - frame.height) > 0.5,
             abs(panel.frame.maxY - frame.maxY) < 1
         else { return panel.setFrame(frame, display: true) }
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.2
-            context.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0.9, 0.25, 1)
-            panel.animator().setFrame(frame, display: true)
-        }
+        animate(to: frame)
     }
 }
 

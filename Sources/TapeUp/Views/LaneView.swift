@@ -24,35 +24,46 @@ struct LaneView: View {
     var body: some View {
         HStack(spacing: 0) {
             Image(systemName: on ? symbol : (symbol.hasPrefix("mic") ? "mic.slash" : "speaker.slash"))
-                .font(.system(size: 12, weight: .medium))
+                .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(on ? Color.secondary : Color.secondary.opacity(0.6))
                 .frame(width: Style.textEdge - Style.inset, alignment: .leading)
-            if !on {
-                Text("\(label) off").font(.system(size: 12)).foregroundStyle(.secondary)
-            } else if access == .denied {
-                LinkButton("Allow access", action: allow).padding(.leading, -6)
-            } else {
-                Text(device)
-                    .font(.system(size: 12, weight: .medium))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .id(device)
-                    .transition(.push(from: .bottom))
+            // What it is, in plain words, over where it comes from now.
+            VStack(alignment: .leading, spacing: 1) {
+                Text(label)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(on ? .primary : .secondary)
+                Group {
+                    if !on {
+                        Text("Off")
+                    } else if access == .denied {
+                        Text("Needs access · click to allow").foregroundStyle(Color.accentColor)
+                    } else {
+                        Text(device)
+                            .truncationMode(.middle)
+                            .id(device)
+                            .transition(.push(from: .bottom))
+                    }
+                }
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
             }
             Spacer(minLength: 8)
             // The meter has a place of its own in the row, so nothing moves
             // when listening starts; it is empty until there is something to show.
             LevelBars(levels: Array(levels.suffix(13)), tint: recording ? Style.red : .accentColor)
-                .frame(width: 48, height: 16)
+                .frame(width: 44, height: 16)
                 .opacity(live && on ? 1 : 0)
                 .animation(.easeOut(duration: 0.2), value: live && on)
                 .padding(.trailing, 8)
             MiniSwitch(on: on, refused: refused)
                 .opacity(recording ? 0.35 : 1)
         }
-        .frame(height: 26)
+        .frame(height: 36)
         .padding(.horizontal, 6)
-        .background(hovering && !recording ? Style.fill : .clear, in: .rect(cornerRadius: 6, style: .continuous))
+        .background(
+            hovering && !recording ? Style.fill : .clear, in: .rect(cornerRadius: Style.corner, style: .continuous)
+        )
         .padding(.horizontal, -6)
         .contentShape(.rect)
         .onHover { hovering = $0 }
@@ -68,6 +79,7 @@ struct LaneView: View {
 
     private var help: String {
         if recording { return label }
+        if on && access == .denied { return "Open Privacy & Security to allow \(label.lowercased())" }
         if on && !canTurnOff { return "One source must stay on" }
         return on ? "Don't record \(label.lowercased())" : "Record \(label.lowercased())"
     }
@@ -75,7 +87,9 @@ struct LaneView: View {
     /// The whole row is the switch. The last source on refuses with a shake.
     private func tap() {
         guard !recording else { return }
-        if on && !canTurnOff {
+        if on && access == .denied {
+            allow()
+        } else if on && !canTurnOff {
             withAnimation(.linear(duration: 0.3)) { refused += 1 }
         } else {
             toggle()
@@ -83,7 +97,7 @@ struct LaneView: View {
     }
 }
 
-/// A small flat on/off switch: the familiar shape that says "this turns off".
+/// A flat on/off switch: the familiar shape that says "this turns off".
 struct MiniSwitch: View {
     let on: Bool
     /// Bumped when a change is refused; the switch shakes.
@@ -92,9 +106,9 @@ struct MiniSwitch: View {
     var body: some View {
         Capsule()
             .fill(on ? Color.accentColor : Color.primary.opacity(0.18))
-            .frame(width: 26, height: 15)
+            .frame(width: 32, height: 19)
             .overlay(alignment: on ? .trailing : .leading) {
-                Circle().fill(.white).frame(width: 11, height: 11).padding(2)
+                Circle().fill(.white).frame(width: 15, height: 15).padding(2)
                     .shadow(color: .black.opacity(0.15), radius: 0.5, y: 0.5)
             }
             .animation(.snappy(duration: 0.2), value: on)

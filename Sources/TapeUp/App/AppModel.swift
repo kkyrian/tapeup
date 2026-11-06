@@ -274,12 +274,13 @@ final class AppModel {
             try? RecordingLibrary.save(people: pending.people, in: folder)
             pendingPeople = nil
         }
+        var saved = folder
         if let pending = pendingTitle, pending.folder == folder {
-            try? RecordingLibrary.save(title: pending.title, in: folder)
+            saved = (try? RecordingLibrary.save(title: pending.title, in: folder)) ?? folder
             pendingTitle = nil
         }
         reload()
-        if var card, card.entry.folder == folder, let entry = RecordingLibrary.entry(at: folder) {
+        if var card, card.entry.folder == folder, let entry = RecordingLibrary.entry(at: saved) {
             card.entry = entry
             card.finishing = false
             self.card = card
@@ -640,6 +641,9 @@ final class AppModel {
     }
 
     /// Names the open recording; the folder keeps its dated name.
+    /// True while the card's title is being edited.
+    var renaming = false
+
     func setTitle(_ title: String) {
         guard var card else { return }
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -650,7 +654,8 @@ final class AppModel {
             return
         }
         do {
-            try RecordingLibrary.save(title: trimmed, in: card.entry.folder)
+            let folder = try RecordingLibrary.save(title: trimmed, in: card.entry.folder)
+            if let entry = RecordingLibrary.entry(at: folder) { self.card?.entry = entry }
             reload()
         } catch {
             problem = "Could not save the title: \(error.localizedDescription)"
