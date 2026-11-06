@@ -4,7 +4,7 @@ import SwiftUI
 /// Shared measures and the flat controls every view uses: solid fills, no
 /// gradients, no shadows, hover by a slightly stronger fill.
 enum Style {
-    static let width: CGFloat = 300
+    static let width: CGFloat = 312
     /// The content edge; icons sit in a column from here to `textEdge`.
     static let inset: CGFloat = 12
     /// Where text starts beside an icon column.
@@ -72,6 +72,60 @@ struct IconButton: View {
                 .contentShape(.rect)
         }
         .buttonStyle(Pressable())
+        .onHover { hovering = $0 }
+        .help(help)
+        .accessibilityLabel(help)
+    }
+}
+
+/// A text-only action, such as Undo or Paste answer: accent text that
+/// gains a fill on hover, like every other clickable thing.
+struct LinkButton: View {
+    let title: String
+    let action: () -> Void
+    @State private var hovering = false
+
+    init(_ title: String, action: @escaping () -> Void) {
+        self.title = title
+        self.action = action
+    }
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Color.accentColor)
+                .padding(.horizontal, 6)
+                .frame(height: 22)
+                .background(hovering ? Style.fill : .clear, in: .rect(cornerRadius: 5, style: .continuous))
+                .contentShape(.rect)
+        }
+        .buttonStyle(Pressable())
+        .onHover { hovering = $0 }
+    }
+}
+
+/// The ··· menu button, with the same hover fill as the icon buttons.
+struct MoreButton<Items: View>: View {
+    let help: String
+    @ViewBuilder let items: Items
+    @State private var hovering = false
+
+    var body: some View {
+        Menu {
+            items
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 24, height: 24)
+                .contentShape(.rect)
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .background(hovering ? Style.fillHover : .clear, in: .rect(cornerRadius: 24 * 0.28, style: .continuous))
         .onHover { hovering = $0 }
         .help(help)
         .accessibilityLabel(help)

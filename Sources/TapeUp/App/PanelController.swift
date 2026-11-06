@@ -62,7 +62,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         resized = { [weak self] height in
             guard let self, abs(height - contentHeight) > 0.5 else { return }
             contentHeight = height
-            if isVisible { position() }
+            if isVisible { position(animated: true) }
         }
     }
 
@@ -135,7 +135,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     /// With several displays each menu bar shows the item, but the button
     /// reports only one of them, so the panel goes to the display under the
     /// pointer, at the same distance from its right edge.
-    func position() {
+    func position(animated: Bool = false) {
         guard let button = anchor, let window = button.window, let home = window.screen ?? NSScreen.main else {
             return
         }
@@ -153,8 +153,17 @@ final class PanelController: NSObject, NSWindowDelegate {
         var x = screen.frame.maxX - fromRight - size.width / 2
         x = min(max(x, visible.minX + 8), visible.maxX - size.width - 8)
         let top = screen.frame.maxY - belowTop - 6
-        panel.setFrame(NSRect(x: x, y: top - size.height, width: size.width, height: size.height), display: true)
-        panel.contentView?.frame = NSRect(origin: .zero, size: size)
+        let frame = NSRect(x: x, y: top - size.height, width: size.width, height: size.height)
+        // A change of page moves the bottom edge smoothly; the top stays put
+        // and the content, laid out from the top, never moves.
+        guard animated, panel.isVisible, abs(panel.frame.height - frame.height) > 0.5,
+            abs(panel.frame.maxY - frame.maxY) < 1
+        else { return panel.setFrame(frame, display: true) }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.2
+            context.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0.9, 0.25, 1)
+            panel.animator().setFrame(frame, display: true)
+        }
     }
 }
 

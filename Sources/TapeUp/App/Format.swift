@@ -11,6 +11,17 @@ enum Format {
             : String(format: "%d:%02d", m, s)
     }
 
+    /// A recording's length in words, so it never reads as a time of day:
+    /// "3 sec", "42 min", "1 hr 12 min".
+    static func length(_ seconds: TimeInterval) -> String {
+        let total = max(0, Int(seconds.rounded()))
+        if total < 60 { return "\(total) sec" }
+        let minutes = Int((Double(total) / 60).rounded())
+        if minutes < 60 { return "\(minutes) min" }
+        let (h, m) = (minutes / 60, minutes % 60)
+        return m == 0 ? "\(h) hr" : "\(h) hr \(m) min"
+    }
+
     static func spokenDuration(_ seconds: TimeInterval) -> String {
         let formatter = DateComponentsFormatter()
         formatter.unitsStyle = .full

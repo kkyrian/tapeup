@@ -46,7 +46,7 @@ struct CardView: View {
                         Image(systemName: "checkmark").font(.system(size: 9, weight: .bold)).foregroundStyle(.green)
                         Text("Saved ·")
                     }
-                    Text("\(Format.when(card.entry.started)) · \(Format.duration(card.entry.duration))")
+                    Text("\(Format.when(card.entry.started)) · \(Format.length(card.entry.duration))")
                         .monospacedDigit()
                 }
                 .font(.system(size: 11))
@@ -55,20 +55,9 @@ struct CardView: View {
             }
             Spacer(minLength: 0)
             if !card.finishing {
-                Menu {
+                MoreButton(help: "More") {
                     Button("Move to Trash", role: .destructive) { model.trash(card.entry) }
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 24, height: 24)
-                        .contentShape(.rect)
                 }
-                .menuStyle(.button)
-                .buttonStyle(.plain)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .help("More")
             }
         }
     }

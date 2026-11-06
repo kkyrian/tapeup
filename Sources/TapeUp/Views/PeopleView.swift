@@ -24,14 +24,15 @@ struct PeopleView: View {
             }
 
             if hasList {
-                HStack(spacing: 10) {
+                HStack(spacing: 2) {
                     // A notice takes the label's place, so nothing moves.
                     if model.peopleNotice == nil || copied {
-                        Text(copied ? "Waiting for your AI…" : "Update from your AI")
+                        Text(copied ? "Waiting…" : "From your AI")
                             .font(.system(size: 12))
                             .foregroundStyle(.secondary)
+                            .lineLimit(1)
                     } else {
-                        status.lineLimit(1)
+                        status.lineLimit(1).help(longNotice)
                     }
                     Spacer(minLength: 0)
                     textButton(copied ? "Copied" : "Copy request", action: model.copyAssistantPrompt)
@@ -73,13 +74,15 @@ struct PeopleView: View {
     }
 
     private func textButton(_ title: String, action: @escaping () -> Void) -> some View {
-        Button(title, action: action)
-            .buttonStyle(.plain)
-            .font(.system(size: 12, weight: .medium))
-            .foregroundStyle(Color.accentColor)
+        LinkButton(title, action: action)
     }
 
     private var copied: Bool { model.peopleNotice == .copied }
+
+    private var longNotice: String {
+        model.peopleNotice == .pasteFailed
+            ? "No list on the clipboard. Copy the assistant's whole answer, then paste again." : ""
+    }
 
     @ViewBuilder private var status: some View {
         switch model.peopleNotice {
@@ -95,7 +98,7 @@ struct PeopleView: View {
             noticeLine(
                 count == 0 ? "Updated" : "\(count) added", failed: false)
         case .pasteFailed:
-            noticeLine("No list on the clipboard. Copy the assistant's whole answer, then paste again.", failed: true)
+            noticeLine(hasList ? "Nothing to paste" : longNotice, failed: true)
         case nil:
             EmptyView()
         }

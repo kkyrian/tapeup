@@ -18,25 +18,19 @@ struct LaneView: View {
     let toggle: () -> Void
     let allow: () -> Void
 
+    @State private var refused = 0
+    @State private var hovering = false
+
     var body: some View {
         HStack(spacing: 0) {
-            SourceSwitch(
-                symbol: on ? symbol : (symbol.hasPrefix("mic") ? "mic.slash.fill" : "speaker.slash.fill"),
-                on: on, enabled: !recording && (!on || canTurnOff), toggle: toggle,
-                help: recording
-                    ? label
-                    : !on
-                        ? "Record \(label.lowercased())"
-                        : canTurnOff ? "Don't record \(label.lowercased())" : "One source must stay on"
-            )
-            .frame(width: Style.textEdge - Style.inset, alignment: .leading)
+            Image(systemName: on ? symbol : (symbol.hasPrefix("mic") ? "mic.slash" : "speaker.slash"))
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(on ? Color.secondary : Color.secondary.opacity(0.6))
+                .frame(width: Style.textEdge - Style.inset, alignment: .leading)
             if !on {
                 Text("\(label) off").font(.system(size: 12)).foregroundStyle(.secondary)
             } else if access == .denied {
-                Button("Allow access to \(label.lowercased())", action: allow)
-                    .buttonStyle(.plain)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.orange)
+                LinkButton("Allow access", action: allow).padding(.leading, -6)
             } else {
                 Text(device)
                     .font(.system(size: 12, weight: .medium))
@@ -48,45 +42,78 @@ struct LaneView: View {
             Spacer(minLength: 8)
             // The meter has a place of its own in the row, so nothing moves
             // when listening starts; it is empty until there is something to show.
-            LevelBars(levels: Array(levels.suffix(18)), tint: recording ? Style.red : .accentColor)
-                .frame(width: 72, height: 16)
+            LevelBars(levels: Array(levels.suffix(13)), tint: recording ? Style.red : .accentColor)
+                .frame(width: 48, height: 16)
                 .opacity(live && on ? 1 : 0)
                 .animation(.easeOut(duration: 0.2), value: live && on)
+                .padding(.trailing, 8)
+            MiniSwitch(on: on, refused: refused)
+                .opacity(recording ? 0.35 : 1)
         }
-        .frame(height: 24)
+        .frame(height: 26)
+        .padding(.horizontal, 6)
+        .background(hovering && !recording ? Style.fill : .clear, in: .rect(cornerRadius: 6, style: .continuous))
+        .padding(.horizontal, -6)
+        .contentShape(.rect)
+        .onHover { hovering = $0 }
+        .onTapGesture(perform: tap)
+        .help(help)
         .animation(.snappy(duration: 0.3), value: device)
-        .accessibilityElement(children: .contain)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(label)
+        .accessibilityValue(on ? (access == .denied ? "On, no access" : "On, \(device)") : "Off")
+        .accessibilityAddTraits(.isToggle)
+        .accessibilityAction(.default, tap)
+    }
+
+    private var help: String {
+        if recording { return label }
+        if on && !canTurnOff { return "One source must stay on" }
+        return on ? "Don't record \(label.lowercased())" : "Record \(label.lowercased())"
+    }
+
+    /// The whole row is the switch. The last source on refuses with a shake.
+    private func tap() {
+        guard !recording else { return }
+        if on && !canTurnOff {
+            withAnimation(.linear(duration: 0.3)) { refused += 1 }
+        } else {
+            toggle()
+        }
     }
 }
 
-/// A round switch in the Control Center idiom: filled when on.
-struct SourceSwitch: View {
-    let symbol: String
+/// A small flat on/off switch: the familiar shape that says "this turns off".
+struct MiniSwitch: View {
     let on: Bool
-    let enabled: Bool
-    let toggle: () -> Void
-    let help: String
-    @State private var hovering = false
+    /// Bumped when a change is refused; the switch shakes.
+    var refused = 0
 
     var body: some View {
-        Button(action: toggle) {
-            Image(systemName: symbol)
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(on ? Color.white : Color.secondary)
-                .frame(width: 22, height: 22)
-                .background(
-                    on
-                        ? Color.accentColor.opacity(hovering && enabled ? 0.85 : 1)
-                        : (hovering && enabled ? Style.fillHover : Style.fill),
-                    in: .circle
-                )
-                .contentShape(.circle)
-        }
-        .buttonStyle(Pressable())
-        .allowsHitTesting(enabled)
-        .onHover { hovering = $0 }
-        .help(help)
-        .accessibilityValue(on ? "On" : "Off")
+        Capsule()
+            .fill(on ? Color.accentColor : Color.primary.opacity(0.18))
+            .frame(width: 26, height: 15)
+            .overlay(alignment: on ? .trailing : .leading) {
+                Circle().fill(.white).frame(width: 11, height: 11).padding(2)
+                    .shadow(color: .black.opacity(0.15), radius: 0.5, y: 0.5)
+            }
+            .animation(.snappy(duration: 0.2), value: on)
+            .modifier(Shake(amount: refused))
+            .accessibilityHidden(true)
+    }
+}
+
+struct Shake: GeometryEffect {
+    var amount: Int
+    var animatableData: CGFloat
+
+    init(amount: Int) {
+        self.amount = amount
+        animatableData = CGFloat(amount)
+    }
+
+    func effectValue(size: CGSize) -> ProjectionTransform {
+        ProjectionTransform(CGAffineTransform(translationX: 3 * sin(animatableData * .pi * 4), y: 0))
     }
 }
 

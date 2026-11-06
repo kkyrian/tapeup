@@ -26,13 +26,10 @@ struct RecentView: View {
                 // Undo takes the header's place, so the list never shifts.
                 if model.trashed != nil {
                     Text("Moved to the Trash").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
-                    Button("Undo", action: model.undoTrash)
-                        .buttonStyle(.plain)
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(Color.accentColor)
-                        .padding(.leading, 6)
-                } else if !model.recent.isEmpty {
-                    SectionLabel(text: "Recent")
+                    LinkButton("Undo", action: model.undoTrash)
+                } else if let first = days.first {
+                    // The first day names the list; no "Recent" above "Today".
+                    SectionLabel(text: first.day)
                 }
                 Spacer()
                 IconButton(symbol: "folder", help: "Open recordings folder", action: model.openRoot)
@@ -44,13 +41,12 @@ struct RecentView: View {
 
             VStack(alignment: .leading, spacing: 0) {
                 let groups = days
-                ForEach(groups, id: \.day) { group in
-                    if groups.count > 1 || group.day != "Today" {
-                        Text(group.day)
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(.tertiary)
+                ForEach(Array(groups.enumerated()), id: \.element.day) { index, group in
+                    if index > 0 || model.trashed != nil {
+                        SectionLabel(text: group.day)
                             .padding(.horizontal, 6)
-                            .padding(.top, 4)
+                            .padding(.top, 8)
+                            .padding(.bottom, 2)
                     }
                     ForEach(group.entries) { entry in
                         RecentRow(entry: entry, model: model)
@@ -86,17 +82,24 @@ struct RecentRow: View {
                 }
             }
             Spacer(minLength: 4)
-            if hovering || copied {
+            // One fixed slot: the length at rest, the actions on hover, so
+            // the title never narrows as the pointer passes.
+            ZStack(alignment: .trailing) {
+                Text(Format.length(entry.duration))
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+                    .opacity(hovering || copied ? 0 : 1)
                 HStack(spacing: 0) {
-                    IconButton(symbol: "trash", help: "Move to Trash", size: 22) { model.trash(entry) }
-                    IconButton(symbol: "folder", help: "Show in Finder", size: 22) { model.reveal(entry) }
                     IconButton(symbol: copied ? "checkmark" : "doc.on.doc", help: "Copy path", size: 22, action: copy)
+                    IconButton(symbol: "folder", help: "Show in Finder", size: 22) { model.reveal(entry) }
+                    IconButton(symbol: "trash", help: "Move to Trash", size: 22) { model.trash(entry) }
                 }
-                .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
+                .opacity(hovering || copied ? 1 : 0)
+                .allowsHitTesting(hovering || copied)
             }
-            Text(Format.duration(entry.duration))
-                .font(.system(size: 12).monospacedDigit())
-                .foregroundStyle(.secondary)
+            .frame(width: 68, alignment: .trailing)
+            .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
+            .animation(.easeOut(duration: 0.12), value: hovering)
         }
         .padding(.horizontal, 6)
         .padding(.vertical, 6)
@@ -146,7 +149,7 @@ struct MoreMenu: View {
     @Bindable var model: AppModel
 
     var body: some View {
-        Menu {
+        MoreButton(help: "TapeUp") {
             Button("People…", action: model.openPeople)
             Button("Change Recordings Folder…") { FolderChooser.choose(model: model) }
                 .disabled(model.phase != .idle)
@@ -155,19 +158,7 @@ struct MoreMenu: View {
             Divider()
             Button("Quit TapeUp") { NSApp.terminate(nil) }
                 .keyboardShortcut("q")
-        } label: {
-            Image(systemName: "ellipsis")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .frame(width: 24, height: 24)
-                .contentShape(.rect)
         }
-        .menuStyle(.button)
-        .buttonStyle(.plain)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .help("TapeUp")
-        .accessibilityLabel("TapeUp menu")
     }
 
     private var launchAtLogin: Binding<Bool> {

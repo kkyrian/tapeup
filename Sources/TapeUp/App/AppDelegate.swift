@@ -144,6 +144,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let button = statusItem.button else { return }
         switch model.phase {
         case .idle:
+            statusItem.length = NSStatusItem.variableLength
             button.image = Self.glyph
             button.attributedTitle = NSAttributedString()
             button.imagePosition = .imageOnly
@@ -159,6 +160,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let font = NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .medium)
             let text = " " + Format.duration(model.elapsed)
             button.attributedTitle = NSAttributedString(string: text, attributes: [.font: font])
+            // A fixed width per hour of length, so the menu bar does not
+            // shift as the seconds tick or at ten minutes.
+            let widest = " " + (model.elapsed >= 3600 ? "00:00:00" : "00:00")
+            let textWidth = ceil((widest as NSString).size(withAttributes: [.font: font]).width)
+            statusItem.length = textWidth + 22
             button.setAccessibilityLabel(
                 "TapeUp, \(model.paused ? "paused" : "recording"), \(Format.spokenDuration(model.elapsed))")
         }
