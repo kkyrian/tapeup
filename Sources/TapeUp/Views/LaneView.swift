@@ -32,21 +32,17 @@ struct LaneView: View {
                 Text(label)
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(on ? .primary : .secondary)
-                Group {
-                    if !on {
-                        Text("Off")
-                    } else if access == .denied {
-                        Text("Needs access · click to allow").foregroundStyle(Color.accentColor)
-                    } else {
-                        Text(device)
-                            .truncationMode(.middle)
-                            .id(device)
-                            .transition(.push(from: .bottom))
-                    }
-                }
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
+                // Turning it on or off rolls the words, as on the Transcript
+                // row; a device switch pushes the new name up.
+                Text(subtitle)
+                    .font(.system(size: 11))
+                    .foregroundStyle(on && access == .denied ? Color.accentColor : Color.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .contentTransition(.numericText())
+                    .animation(.snappy(duration: 0.2), value: subtitle)
+                    .id(device)
+                    .transition(.push(from: .bottom))
             }
             Spacer(minLength: 8)
             // The meter has a place of its own in the row, so nothing moves
@@ -75,6 +71,11 @@ struct LaneView: View {
         .accessibilityValue(on ? (access == .denied ? "On, no access" : "On, \(device)") : "Off")
         .accessibilityAddTraits(.isToggle)
         .accessibilityAction(.default, tap)
+    }
+
+    private var subtitle: String {
+        if !on { return "Off" }
+        return access == .denied ? "Needs access · click to allow" : device
     }
 
     private var help: String {
