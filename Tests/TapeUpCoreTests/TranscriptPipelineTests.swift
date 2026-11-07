@@ -355,6 +355,29 @@ struct SpeakerLabelsTests {
         #expect(text.contains("[00:40] Anyone?"))
     }
 
+    @Test func namingAVoiceRewritesTheLabeledTranscript() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try MetaFile.update(folder) { $0["status"] = "recorded" }
+        try TranscriptDocument.save(lines: lines, failures: 0, pieces: 4, model: .large, in: folder)
+        let assigned: [Int?] = [2, 1, 2, nil]
+        let result = SpeakerResult(
+            count: 2, estimated: true, voices: SpeakerLabels.voices(lines: lines, assigned: assigned),
+            assigned: assigned)
+        try SpeakerLabels.save(result, lines: lines, in: folder)
+        try SpeakerLabels.name(2, "Mei Lin", in: folder)
+        let text = try String(contentsOf: folder.appendingPathComponent(SpeakerLabels.fileName), encoding: .utf8)
+        #expect(text.contains("Mei Lin: Hello there."))
+        #expect(text.contains("Voice 1: I have been"))
+        #expect(text.contains("with Qwen3-ASR 1.7B"))
+        let labels = try #require(MetaFile.read(folder)?["speaker_labels"] as? [String: Any])
+        #expect(labels["status"] as? String == "done")
+        #expect(labels["names"] as? [String] == ["Mei Lin"])
+        #expect(
+            try String(contentsOf: folder.appendingPathComponent("transcript.md"), encoding: .utf8).contains("Hello"))
+    }
+
     @Test func linesAreKeptForLabelsLater() throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)

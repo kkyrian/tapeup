@@ -14,7 +14,7 @@ public struct VoiceTurn: Sendable, Equatable {
 }
 
 /// One voice as the card shows it: how long it talked and something it said.
-public struct Voice: Sendable, Equatable, Identifiable {
+public struct Voice: Sendable, Equatable, Identifiable, Codable {
     /// 1 for the voice that talked most, then in order of talk time.
     public var id: Int
     public var seconds: Double
@@ -77,5 +77,73 @@ public enum SpeakerLabels {
             text += "\n[\(TranscriptDocument.stamp(line.start, long: long))] \(speaker)\(line.text)\n"
         }
         return text
+    }
+}
+
+/// A recording's speaker labels: what the model found and the names the
+/// user gave. Kept hidden beside the labeled transcript so a rename rewrites
+/// it without running the model again.
+public struct SpeakerResult: Sendable, Equatable, Codable {
+    /// Voices asked for with a tapped count, or estimated without one.
+    public var count: Int
+    public var estimated: Bool
+    public var voices: [Voice]
+    /// Each transcript line's voice, in line order.
+    public var assigned: [Int?]
+    public var names: [Int: String] = [:]
+
+    public init(count: Int, estimated: Bool, voices: [Voice], assigned: [Int?]) {
+        self.count = count
+        self.estimated = estimated
+        self.voices = voices
+        self.assigned = assigned
+    }
+}
+
+extension SpeakerLabels {
+    static let resultFileName = ".speakers.json"
+
+    public static func result(in folder: URL) -> SpeakerResult? {
+        guard let data = try? Data(contentsOf: folder.appendingPathComponent(resultFileName)) else { return nil }
+        return try? JSONDecoder().decode(SpeakerResult.self, from: data)
+    }
+
+    /// Writes the labeled transcript and records it in `meta.json`.
+    public static func save(_ result: SpeakerResult, lines: [TranscriptLine], in folder: URL) throws {
+        let meta = MetaFile.read(folder) ?? [:]
+        let model = (meta["transcript"] as? [String: Any])?["model"] as? String ?? "Qwen3-ASR"
+        let text = render(lines: lines, assigned: result.assigned, names: result.names, model: model)
+        try text.write(to: folder.appendingPathComponent(fileName), atomically: true, encoding: .utf8)
+        try JSONEncoder().encode(result).write(to: folder.appendingPathComponent(resultFileName), options: .atomic)
+        try mark("done", in: folder) { labels in
+            labels["file"] = fileName
+            labels["voices"] = result.count
+            labels["voices_estimated"] = result.estimated
+            labels["names"] = result.voices.compactMap { result.names[$0.id] }
+        }
+    }
+
+    /// Records how far speaker labels have got: `finding`, `done` or `failed`.
+    public static func mark(
+        _ status: String, error: String? = nil, in folder: URL, _ more: (inout [String: Any]) -> Void = { _ in }
+    ) throws {
+        guard FileManager.default.fileExists(atPath: MetaFile.url(in: folder).path) else {
+            throw CocoaError(.fileNoSuchFile)
+        }
+        try MetaFile.update(folder) { meta in
+            var labels: [String: Any] = ["status": status]
+            if let error { labels["error"] = error }
+            more(&labels)
+            meta["speaker_labels"] = labels
+        }
+    }
+
+    /// Gives a voice a name, or takes it away, and rewrites the labeled transcript.
+    public static func name(_ voice: Int, _ name: String?, in folder: URL) throws {
+        guard var result = result(in: folder), let lines = TranscriptDocument.lines(in: folder) else {
+            throw CocoaError(.fileNoSuchFile)
+        }
+        result.names[voice] = name
+        try save(result, lines: lines, in: folder)
     }
 }
