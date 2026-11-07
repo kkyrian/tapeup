@@ -49,7 +49,10 @@ struct CardView: View {
                 symbol: card.justRecorded ? "xmark" : "chevron.left", help: card.justRecorded ? "Close" : "Back",
                 action: model.closeCard
             )
-            .padding(.trailing, 6)
+            // The chevron sits in the icon column and the title on the text
+            // edge, as on every page.
+            .padding(.leading, -6)
+            .frame(width: Style.textEdge - Style.inset, alignment: .leading)
             TitleField(entry: card.entry, model: model) {
                 HStack(spacing: 4) {
                     if card.finishing {
@@ -69,6 +72,7 @@ struct CardView: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
             }
+            .padding(.leading, -6)
             if !card.finishing {
                 IconButton(symbol: "trash", help: "Move to Trash") { model.trash(card.entry) }
                     .padding(.leading, 4)

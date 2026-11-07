@@ -9,32 +9,28 @@ struct SettingsView: View {
     private var agents: Agents { model.agents }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 0) {
-                IconButton(symbol: "chevron.left", help: "Back", action: model.closeSettings)
-                    .frame(width: Style.textEdge - Style.inset, alignment: .leading)
-                Text("Settings").font(.system(size: 13, weight: .semibold))
-                Spacer()
-            }
-            .padding(.bottom, 4)
+        VStack(alignment: .leading, spacing: 2) {
+            PageHeader(title: "Settings", back: model.closeSettings)
 
             section("Recordings")
             SettingRow(
-                symbol: "folder", title: "Recordings folder",
-                subtitle: (model.root.path as NSString).abbreviatingWithTildeInPath
+                symbol: "folder", title: "Folder", subtitle: (model.root.path as NSString).abbreviatingWithTildeInPath,
+                action: canMoveFolder ? { FolderChooser.choose(model: model) } : nil
             ) {
-                LinkButton("Change…") { FolderChooser.choose(model: model) }
-                    .disabled(!canMoveFolder)
+                // The whole row changes it; the word only says so.
+                Text("Change…")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Color.accentColor)
                     .opacity(canMoveFolder ? 1 : 0.4)
-                    .hoverHelp(canMoveFolder ? "Choose another folder" : "Stop recording first")
             }
+            .hoverHelp(canMoveFolder ? "Choose another folder" : "Stop recording first")
 
             section("Your AI")
             Text(Agents.caption)
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.bottom, 2)
+                .lineLimit(1)
+                .padding(.bottom, 4)
             SettingRow(
                 symbol: agents.chosen == nil ? "largecircle.fill.circle" : "circle",
                 markColor: agents.chosen == nil ? .accentColor : .secondary, title: "Off",
@@ -66,11 +62,7 @@ struct SettingsView: View {
     }
 
     private func section(_ title: String) -> some View {
-        Text(title)
-            .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(.secondary)
-            .padding(.top, 10)
-            .padding(.bottom, 2)
+        SectionLabel(text: title).padding(.top, 12).padding(.bottom, 4)
     }
 
     /// One agent on one line: picked or not on the left, its state on the
@@ -93,15 +85,17 @@ struct SettingsView: View {
         ) {
             Group {
                 if state == .checking || waiting {
-                    ProgressView().controlSize(.mini)
+                    ProgressView().controlSize(.small).scaleEffect(0.7).frame(width: 16, height: 16)
                 } else if state == .signedIn {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 14))
+                    // Quiet beside the accent radio, which alone says which is on.
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(.green)
+                        .frame(width: 16, height: 16)
                 } else if state == .signedOut {
-                    LinkButton("Sign In") { agents.signIn(kind) }
+                    LinkButton("Sign in") { agents.signIn(kind) }.padding(.trailing, -6)
                 } else {
-                    LinkButton("Install") { agents.install(kind) }
+                    LinkButton("Install") { agents.install(kind) }.padding(.trailing, -6)
                 }
             }
             .hoverHelp(status)
@@ -126,7 +120,7 @@ struct SettingRow<Trailing: View>: View {
         HStack(spacing: 0) {
             // The column keeps its width with no mark, so titles line up.
             Image(systemName: symbol ?? "checkmark")
-                .font(.system(size: 12, weight: .semibold))
+                .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(markColor)
                 .opacity(symbol == nil ? 0 : 1)
                 .frame(width: Style.textEdge - Style.inset, alignment: .leading)
@@ -145,7 +139,7 @@ struct SettingRow<Trailing: View>: View {
             Spacer(minLength: 8)
             trailing
         }
-        .frame(height: subtitle == nil ? 30 : 36)
+        .frame(height: subtitle == nil ? 32 : 36)
         .padding(.horizontal, 6)
         .background(
             hovering && action != nil ? Style.fill : .clear,

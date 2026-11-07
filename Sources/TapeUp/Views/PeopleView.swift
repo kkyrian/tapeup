@@ -8,24 +8,26 @@ struct PeopleView: View {
     @State private var filter = ""
     /// The copy-and-paste steps for filling the list from your AI.
     @State private var filling = false
+    /// Decided when the page opens, so the rows never jump while typing.
+    @State private var findShown = false
+    @State private var findHovering = false
     @FocusState private var filterFocused: Bool
 
     private var list: PeopleList { model.peopleList }
 
+    init(model: AppModel) {
+        self.model = model
+        _findShown = State(initialValue: model.peopleList.people.count > 8)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 0) {
-                IconButton(symbol: "chevron.left", help: "Back", action: model.closePeople)
-                    .frame(width: Style.textEdge - Style.inset, alignment: .leading)
-                Text("People").font(.system(size: 13, weight: .semibold))
-                // A notice takes the count's place, so nothing moves.
-                if let notice = shortNotice {
-                    notice.padding(.leading, 8)
-                } else if !list.people.isEmpty {
-                    Text("  \(list.people.count)").font(.system(size: 13).monospacedDigit()).foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 4)
+            PageHeader(title: "People", back: model.closePeople) {
+                // Only notices here, short enough never to be cut.
+                if let notice = shortNotice { notice }
+            } trailing: {
                 LinkButton(filling ? "Done" : "Fill from your AI") { filling.toggle() }
+                    .padding(.trailing, -6)
                     .hoverHelp(filling ? "Hide the steps" : "Have your AI assistant write the list")
             }
             if filling {
@@ -87,8 +89,8 @@ struct PeopleView: View {
         case .pasteFailed where !filling:
             text = "Nothing to paste"
             failed = true
-        case .taken(let name):
-            text = "\(name) is already listed"
+        case .taken:
+            text = "Already listed"
             failed = true
         default: return nil
         }
@@ -96,7 +98,7 @@ struct PeopleView: View {
             HStack(spacing: 4) {
                 Image(systemName: failed ? "exclamationmark.circle.fill" : "checkmark.circle.fill")
                     .foregroundStyle(failed ? Color.orange : Color.green)
-                Text(text).lineLimit(1).truncationMode(.middle)
+                Text(text).lineLimit(1).fixedSize()
             }
             .font(.system(size: 11))
             .task(id: model.peopleNotice) {
@@ -116,17 +118,21 @@ struct PeopleView: View {
 
     private var people: some View {
         VStack(alignment: .leading, spacing: 6) {
-            if list.people.count > 8 {
-                HStack(spacing: 6) {
-                    Image(systemName: "magnifyingglass").font(.system(size: 11)).foregroundStyle(.secondary)
+            if findShown {
+                HStack(spacing: 0) {
+                    RowMark(symbol: "magnifyingglass")
                     TextField("Find", text: $filter)
                         .textFieldStyle(.plain)
-                        .font(.system(size: 12))
+                        .font(.system(size: 13))
                         .focused($filterFocused)
                 }
-                .padding(.horizontal, 8)
-                .frame(height: 28)
-                .background(Style.fill, in: .rect(cornerRadius: 6, style: .continuous))
+                .rowChrome(editing: filterFocused, hovering: findHovering)
+                .onHover { findHovering = $0 }
+                .onTapGesture {
+                    model.focusPanel()
+                    filterFocused = true
+                }
+                .padding(.horizontal, -6)
             }
             ScrollViewReader { scroller in
                 ScrollView {
@@ -144,7 +150,8 @@ struct PeopleView: View {
                     }
                 }
             }
-            .frame(height: min(CGFloat(shown.count + (filter.isEmpty ? 2 : 0)) * 28, 252))
+            // Eight and a half rows: the half row shows the list goes on.
+            .frame(height: min(CGFloat(shown.count + (filter.isEmpty ? 2 : 0)) * 28, 238))
             .padding(.horizontal, -6)
         }
     }
@@ -163,9 +170,8 @@ private struct AddPersonRow: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Image(systemName: "plus")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(Color.accentColor)
+            RowMark(symbol: "plus", color: .accentColor)
+                .padding(.trailing, -6)
             TextField("Add a person", text: $name)
                 .focused($focus, equals: .name)
                 .onSubmit(add)
@@ -180,9 +186,7 @@ private struct AddPersonRow: View {
         .textFieldStyle(.plain)
         .font(.system(size: 13))
         .onExitCommand(perform: clear)
-        .padding(.horizontal, 6)
-        .frame(height: 28)
-        .background(focus != nil ? Style.fill : .clear, in: .rect(cornerRadius: 6, style: .continuous))
+        .rowChrome(editing: focus != nil, hovering: false)
         .animation(.easeOut(duration: 0.15), value: name.isEmpty)
         // While something is typed, Escape clears it instead of closing the panel.
         .onChange(of: name.isEmpty) { _, empty in model.renaming = !empty }
@@ -218,7 +222,8 @@ private struct YouRow: View {
     @FocusState private var focused: Bool
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 0) {
+            RowMark(symbol: "person.crop.circle").hoverHelp("You")
             if editing {
                 TextField("Your name", text: $text)
                     .textFieldStyle(.plain)
@@ -229,11 +234,7 @@ private struct YouRow: View {
                 Text(you ?? "Your name")
                     .foregroundStyle(you == nil ? .tertiary : .primary)
                     .lineLimit(1)
-                if hovering {
-                    Image(systemName: "pencil").font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
-                }
             }
-            Text("you").font(.system(size: 12)).foregroundStyle(.tertiary)
             Spacer(minLength: 4)
         }
         .font(.system(size: 13))
@@ -279,6 +280,7 @@ private struct PersonRow: View {
 
     var body: some View {
         HStack(spacing: 6) {
+            RowMark(symbol: nil).padding(.trailing, -6)
             if editing {
                 TextField("Name", text: $name)
                     .focused($focused)
@@ -343,6 +345,21 @@ private struct PersonRow: View {
     }
 }
 
+/// The icon column every page shares, so names start on the text edge.
+private struct RowMark: View {
+    let symbol: String?
+    var color = Color.secondary
+
+    var body: some View {
+        Image(systemName: symbol ?? "plus")
+            .font(.system(size: 13, weight: .medium))
+            .foregroundStyle(color)
+            .opacity(symbol == nil ? 0 : 1)
+            .frame(width: Style.textEdge - Style.inset, alignment: .leading)
+            .accessibilityHidden(true)
+    }
+}
+
 extension View {
     /// The list rows' padding, height and fill: a field's fill while
     /// editing, the hover fill otherwise.
@@ -350,7 +367,7 @@ extension View {
         padding(.horizontal, 6)
             .frame(height: 28)
             .background(
-                editing ? Style.fill : hovering ? Style.fillHover.opacity(0.6) : .clear,
+                editing || hovering ? Style.fill : .clear,
                 in: .rect(cornerRadius: 6, style: .continuous)
             )
             .contentShape(.rect)

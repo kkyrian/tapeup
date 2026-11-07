@@ -201,6 +201,34 @@ struct Chip: View {
 }
 
 /// A left-aligned section label.
+/// A page's header: the back chevron in the icon column, the title on the
+/// text edge, a short notice beside it, and one action ending on the right edge.
+struct PageHeader<Accessory: View, Trailing: View>: View {
+    let title: String
+    let back: () -> Void
+    @ViewBuilder var accessory: Accessory
+    @ViewBuilder var trailing: Trailing
+
+    var body: some View {
+        HStack(spacing: 0) {
+            IconButton(symbol: "chevron.left", help: "Back", action: back)
+                .padding(.leading, -6)
+                .frame(width: Style.textEdge - Style.inset, alignment: .leading)
+            Text(title).font(.system(size: 13, weight: .semibold))
+            accessory.padding(.leading, 8)
+            Spacer(minLength: 8)
+            trailing
+        }
+        .frame(height: 24)
+    }
+}
+
+extension PageHeader where Accessory == EmptyView, Trailing == EmptyView {
+    init(title: String, back: @escaping () -> Void) {
+        self.init(title: title, back: back, accessory: { EmptyView() }, trailing: { EmptyView() })
+    }
+}
+
 struct SectionLabel: View {
     let text: String
 
