@@ -219,7 +219,10 @@ enum UITest {
             process.standardOutput = pipe
             process.standardError = pipe
             try? process.run()
-            while process.isRunning { settle(0.1) }
+            // A command that started a second app instead would never end.
+            let deadline = Date().addingTimeInterval(60)
+            while process.isRunning && Date() < deadline { settle(0.1) }
+            if process.isRunning { process.terminate() }
             return (
                 process.terminationStatus,
                 String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
@@ -227,7 +230,7 @@ enum UITest {
         }
         if let target = model.recent.first(where: { $0.title == nil && $0.transcript == .none }) {
             let stamp = RecordingLibrary.stamp(of: target.folder)
-            let named = command(["title", stamp, "Budget review"])
+            let named = command(["title", stamp, "Budget", "review"])
             expect(
                 named.status == 0 && named.out.contains("Budget review"),
                 "TapeUp title names a recording (\(named.out))")
@@ -248,6 +251,23 @@ enum UITest {
             expect(
                 folder.out.replacingOccurrences(of: "\\/", with: "/").contains(model.root.path),
                 "TapeUp folder shows this folder (\(folder.out))")
+            for words in [["lists"], ["--version"], ["title", stamp]] {
+                let wrong = command(words)
+                expect(
+                    wrong.status == 2 && wrong.out.contains("usage"),
+                    "TapeUp \(words.joined(separator: " ")) is a usage error, not a second app (\(wrong.out))")
+            }
+            let home = model.root
+            let away = home.deletingLastPathComponent().appendingPathComponent("moved-by-command")
+            let moved = command(["folder", away.path, "--move"])
+            expect(
+                moved.status == 0 && model.root.standardizedFileURL == away.standardizedFileURL
+                    && model.recent.contains { $0.title == "Budget review" },
+                "TapeUp folder --move moves the recordings through the app (\(moved.out))")
+            let back = command(["folder", home.path, "--move"])
+            expect(
+                back.status == 0 && model.root.standardizedFileURL == home.standardizedFileURL,
+                "and back (\(back.out))")
         }
         DistributedNotificationCenter.default().removeObserver(link)
 

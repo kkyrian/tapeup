@@ -437,6 +437,7 @@ extension TranscriptDocument {
         try JSONEncoder().encode(lines).write(to: folder.appendingPathComponent(linesFileName), options: .atomic)
         try RecordingLibrary.markTranscript(
             "done", model: model.name, sideLabels: labeled, missing: failures, in: folder)
+        try? SpeakerLabels.redo(in: folder)
     }
 }
 

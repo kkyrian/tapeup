@@ -175,6 +175,21 @@ struct TranscriptStateTests {
         #expect(!FileManager.default.fileExists(atPath: gone.path))
     }
 
+    @Test func aRecordingIsNamedByStampFolderNameOrPathInThisFolderOnly() throws {
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent("tapeup-test-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: base) }
+        let root = base.appendingPathComponent("here")
+        let folder = root.appendingPathComponent("2026/2026-11-06-1000 Lab sync")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let library = RecordingLibrary(root: root)
+        for name in ["2026-11-06-1000", "2026-11-06-1000 Lab sync", "2026/2026-11-06-1000", folder.path] {
+            #expect(library.recording(name)?.lastPathComponent == folder.lastPathComponent, "\(name)")
+        }
+        // The same stamp in another recordings folder is another recording.
+        #expect(library.recording(base.appendingPathComponent("there/2026/2026-11-06-1000").path) == nil)
+        #expect(library.recording("2026-11-06-1100") == nil)
+    }
+
     @Test func untouchedGuideIsUpgradedAndAnEditedOneKept() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("tapeup-test-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }

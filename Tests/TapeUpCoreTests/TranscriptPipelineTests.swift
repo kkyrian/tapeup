@@ -498,6 +498,29 @@ struct VoiceFoldingTests {
         let one = SpeakerLabels.label(lines: lines, heard: found, count: 1)
         #expect(!one.estimated && one.count == 1 && one.assigned == [1, 1])
     }
+
+    @Test func aTranscriptMadeAgainIsRelabeledAndKeepsNames() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("tapeup-redo-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try JSONSerialization.data(withJSONObject: ["status": "recorded"]).write(
+            to: folder.appendingPathComponent("meta.json"))
+        let found = heard([(0, 100, print(1, 0, 0, 0)), (1, 60, print(0, 1, 0, 0))])
+        try found.save(in: folder)
+        let first = [
+            TranscriptLine(start: 0, end: 90, text: "Hello."), TranscriptLine(start: 100, end: 150, text: "Hi."),
+        ]
+        try TranscriptDocument.save(lines: first, failures: 0, pieces: 2, model: .large, in: folder)
+        try SpeakerLabels.relabel(found, count: nil, in: folder)
+        try SpeakerLabels.name(1, "Priya Shah", in: folder)
+        // Made again with a line more: labels follow without being asked, the name stays.
+        let again = first + [TranscriptLine(start: 152, end: 158, text: "Bye.")]
+        try TranscriptDocument.save(lines: again, failures: 0, pieces: 3, model: .large, in: folder)
+        let result = try #require(SpeakerLabels.result(in: folder))
+        #expect(result.assigned == [1, 2, 2] && result.names == [1: "Priya Shah"])
+        let text = try String(contentsOf: folder.appendingPathComponent(SpeakerLabels.fileName), encoding: .utf8)
+        #expect(text.contains("Bye.") && text.contains("Priya Shah"))
+    }
 }
 
 struct TitleExcerptTests {

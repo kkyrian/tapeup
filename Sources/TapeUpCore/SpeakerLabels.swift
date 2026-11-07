@@ -300,11 +300,25 @@ extension SpeakerLabels {
     public static func relabel(_ heard: VoicePrints, count: Int?, in folder: URL) throws -> SpeakerResult {
         guard let lines = TranscriptDocument.lines(in: folder) else { throw CocoaError(.fileNoSuchFile) }
         var labeled = label(lines: lines, heard: heard, count: count)
-        if let earlier = result(in: folder), earlier.assigned.count == lines.count {
-            labeled.names = carry(earlier.names, from: earlier.assigned, to: labeled.assigned, lines: lines)
+        if let earlier = result(in: folder) {
+            if earlier.assigned.count == lines.count {
+                labeled.names = carry(earlier.names, from: earlier.assigned, to: labeled.assigned, lines: lines)
+            } else if earlier.voices.count == labeled.voices.count {
+                // The transcript was made again: the same voices, numbered by talk time as before.
+                labeled.names = earlier.names
+            }
         }
         try save(labeled, lines: lines, in: folder)
         return labeled
+    }
+
+    /// Labels a transcript made again, when it had speaker labels, with the
+    /// same voices and count.
+    static func redo(in folder: URL) throws {
+        guard let earlier = result(in: folder), let heard = VoicePrints.read(in: folder),
+            (MetaFile.read(folder)?["speaker_labels"] as? [String: Any])?["status"] as? String == "done"
+        else { return }
+        try relabel(heard, count: earlier.estimated ? nil : earlier.count, in: folder)
     }
 
     /// Gives a voice a name, or takes it away, and rewrites the labeled transcript.

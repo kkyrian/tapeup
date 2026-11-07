@@ -169,6 +169,8 @@ final class AppModel {
     private var pendingTitle: (folder: URL, title: String?)?
     /// The folder being recorded or saved; kept out of Recent until it is final.
     private(set) var activeFolder: URL?
+    /// True while recordings move to another folder, so a second move waits.
+    private(set) var movingRecordings = false
     /// The shortcut shown on the buttons, or nil when another app holds it.
     var shortcutLabel: String? = HotKey.recordShortcutLabel
 
@@ -665,6 +667,10 @@ final class AppModel {
             done?("TapeUp is recording; change the folder after it stops.")
             return
         }
+        guard !movingRecordings else {
+            done?("TapeUp is still moving the recordings; try again when it finishes.")
+            return
+        }
         guard destination.standardizedFileURL != root.standardizedFileURL else {
             done?(nil)
             return
@@ -675,10 +681,12 @@ final class AppModel {
             return
         }
         let library = library
+        movingRecordings = true
         Task.detached(priority: .userInitiated) {
             let outcome = Result { try library.move(to: destination) }
             await MainActor.run { [weak self] in
                 guard let self else { return }
+                movingRecordings = false
                 root = destination
                 switch outcome {
                 case .success(let result) where !result.skipped.isEmpty:
@@ -803,25 +811,38 @@ final class AppModel {
 
 extension AppModel {
     /// Answers a `TapeUp` command sent while the app runs, so the work shows
-    /// in the panel and only one model loads. `reply` gets an error message,
-    /// or nil and the folder the command acted on.
-    func handle(_ request: [String: String], reply: @escaping @MainActor @Sendable (String?, URL?) -> Void) {
+    /// in the panel and only one model loads. `reply` gets a refusal, or nil
+    /// and the folder the command acted on.
+    func handle(_ request: [String: String], reply: @escaping @MainActor @Sendable (Refusal?, URL?) -> Void) {
         let command = request["command"] ?? ""
         if command == "folder" {
             let destination = URL(fileURLWithPath: request["value"] ?? root.path)
-            changeRoot(to: destination, moving: request["move"] == "1") { [weak self] problem in
-                reply(problem, self?.root)
+            let moving = request["move"] == "1"
+            changeRoot(to: destination, moving: moving) { [weak self] problem in
+                guard let problem else { return reply(nil, self?.root) }
+                if self?.root.standardizedFileURL == destination.standardizedFileURL {
+                    // The folder changed; some recordings stayed behind.
+                    reply(Refusal("partly_moved", problem, suggestion: "Move or rename them by hand."), self?.root)
+                } else {
+                    reply(Refusal("busy", problem, retryable: true), nil)
+                }
             }
             return
         }
         guard let target = request["recording"], let folder = library.recording(target),
             let entry = RecordingLibrary.entry(at: folder)
         else {
-            reply("No recording \(request["recording"] ?? "") in \(root.path).", nil)
+            reply(
+                Refusal(
+                    "not_found", "No recording \(request["recording"] ?? "") in \(root.path).",
+                    suggestion: "Give its folder, folder name or start time, such as 2026-11-06-1430."), nil)
             return
         }
         guard folder != activeFolder, entry.status != "recording" else {
-            reply("That recording is still running; try again after it stops.", nil)
+            reply(
+                Refusal(
+                    "recording", "That recording is still running.", suggestion: "Try again after it stops.",
+                    retryable: true), nil)
             return
         }
         let stamp = RecordingLibrary.stamp(of: folder)
@@ -832,20 +853,23 @@ extension AppModel {
                 refreshCard(stamp)
                 reply(nil, renamed)
             } catch {
-                reply("Could not save the title: \(error.localizedDescription)", nil)
+                reply(Refusal("write_failed", "Could not save the title: \(error.localizedDescription)"), nil)
             }
         case "transcribe":
             makeTranscript(entry)
             reply(nil, folder)
         case "speakers":
             guard entry.transcript == .done else {
-                reply("That recording has no transcript yet; run transcribe first.", nil)
+                reply(
+                    Refusal(
+                        "no_transcript", "That recording has no transcript yet.",
+                        suggestion: "Run TapeUp transcribe \(stamp) first."), nil)
                 return
             }
             speakers.label(entry, count: request["voices"].flatMap(Int.init))
             reply(nil, folder)
         default:
-            reply("Unknown command \(command).", nil)
+            reply(Refusal("usage", "TapeUp does not know the command \(command)."), nil)
         }
     }
 }
