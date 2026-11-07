@@ -108,6 +108,10 @@ struct LinkButton: View {
 /// The ··· menu button, with the same hover fill as the icon buttons.
 struct MoreButton<Items: View>: View {
     let help: String
+    /// A small dot: something in the menu needs the user.
+    var badge = false
+    /// Runs as the pointer arrives, before the menu can open.
+    var opening: () -> Void = {}
     @ViewBuilder let items: Items
     @State private var hovering = false
 
@@ -119,6 +123,9 @@ struct MoreButton<Items: View>: View {
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(.secondary)
                 .frame(width: 24, height: 24)
+                .overlay(alignment: .topTrailing) {
+                    if badge { Circle().fill(Color.orange).frame(width: 6, height: 6).padding(3) }
+                }
                 .contentShape(.rect)
         }
         .menuStyle(.button)
@@ -126,9 +133,12 @@ struct MoreButton<Items: View>: View {
         .menuIndicator(.hidden)
         .fixedSize()
         .background(hovering ? Style.fillHover : .clear, in: .rect(cornerRadius: 24 * 0.28, style: .continuous))
-        .onHover { hovering = $0 }
+        .onHover {
+            hovering = $0
+            if $0 { opening() }
+        }
         .hoverHelp(help)
-        .accessibilityLabel(help)
+        .accessibilityLabel(badge ? "\(help), needs attention" : help)
     }
 }
 

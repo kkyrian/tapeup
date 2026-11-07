@@ -56,8 +56,10 @@ final class AppModel {
     let transcription: Transcription
     /// Speaker labels, made when asked.
     let speakers: Speakers
-    /// Suggested titles from the on-device model.
+    /// Suggested titles from the user's agent or the on-device model.
     let titles: Titles
+    /// The user's own Claude Code or Codex, when picked in ···.
+    let agents = Agents()
     /// True when the panel was opened by the user and holds the keyboard, so
     /// a field may take the cursor at once. False after a shortcut stop, so
     /// the card never takes typing away from a call.
@@ -191,6 +193,13 @@ final class AppModel {
         transcription.names = { [weak self] in self?.nameHints() }
         speakers.makeRoom = { [weak self] in self?.transcription.releaseIfIdle() ?? true }
         titles.suggested = { [weak self] stamp in self?.refreshCard(stamp) }
+        titles.agents = agents
+        speakers.agents = agents
+        speakers.knownNames = { [weak self] entry in
+            var names = entry.people.names
+            for name in self?.peopleList.allNames ?? [] where !names.contains(name) { names.append(name) }
+            return names
+        }
     }
 
     var isRecording: Bool {

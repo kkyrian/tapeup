@@ -26,6 +26,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if hotKey == nil { model.shortcutLabel = nil }
         renderStatusItem()
         model.recoverLeftovers()
+        model.agents.refresh()
 
         // A menu-bar app that shows nothing on first launch looks broken.
         if !UserDefaults.standard.bool(forKey: "hasLaunched") {
@@ -55,6 +56,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func statusItemClicked() {
+        model.agents.refresh()
         guard NSApp.currentEvent?.type == .rightMouseDown else { return panel.toggle() }
         panel.close()
         statusItem.menu = appMenu()
@@ -90,6 +92,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 guard let self else { return }
                 model.launchAtLogin.toggle()
             })
+        let agent = NSMenuItem(title: "Agent", action: nil, keyEquivalent: "")
+        let agents = NSMenu()
+        agents.autoenablesItems = false
+        let caption = NSMenuItem(title: "Suggests titles and names", action: nil, keyEquivalent: "")
+        caption.isEnabled = false
+        agents.addItem(caption)
+        for row in model.agents.rows {
+            let entry = item(row.title, on: row.checked ? true : nil, row.action)
+            entry.isEnabled = row.enabled
+            agents.addItem(entry)
+        }
+        agent.submenu = agents
+        menu.insertItem(agent, at: 1)
         menu.addItem(.separator())
         menu.addItem(item("Quit TapeUp") { NSApp.terminate(nil) })
         menu.autoenablesItems = false

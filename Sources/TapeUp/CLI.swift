@@ -19,6 +19,9 @@ enum CLI {
           TapeUp speakers <recording> [--voices N]
                                                  label speakers: N voices (people who talked,
                                                  the user included), or estimated without --voices
+          TapeUp agent [off] [--model M] [--effort E]
+                                                 show the agent that suggests titles and names, turn
+                                                 it off, or set its model and effort ("default" resets)
 
         <recording> is a recording's folder, its folder name, or the time it
         starts with (2026-11-06-1430). transcribe and speakers wait until the
@@ -28,10 +31,11 @@ enum CLI {
         works, on stderr with error, message, suggestion and retryable when it
         does not. Usage errors exit 2, other failures 1.
         People are listed in people.json in the recordings folder; edit it directly.
+        The agent is turned on only by the user, in TapeUp's ··· menu under Agent.
 
         """
 
-    static let commands: Set = ["folder", "title", "transcribe", "speakers", "help"]
+    static let commands: Set = ["folder", "title", "transcribe", "speakers", "agent", "help"]
 
     private static var json = false
 
@@ -139,6 +143,51 @@ enum CLI {
             } alone: {
                 speakersAlone(folder, count: voices)
             }
+        case "agent":
+            var changes: [String: String] = [:]
+            for name in ["model", "effort"] {
+                guard let index = rest.firstIndex(of: "--\(name)") else { continue }
+                guard index + 1 < rest.count, !rest[index + 1].hasPrefix("--") else {
+                    fail("usage", "--\(name) takes a value.", suggestion: "Give \"default\" to reset it.")
+                }
+                changes[name.capitalized] = rest[index + 1]
+                rest.removeSubrange(index...(index + 1))
+            }
+            refuseFlags(rest, usage: "TapeUp agent [off] [--model M] [--effort E]")
+            if rest == ["off"] {
+                UserDefaults.standard.removeObject(forKey: "agent")
+            } else if let word = rest.first, rest.count == 1, AgentKind(rawValue: word) != nil || word == "on" {
+                fail(
+                    "needs_user", "Only the user turns the agent on.",
+                    suggestion: "Ask them to pick it in TapeUp's ··· menu, under Agent.")
+            } else if !rest.isEmpty {
+                fail("usage", "TapeUp agent [off] [--model M] [--effort E]", suggestion: "Run TapeUp help.")
+            }
+            guard let kind = Agents.chosen else {
+                if !changes.isEmpty {
+                    fail(
+                        "no_agent", "No agent is on.",
+                        suggestion: "The user picks one in TapeUp's ··· menu, under Agent.")
+                }
+                succeed("Agent: off", ["agent": NSNull()])
+            }
+            for (name, value) in changes {
+                let key = "agent\(name)-\(kind.rawValue)"
+                if value == "default" {
+                    UserDefaults.standard.removeObject(forKey: key)
+                } else {
+                    UserDefaults.standard.set(value, forKey: key)
+                }
+            }
+            let model = Agents.setting("Model", for: kind) ?? (kind == .claude ? "sonnet" : "its own default")
+            let effort = Agents.setting("Effort", for: kind) ?? "low"
+            succeed(
+                "Agent: \(kind.name), model \(model), effort \(effort)",
+                [
+                    "agent": kind.rawValue,
+                    "model": Agents.setting("Model", for: kind) ?? (kind == .claude ? "sonnet" : NSNull()),
+                    "effort": effort,
+                ])
         default:
             fail("usage", "TapeUp has no command \(command).", suggestion: "Run TapeUp help.")
         }

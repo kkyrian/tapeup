@@ -69,7 +69,7 @@ struct CardView: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
             }
-            if let suggestion = card.entry.titleSuggestion, card.entry.title == nil, Titles.available,
+            if let suggestion = card.entry.titleSuggestion, card.entry.title == nil, model.titles.canSuggest,
                 !model.renaming
             {
                 UseButton(help: "Use \u{201C}\(suggestion)\u{201D} as the title", action: model.acceptSuggestedTitle)
@@ -100,7 +100,7 @@ struct TitleField<Subtitle: View>: View {
     @FocusState private var focused: Bool
 
     /// Shown only where the model runs, as SYSTEM.md describes.
-    private var suggestion: String? { Titles.available ? entry.titleSuggestion : nil }
+    private var suggestion: String? { model.titles.canSuggest ? entry.titleSuggestion : nil }
 
     var body: some View {
         // One container, so its modifiers see a single view whether or not

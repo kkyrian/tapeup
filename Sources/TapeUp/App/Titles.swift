@@ -7,14 +7,16 @@ import TapeUpCore
     import FoundationModels
 #endif
 
-/// Suggested titles from Apple's on-device model, where Apple Intelligence
-/// runs (macOS 26 and later). One recording at a time, once per recording;
-/// the suggestion waits in `meta.json` until the user accepts or replaces it.
+/// Suggested titles from the user's agent when one is chosen, otherwise from
+/// Apple's on-device model where Apple Intelligence runs (macOS 26 and
+/// later). One recording at a time, once per recording; the suggestion
+/// waits in `meta.json` until the user accepts or replaces it.
 @MainActor @Observable
 final class Titles {
     var library: RecordingLibrary
     /// A suggestion was saved for this stamp.
     var suggested: (String) -> Void = { _ in }
+    var agents: Agents?
 
     private var queue: [String] = []
     private var running = false
@@ -30,10 +32,13 @@ final class Titles {
         return false
     }()
 
+    /// Whether suggestions are made, and saved ones shown.
+    var canSuggest: Bool { Self.available || agents?.chosen != nil }
+
     /// Suggests a title for a transcribed recording the user has not named.
     func suggest(for entry: RecordingEntry) {
         let stamp = RecordingLibrary.stamp(of: entry.folder)
-        guard Self.available, entry.transcript == .done, entry.title == nil, entry.titleSuggestion == nil,
+        guard canSuggest, entry.transcript == .done, entry.title == nil, entry.titleSuggestion == nil,
             tried.insert(stamp).inserted
         else { return }
         queue.append(stamp)
@@ -56,7 +61,12 @@ final class Titles {
             // Too little said to name; the model would invent a topic.
             let excerpt = TitleExcerpt.make(lines: lines)
             guard excerpt.count >= 40 else { return }
-            guard let title = await Self.make(excerpt: excerpt, people: entry.people.names) else {
+            var title: String?
+            if let agents {
+                title = await Self.ask(agents, excerpt: excerpt, people: entry.people.names, folder: folder)
+            }
+            if title == nil { title = await Self.make(excerpt: excerpt, people: entry.people.names) }
+            guard let title else {
                 // Tried again the next time the card opens.
                 tried.remove(stamp)
                 return
@@ -66,6 +76,46 @@ final class Titles {
             try? RecordingLibrary.save(titleSuggestion: title, in: folder)
             suggested(stamp)
         }
+    }
+
+    /// The agent's title; nil without an agent or when the call fails.
+    private static func ask(_ agents: Agents, excerpt: String, people: [String], folder: URL) async -> String? {
+        var prompt = instructions(people: people)
+        prompt += "\n\nTranscript lines:\n\(excerpt)"
+        let schema: [String: Any] = [
+            "type": "object", "properties": ["title": ["type": "string"]], "required": ["title"],
+            "additionalProperties": false,
+        ]
+        guard let data = await agents.ask("title", prompt: prompt, schema: schema, for: folder),
+            let answer = try? JSONDecoder().decode([String: String].self, from: data)
+        else { return nil }
+        return answer["title"].flatMap(tidy)
+    }
+
+    /// What either model is told: tested on real mixed-language meetings,
+    /// naming the decision or plan, not the field, gave specific titles;
+    /// examples of the user's own titles were copied word for word, so none
+    /// are given.
+    nonisolated static func instructions(people: [String]) -> String {
+        var text = """
+            You name recordings. You are given lines from a transcript of a meeting, lecture or call \
+            recorded on a Mac, in order, with gaps. Name what it is about, specifically: the decision, \
+            plan or question discussed, not just the field. 2 to 6 words, no dates, no quotes, no \
+            trailing period. Always in \(languageName). Reply with the title only.
+            """
+        if !people.isEmpty {
+            text += "\nPeople in this recording besides the user: \(people.joined(separator: ", "))."
+        }
+        return text
+    }
+
+    nonisolated static var language: Locale {
+        Locale.preferredLanguages.first.map { Locale(identifier: $0) } ?? Locale.current
+    }
+
+    nonisolated static var languageName: String {
+        Locale(identifier: "en").localizedString(forLanguageCode: language.language.languageCode?.identifier ?? "en")
+            ?? "English"
     }
 
     /// The model's title, in the Mac's language; nil when it cannot make one.
@@ -101,25 +151,12 @@ final class Titles {
 
     @available(macOS 26, *)
     private enum Generator {
-        /// Tested on real mixed-language meetings: naming the decision or
-        /// plan, not the field, gave specific titles; examples of the user's
-        /// own titles were copied word for word, so none are given.
         static func title(excerpt: String, people: [String]) async -> String? {
-            let language = Locale.preferredLanguages.first.map { Locale(identifier: $0) } ?? Locale.current
-            let name =
-                Locale(identifier: "en").localizedString(
-                    forLanguageCode: language.language.languageCode?.identifier ?? "en") ?? "English"
-            var instructions = """
-                You name recordings. You are given lines from a transcript of a meeting, lecture or call \
-                recorded on a Mac, in order, with gaps. Name what it is about, specifically: the decision, \
-                plan or question discussed, not just the field. Always in \(name). Reply with the title only.
-                """
-            if !people.isEmpty {
-                instructions += "\nPeople in this recording besides the user: \(people.joined(separator: ", "))."
-            }
+            let language = Titles.language
+            let name = Titles.languageName
             let first: String
             do {
-                let session = LanguageModelSession(instructions: instructions)
+                let session = LanguageModelSession(instructions: Titles.instructions(people: people))
                 first = try await session.respond(to: excerpt, generating: SuggestedTitle.self).content.title
             } catch {
                 return nil

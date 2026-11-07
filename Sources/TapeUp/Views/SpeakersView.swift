@@ -15,7 +15,9 @@ struct SpeakersView: View {
                 HStack {
                     SectionLabel(text: "Speakers")
                     Spacer()
-                    if result.estimated, result.voices.count > 0 {
+                    if !result.suggested.isEmpty {
+                        UseButton(help: "Use the suggested names") { model.speakers.acceptSuggestedNames(in: entry) }
+                    } else if result.estimated, result.voices.count > 0 {
                         Text("Estimated · tap a count to change")
                             .font(.system(size: 11))
                             .foregroundStyle(.tertiary)
@@ -26,7 +28,9 @@ struct SpeakersView: View {
                     Text("No voices found.").font(.system(size: 12)).foregroundStyle(.secondary)
                 }
                 ForEach(result.voices) { voice in
-                    VoiceRow(model: model, entry: entry, voice: voice, name: result.names[voice.id])
+                    VoiceRow(
+                        model: model, entry: entry, voice: voice, name: result.names[voice.id],
+                        suggested: result.suggested[voice.id])
                 }
             } else {
                 status(work)
@@ -73,11 +77,12 @@ private struct VoiceRow: View {
     let entry: RecordingEntry
     let voice: Voice
     let name: String?
+    let suggested: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 1) {
             HStack(spacing: 6) {
-                NamePicker(model: model, entry: entry, voice: voice, name: name)
+                NamePicker(model: model, entry: entry, voice: voice, name: name, suggested: suggested)
                 Spacer(minLength: 4)
                 Text(Format.length(voice.seconds))
                     .font(.system(size: 11))
@@ -102,6 +107,7 @@ private struct NamePicker: View {
     let entry: RecordingEntry
     let voice: Voice
     let name: String?
+    let suggested: String?
     @State private var hovering = false
 
     var body: some View {
@@ -116,9 +122,10 @@ private struct NamePicker: View {
             }
         } label: {
             HStack(spacing: 4) {
-                Text(name ?? "Voice \(voice.id)")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(name == nil ? .secondary : .primary)
+                // A suggestion reads grey, like a suggested title, until taken.
+                Text(name ?? suggested ?? "Voice \(voice.id)")
+                    .font(.system(size: 12, weight: name == nil && suggested != nil ? .regular : .medium))
+                    .foregroundStyle(name != nil ? .primary : suggested != nil ? .tertiary : .secondary)
                     .lineLimit(1)
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.system(size: 8, weight: .semibold))
@@ -134,8 +141,12 @@ private struct NamePicker: View {
         .menuIndicator(.hidden)
         .fixedSize()
         .onHover { hovering = $0 }
-        .hoverHelp(name == nil ? "Name this voice" : "Rename this voice")
-        .accessibilityLabel(name.map { "Voice \(voice.id), \($0)" } ?? "Voice \(voice.id), unnamed")
+        .hoverHelp(
+            name != nil ? "Rename this voice" : suggested != nil ? "Suggested: Voice \(voice.id)" : "Name this voice"
+        )
+        .accessibilityLabel(
+            name.map { "Voice \(voice.id), \($0)" } ?? suggested.map { "Voice \(voice.id), suggested \($0)" }
+                ?? "Voice \(voice.id), unnamed")
     }
 
     private func pick(_ person: String) -> some View {

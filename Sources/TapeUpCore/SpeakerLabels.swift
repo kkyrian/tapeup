@@ -244,12 +244,25 @@ public struct SpeakerResult: Sendable, Equatable, Codable {
     /// Each transcript line's voice, in line order.
     public var assigned: [Int?]
     public var names: [Int: String] = [:]
+    /// Names the user's agent suggested for voices the user has not named,
+    /// shown until the user takes or replaces them. A recount drops them.
+    public var suggested: [Int: String] = [:]
 
     public init(count: Int, estimated: Bool, voices: [Voice], assigned: [Int?]) {
         self.count = count
         self.estimated = estimated
         self.voices = voices
         self.assigned = assigned
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        count = try values.decode(Int.self, forKey: .count)
+        estimated = try values.decode(Bool.self, forKey: .estimated)
+        voices = try values.decode([Voice].self, forKey: .voices)
+        assigned = try values.decode([Int?].self, forKey: .assigned)
+        names = try values.decodeIfPresent([Int: String].self, forKey: .names) ?? [:]
+        suggested = try values.decodeIfPresent([Int: String].self, forKey: .suggested) ?? [:]
     }
 }
 
@@ -327,6 +340,32 @@ extension SpeakerLabels {
             throw CocoaError(.fileNoSuchFile)
         }
         result.names[voice] = name
+        result.suggested[voice] = nil
+        try save(result, lines: lines, in: folder)
+    }
+
+    /// Keeps suggested names for unnamed voices, each name on one voice only.
+    public static func suggest(_ names: [Int: String], in folder: URL) throws {
+        guard var result = result(in: folder), let lines = TranscriptDocument.lines(in: folder) else {
+            throw CocoaError(.fileNoSuchFile)
+        }
+        let voices = Set(result.voices.map(\.id))
+        var taken = Set(result.names.values)
+        result.suggested = [:]
+        for (voice, name) in names.sorted(by: { $0.key < $1.key })
+        where voices.contains(voice) && result.names[voice] == nil && taken.insert(name).inserted {
+            result.suggested[voice] = name
+        }
+        try save(result, lines: lines, in: folder)
+    }
+
+    /// Gives every voice with a suggestion that name.
+    public static func acceptSuggested(in folder: URL) throws {
+        guard var result = result(in: folder), let lines = TranscriptDocument.lines(in: folder) else {
+            throw CocoaError(.fileNoSuchFile)
+        }
+        for (voice, name) in result.suggested where result.names[voice] == nil { result.names[voice] = name }
+        result.suggested = [:]
         try save(result, lines: lines, in: folder)
     }
 }

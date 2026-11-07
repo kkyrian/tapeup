@@ -156,8 +156,17 @@ struct MoreMenu: View {
     @Bindable var model: AppModel
 
     var body: some View {
-        MoreButton(help: "TapeUp") {
+        MoreButton(help: "TapeUp", badge: model.agents.needsAttention, opening: model.agents.refresh) {
             Button("People…", action: model.openPeople)
+            Menu("Agent") {
+                Text("Suggests titles and names")
+                ForEach(Array(model.agents.rows.enumerated()), id: \.offset) { _, row in
+                    Button(action: row.action) {
+                        if row.checked { Label(row.title, systemImage: "checkmark") } else { Text(row.title) }
+                    }
+                    .disabled(!row.enabled)
+                }
+            }
             Button("Change Recordings Folder…") { FolderChooser.choose(model: model) }
                 .disabled(model.phase != .idle)
             Toggle("Floating Controls While Recording", isOn: $model.showsFloatingControls)

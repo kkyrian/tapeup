@@ -6,7 +6,8 @@ import TapeUpCore
 //   TapeUp record --out <dir> [--seconds N]
 //   TapeUp permissions [--out <file>]
 //   TapeUp snapshot [--out <dir>]   renders every panel state to PNGs for design review
-//   TapeUp uitest [--out <dir>] [--record]   drives the real panel through every flow and checks it
+//   TapeUp uitest [--out <dir>] [--record] [--agent claude|codex]   drives the real panel through
+//     every flow and checks it; --agent also calls that agent for real
 //   TapeUp time-transcribe <recording folder> [--model large|small] [--live]   timed run; --live
 //     feeds it in quarter seconds, as while recording
 //   TapeUp time-speakers <recording folder> --turns <out.json> [--voices N]   timed run, writing
@@ -25,7 +26,8 @@ case "uitest":
     MainActor.assumeIsolated {
         UITest.run(
             out: Launcher.value(after: "--out", in: arguments) ?? "tmp/uitest",
-            record: arguments.contains("--record"))
+            record: arguments.contains("--record"),
+            agent: Launcher.value(after: "--agent", in: arguments).flatMap(AgentKind.init))
     }
 case "permissions":
     Launcher.reportPermissions(to: Launcher.value(after: "--out", in: arguments))

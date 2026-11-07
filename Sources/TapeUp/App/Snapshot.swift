@@ -171,6 +171,37 @@ enum Snapshot {
         try? VoicePrints(turns: turns, prints: prints).save(in: folder)
     }
 
+    /// A short call where people name each other, for agent name suggestions.
+    static let namesSaidAloud = [
+        "Thanks for joining, everyone. José, can you hear us?", "Yes, loud and clear, Priya.",
+        "Hi Priya, hi José. Mei here, I have the budget numbers.",
+    ]
+
+    static func seedNamesSaidAloud(_ folder: URL) {
+        let said: [(Int, String)] = [
+            (0, namesSaidAloud[0]), (1, namesSaidAloud[1]), (2, namesSaidAloud[2]),
+            (0, "Great, Mei, walk us through the travel line."), (2, "We can cut travel by ten percent this quarter."),
+            (1, "I agree, as long as the field visits stay."),
+            (0, "Then we decide: cut travel ten percent and keep the field visits."),
+        ]
+        var lines: [TranscriptLine] = []
+        var turns: [VoiceTurn] = []
+        for (index, (voice, text)) in said.enumerated() {
+            let start = Double(index) * 20
+            lines.append(TranscriptLine(start: start, end: start + 15, text: text))
+            turns.append(VoiceTurn(start: start, end: start + 15, voice: voice))
+        }
+        let meta: [String: Any] = [
+            "status": "recorded", "audio": "audio.m4a", "duration_seconds": 140.0,
+            "started": ISO8601DateFormatter().string(from: Date().addingTimeInterval(-600)),
+        ]
+        try? JSONSerialization.data(withJSONObject: meta).write(to: folder.appendingPathComponent("meta.json"))
+        FileManager.default.createFile(atPath: folder.appendingPathComponent("events.jsonl").path, contents: nil)
+        try? RecordingLibrary.save(people: .init(count: 3, names: ["Priya Shah", "José Ortiz"]), in: folder)
+        try? TranscriptDocument.save(lines: lines, failures: 0, pieces: lines.count, model: .large, in: folder)
+        try? VoicePrints(turns: turns, prints: [0: [1, 0, 0], 1: [0, 1, 0], 2: [0, 0, 1]]).save(in: folder)
+    }
+
     static func seed(_ root: URL) {
         let library = RecordingLibrary(root: root)
         try? library.prepareRoot()

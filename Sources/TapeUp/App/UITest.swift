@@ -15,7 +15,7 @@ enum UITest {
         "transcribe",
     ]
 
-    static func run(out: String, record: Bool) {
+    static func run(out: String, record: Bool, agent: AgentKind? = nil) {
         let outURL = URL(fileURLWithPath: out)
         try? FileManager.default.createDirectory(at: outURL, withIntermediateDirectories: true)
         let defaults = UserDefaults.standard
@@ -207,6 +207,95 @@ enum UITest {
             model.closeCard()
         } else {
             expect(false, "a seeded recording has voices to label")
+        }
+
+        // The user's own agent, called for real (only with --agent): a title
+        // through the fallback after a failing tuned call, then names said
+        // aloud, suggested from the known people only.
+        if let agent,
+            let folder = try? RecordingLibrary(root: model.root).newFolder(at: Date().addingTimeInterval(-600))
+        {
+            model.agents.testing = agent
+            model.agents.testingModel = "no-such-model"
+            Snapshot.seedNamesSaidAloud(folder)
+            model.reload()
+            if let entry = model.recent.first(where: { $0.folder.lastPathComponent == folder.lastPathComponent }) {
+                let began = Date()
+                model.open(entry)
+                for _ in 0..<600 where model.card?.entry.titleSuggestion == nil { settle(0.25) }
+                let title = model.card?.entry.titleSuggestion
+                expect(
+                    title != nil,
+                    "\(agent.name) suggests a title after the tuned call fails (\(title ?? "none"), \(Int(Date().timeIntervalSince(began))) s)"
+                )
+                model.agents.testingModel = nil
+                let asked = Date()
+                model.labelSpeakers()
+                for _ in 0..<600 where model.speakers.result(for: entry)?.suggested.isEmpty != false { settle(0.25) }
+                check("card-agent-names")
+                let result = model.speakers.result(for: entry)
+                let lines = TranscriptDocument.lines(in: entry.folder) ?? []
+                func voice(saying text: String) -> Int? {
+                    lines.firstIndex { $0.text == text }.flatMap { result?.assigned[$0] }
+                }
+                var expected: [Int: String] = [:]
+                for (index, name) in ["Priya Shah", "José Ortiz", "Mei"].enumerated() {
+                    if let voice = voice(saying: Snapshot.namesSaidAloud[index]) { expected[voice] = name }
+                }
+                expect(
+                    result?.suggested == expected,
+                    "\(agent.name) suggests each voice's name (\(result?.suggested ?? [:]), \(Int(Date().timeIntervalSince(asked))) s)"
+                )
+                expect(result?.names.isEmpty == true, "suggested names wait for the user")
+                model.speakers.acceptSuggestedNames(in: entry)
+                check("card-agent-names-used")
+                expect(model.speakers.result(for: entry)?.names == expected, "Use names every voice")
+                let events =
+                    (try? String(contentsOf: entry.folder.appendingPathComponent("events.jsonl"), encoding: .utf8))
+                    ?? ""
+                expect(
+                    events.components(separatedBy: "agent failed").count == 1,
+                    "only the failing tuned call is retried, nothing logged (\(events.suffix(1500)))")
+                model.closeCard()
+            }
+            // Signed out, or out of its weekly limit: nothing shows but a
+            // dot on ···, the reason is logged, and the next recording tries again.
+            let fake = base.appendingPathComponent("fake-agent")
+            try? "#!/bin/sh\necho 'Weekly limit reached' >&2\nexit 1\n".write(
+                to: fake, atomically: true, encoding: .utf8)
+            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fake.path)
+            AgentRunner.testingBinary = fake
+            if let other = try? RecordingLibrary(root: model.root).newFolder(at: Date().addingTimeInterval(-300)) {
+                Snapshot.seedNamesSaidAloud(other)
+                model.reload()
+                if let entry = model.recent.first(where: { $0.folder.lastPathComponent == other.lastPathComponent }) {
+                    model.open(entry)
+                    model.labelSpeakers()
+                    let events = entry.folder.appendingPathComponent("events.jsonl")
+                    func failures() -> Int {
+                        ((try? String(contentsOf: events, encoding: .utf8)) ?? "").components(
+                            separatedBy: "agent failed"
+                        ).count - 1
+                    }
+                    for _ in 0..<120 where failures() < 2 { settle(0.25) }
+                    model.closeCard()
+                    check("list-agent-signed-out")
+                    expect(failures() == 2, "a failing agent is logged once per suggestion (\(failures()))")
+                    expect(
+                        model.speakers.result(for: entry)?.suggested.isEmpty == true, "and suggests no names")
+                    expect(model.agents.needsAttention, "a signed-out agent puts a dot on ···")
+                    expect(
+                        model.agents.rows.contains { $0.title == "Sign In to \(agent.name)…" && $0.checked },
+                        "the Agent menu offers to sign in")
+                } else {
+                    expect(false, "the second agent recording is listed (\(other.lastPathComponent))")
+                }
+            } else {
+                expect(false, "a second agent recording can be made")
+            }
+            AgentRunner.testingBinary = nil
+            model.agents.testing = nil
+            model.agents.refreshNow()
         }
 
         // The command line, answered by this running model.

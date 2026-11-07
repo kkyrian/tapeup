@@ -499,6 +499,42 @@ struct VoiceFoldingTests {
         #expect(!one.estimated && one.count == 1 && one.assigned == [1, 1])
     }
 
+    @Test func suggestedNamesWaitForTheUserAndNeverRepeatAName() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "tapeup-suggest-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try JSONSerialization.data(withJSONObject: ["status": "recorded"]).write(
+            to: folder.appendingPathComponent("meta.json"))
+        FileManager.default.createFile(atPath: folder.appendingPathComponent("events.jsonl").path, contents: nil)
+        let found = heard([(0, 100, print(1, 0, 0, 0)), (1, 60, print(0, 1, 0, 0)), (2, 30, print(0, 0, 1, 0))])
+        let lines = [
+            TranscriptLine(start: 0, end: 90, text: "Hello."), TranscriptLine(start: 100, end: 150, text: "Hi."),
+            TranscriptLine(start: 165, end: 185, text: "Hey."),
+        ]
+        try TranscriptDocument.save(lines: lines, failures: 0, pieces: 3, model: .large, in: folder)
+        try SpeakerLabels.relabel(found, count: nil, in: folder)
+        try SpeakerLabels.name(1, "Mei", in: folder)
+        // Voice 1 is named already, voice 9 does not exist, and Mei is taken.
+        try SpeakerLabels.suggest([1: "Priya Shah", 2: "Mei", 3: "José Ortiz", 9: "Ana"], in: folder)
+        #expect(SpeakerLabels.result(in: folder)?.suggested == [3: "José Ortiz"])
+        try SpeakerLabels.suggest([2: "Priya Shah", 3: "José Ortiz"], in: folder)
+        try SpeakerLabels.name(2, "Ana", in: folder)
+        #expect(SpeakerLabels.result(in: folder)?.suggested == [3: "José Ortiz"])
+        try SpeakerLabels.acceptSuggested(in: folder)
+        let result = try #require(SpeakerLabels.result(in: folder))
+        #expect(result.names == [1: "Mei", 2: "Ana", 3: "José Ortiz"] && result.suggested.isEmpty)
+        // Named voices get none; files from before suggestions still read.
+        try SpeakerLabels.suggest([3: "Priya Shah"], in: folder)
+        #expect(SpeakerLabels.result(in: folder)?.suggested.isEmpty == true)
+        let old = #"{"count":1,"estimated":true,"voices":[],"assigned":[]}"#
+        #expect((try? JSONDecoder().decode(SpeakerResult.self, from: Data(old.utf8)))?.names.isEmpty == true)
+        EventLog.append("agent failed", ["agent": "claude"], in: folder)
+        EventLog.append("agent failed", ["agent": "codex"], in: folder)
+        let events = try String(contentsOf: folder.appendingPathComponent("events.jsonl"), encoding: .utf8)
+        #expect(events.split(separator: "\n").count == 2 && events.contains("codex"))
+    }
+
     @Test func aTranscriptMadeAgainIsRelabeledAndKeepsNames() throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("tapeup-redo-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: folder) }

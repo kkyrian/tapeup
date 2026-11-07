@@ -20,6 +20,11 @@ final class Speakers {
     /// Frees the speech model before the speaker model loads; false while a
     /// transcript needs it.
     var makeRoom: () -> Bool = { true }
+    /// The user's agent, asked to suggest names once voices are found.
+    var agents: Agents?
+    /// The names a voice may be given: this recording's people, then the
+    /// people list. With none, no names are suggested.
+    var knownNames: (RecordingEntry) -> [String] = { $0.people.names }
 
     /// Work in progress or failed, by recording stamp.
     private(set) var work: [String: Work] = [:]
@@ -109,13 +114,82 @@ final class Speakers {
     private func save(stamp: String, heard: VoicePrints) {
         do {
             guard let folder = library.folder(withStamp: stamp) else { throw CocoaError(.fileNoSuchFile) }
-            try SpeakerLabels.relabel(heard, count: wanted[stamp] ?? nil, in: folder)
+            let result = try SpeakerLabels.relabel(heard, count: wanted[stamp] ?? nil, in: folder)
             work[stamp] = nil
             wanted[stamp] = nil
             version += 1
+            suggestNames(stamp: stamp, result: result)
         } catch {
             failed(stamp, error)
         }
+    }
+
+    /// Asks the user's agent which known person each unnamed voice is. The
+    /// answer can only be a known name or none; it shows as a suggestion.
+    private func suggestNames(stamp: String, result: SpeakerResult) {
+        guard let agents, agents.chosen != nil, let folder = library.folder(withStamp: stamp),
+            let entry = RecordingLibrary.entry(at: folder), let lines = TranscriptDocument.lines(in: folder)
+        else { return }
+        let known = knownNames(entry)
+        let unnamed = result.voices.filter { result.names[$0.id] == nil }
+        guard !known.isEmpty, !unnamed.isEmpty else { return }
+        let labeled = zip(lines, result.assigned).map { line, voice in
+            TranscriptLine(
+                start: line.start, end: line.end,
+                text: "\(voice.map { result.names[$0] ?? "Voice \($0)" } ?? "Unknown"): \(line.text)")
+        }
+        let prompt = """
+            Lines from a transcript, each starting with the voice that said it. For each voice listed below, \
+            say which of the known people it is, only when the lines make it clear (someone addressed by \
+            name, introducing themselves, or named by others). Otherwise give an empty name. Never guess.
+            Voices to name: \(unnamed.map { "Voice \($0.id)" }.joined(separator: ", "))
+            Known people: \(known.joined(separator: ", "))
+
+            Transcript lines:
+            \(TitleExcerpt.make(lines: labeled))
+            """
+        let schema: [String: Any] = [
+            "type": "object",
+            "properties": [
+                "voices": [
+                    "type": "array",
+                    "items": [
+                        "type": "object",
+                        "properties": [
+                            "voice": ["type": "integer"], "name": ["type": "string", "enum": known + [""]],
+                        ],
+                        "required": ["voice", "name"], "additionalProperties": false,
+                    ],
+                ]
+            ],
+            "required": ["voices"], "additionalProperties": false,
+        ]
+        Task { [weak self] in
+            struct Answer: Decodable {
+                struct Pick: Decodable {
+                    var voice: Int
+                    var name: String
+                }
+                var voices: [Pick]
+            }
+            guard let self, let data = await agents.ask("names", prompt: prompt, schema: schema, for: folder),
+                let answer = try? JSONDecoder().decode(Answer.self, from: data),
+                let folder = library.folder(withStamp: stamp),
+                // A recount or a name given meanwhile changed what was asked about.
+                SpeakerLabels.result(in: folder)?.assigned == result.assigned
+            else { return }
+            var picks: [Int: String] = [:]
+            for pick in answer.voices where known.contains(pick.name) { picks[pick.voice] = pick.name }
+            guard !picks.isEmpty else { return }
+            try? SpeakerLabels.suggest(picks, in: folder)
+            version += 1
+        }
+    }
+
+    /// Takes every suggested name.
+    func acceptSuggestedNames(in entry: RecordingEntry) {
+        try? SpeakerLabels.acceptSuggested(in: entry.folder)
+        version += 1
     }
 
     private func failed(_ stamp: String, _ error: Error) {
