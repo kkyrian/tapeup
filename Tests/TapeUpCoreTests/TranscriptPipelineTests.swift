@@ -93,6 +93,18 @@ struct PieceCutterTests {
         #expect(abs(pieces[2].start - pieces[1].end) < 0.001)
     }
 
+    @Test func aSliverAfterTheLimitIsDropped() {
+        let cutter = PieceCutter(detector: LoudnessDetector(), side: nil, offset: 0, maxSeconds: 20)
+        var pieces: [Piece] = []
+        let audio = tone(20.1) + silence(1)
+        for start in stride(from: 0, to: audio.count, by: 4_000) {
+            pieces += cutter.feed(Array(audio[start..<min(audio.count, start + 4_000)]))
+        }
+        pieces += cutter.finish()
+        #expect(pieces.count == 1)
+        #expect(pieces.allSatisfy { $0.samples.count >= PieceCutter.minSamples })
+    }
+
     @Test func chunkSizeNeverChangesThePieces() {
         let audio = silence(1) + tone(45) + silence(2) + tone(3) + silence(1)
         func pieces(chunk: Int) -> [Double] {

@@ -122,9 +122,13 @@ final class PieceCutter {
         return pieces
     }
 
+    /// Speech that ends just after a cut at the length limit leaves a
+    /// sliver, a few samples long at times, which crashes the model.
+    static let minSamples = rate * 3 / 10
+
     private func cut(from start: Int, to end: Int) -> [Piece] {
         let from = max(start, bufferStart)
-        guard end > from else { return [] }
+        guard end - from >= Self.minSamples else { return [] }
         let samples = Array(buffer[(from - bufferStart)..<(end - bufferStart)])
         let seconds = { (sample: Int) in self.offset + Double(sample) / Double(Self.rate) }
         return [Piece(start: seconds(from), end: seconds(end), side: side, samples: samples)]
