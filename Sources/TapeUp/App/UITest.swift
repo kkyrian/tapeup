@@ -258,11 +258,20 @@ enum UITest {
                 )
                 // The speaker model, for real, inside the app.
                 model.labelSpeakers()
+                // A count tapped while voices are being found is the one used.
+                if let card = model.card {
+                    var people = card.entry.people
+                    people.count = 2
+                    model.setPeople(people)
+                }
                 for _ in 0..<240 where model.card.flatMap({ model.speakers.work(on: $0.entry) }) != nil { settle(0.25) }
                 check("saved-speakers")
                 expect(
                     model.card.flatMap { model.speakers.result(for: $0.entry) } != nil,
                     "speakers labeled on the recording just made")
+                expect(
+                    model.card.flatMap { model.speakers.result(for: $0.entry) }?.estimated == false,
+                    "the count tapped while finding voices was used")
             }
             expect(!floating.window.isVisible, "floating controls hide after stop")
             if let saved = model.card?.entry, let meta = MetaFile.read(saved.folder) {

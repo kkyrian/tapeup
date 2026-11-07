@@ -175,11 +175,12 @@ final class Transcription {
     }
 
     /// Frees the speech model now unless a transcript needs it, to make room
-    /// for the speaker model.
-    func releaseIfIdle() {
-        guard !busy else { return }
+    /// for the speaker model; false while one does.
+    func releaseIfIdle() -> Bool {
+        guard !busy else { return false }
         unload?.cancel()
         release()
+        return true
     }
 
     /// Frees the model's memory a minute after the last transcript.

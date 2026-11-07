@@ -359,7 +359,7 @@ public enum TranscriptDocument {
     }
 
     /// Lines from a rendered transcript. Only starts are written, so each
-    /// line ends where the next begins, at most a piece's 20 s later.
+    /// line ends where the next on its side begins, at most a piece's 20 s later.
     static func parse(_ text: String) -> [TranscriptLine] {
         var lines: [TranscriptLine] = []
         for row in text.split(separator: "\n") where row.hasPrefix("[") {
@@ -375,8 +375,13 @@ public enum TranscriptDocument {
             }
             lines.append(TranscriptLine(start: start, end: start + 20, side: side, text: said))
         }
-        for index in lines.indices.dropLast() where lines[index + 1].start > lines[index].start {
-            lines[index].end = min(lines[index].end, lines[index + 1].start)
+        // Each side's lines follow one another; the other side may talk over them.
+        for index in lines.indices {
+            if let next = lines[(index + 1)...].first(where: { $0.side == lines[index].side }),
+                next.start > lines[index].start
+            {
+                lines[index].end = min(lines[index].end, next.start)
+            }
         }
         return lines
     }

@@ -413,6 +413,10 @@ struct SpeakerLabelsTests {
         let plain = TranscriptDocument.parse(TranscriptDocument.render(lines: lines, labeled: false, model: "m"))
         #expect(plain.map(\.text) == lines.map(\.text))
         #expect(plain[0].end == 5)
+        // A side's line ends at that side's next line, not the other side's.
+        let crossing = TranscriptDocument.parse(
+            "[0:10] Microphone: Long point.\n[0:12] Computer audio: Mm.\n[0:25] Microphone: Next.\n")
+        #expect(crossing.map(\.end) == [25, 32, 45])
     }
 }
 
@@ -457,9 +461,24 @@ struct VoiceFoldingTests {
     }
 
     @Test func aVoiceWithNoPrintJoinsTheVoiceThatTalkedMost() {
-        let found = heard([(0, 100, print(1, 0, 0, 0)), (1, 90, print(0, 1, 0, 0)), (2, 5, nil)])
-        #expect(VoiceFolding.fold(found, count: 2)[2] == 0)
-        #expect(VoiceFolding.fold(found, count: nil)[2] == 0)
+        let found = heard([(0, 50, print(1, 0, 0, 0)), (1, 100, print(0, 1, 0, 0)), (2, 5, nil)])
+        #expect(VoiceFolding.fold(found, count: 2)[2] == 1)
+        #expect(VoiceFolding.fold(found, count: nil)[2] == 1)
+    }
+
+    @Test func namesFollowThePersonAcrossARecount() {
+        let lines = (0..<6).map { TranscriptLine(start: Double($0) * 10, end: Double($0) * 10 + 8, text: "l\($0)") }
+        // Before: Priya is voice 2. After the recount her lines are voice 1,
+        // and the voice that took over one of hers stays unnamed.
+        let carried = SpeakerLabels.carry(
+            [2: "Priya Shah", 1: "Mei"], from: [2, 2, 2, 1, 1, 1], to: [1, 1, 1, 2, 3, 3], lines: lines)
+        #expect(carried == [1: "Priya Shah", 3: "Mei"])
+    }
+
+    @Test func theCountRecordedIsTheVoicesFound() {
+        let lines = [TranscriptLine(start: 0, end: 50, text: "Only one.")]
+        let found = heard([(0, 100, print(1, 0, 0, 0))])
+        #expect(SpeakerLabels.label(lines: lines, heard: found, count: 10).count == 1)
     }
 
     @Test func aCountAboveWhatWasHeardKeepsEveryVoice() {

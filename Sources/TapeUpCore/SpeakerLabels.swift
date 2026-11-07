@@ -89,10 +89,14 @@ public enum VoiceFolding {
                 merge(other, into: voice)
             }
         }
+        // A voice with no print joins the voice that talked most.
+        func partner(of voice: Int) -> Int {
+            groups[voice]!.print == nil ? smallestFirst().last { $0 != voice }! : nearest(to: voice)
+        }
         if let count {
             while groups.count > max(1, count) {
                 let voice = smallestFirst()[0]
-                join(voice, groups[voice]!.print == nil ? smallestFirst().last! : nearest(to: voice))
+                join(voice, partner(of: voice))
             }
         } else {
             let total = groups.values.reduce(0) { $0 + $1.talk }
@@ -100,7 +104,7 @@ public enum VoiceFolding {
             while changed && groups.count > 1 {
                 changed = false
                 for voice in smallestFirst() {
-                    let other = nearest(to: voice)
+                    let other = partner(of: voice)
                     let stray = total > 0 && groups[voice]!.talk / total < strayShare
                     if stray || groups[voice]!.print == nil || alike(voice, other) >= sameVoice {
                         join(voice, other)
@@ -180,15 +184,47 @@ public enum SpeakerLabels {
         let turns = heard.turns.map { VoiceTurn(start: $0.start, end: $0.end, voice: person[$0.voice] ?? $0.voice) }
         let assigned = assign(lines: lines, turns: turns)
         let voices = voices(lines: lines, assigned: assigned)
-        return SpeakerResult(count: count ?? voices.count, estimated: count == nil, voices: voices, assigned: assigned)
+        return SpeakerResult(count: voices.count, estimated: count == nil, voices: voices, assigned: assigned)
+    }
+
+    /// Names from earlier labels, moved to whichever new voice holds most of
+    /// a named voice's lines, so a recount keeps them on the same person.
+    /// A name moves only where it covers most of the new voice's talk.
+    public static func carry(
+        _ names: [Int: String], from before: [Int?], to after: [Int?], lines: [TranscriptLine]
+    ) -> [Int: String] {
+        var shared: [Int: [Int: Double]] = [:]
+        var talk: [Int: Double] = [:]
+        for (line, (old, new)) in zip(lines, zip(before, after)) {
+            guard let new else { continue }
+            let seconds = line.end - line.start
+            talk[new, default: 0] += seconds
+            if let old, names[old] != nil { shared[new, default: [:]][old, default: 0] += seconds }
+        }
+        // At most one named voice holds most of a new voice's talk; each
+        // name then goes to the new voice holding most of its lines.
+        var best: [Int: (new: Int, seconds: Double)] = [:]
+        for (new, olds) in shared.sorted(by: { $0.key < $1.key }) {
+            for (old, seconds) in olds where seconds > (talk[new] ?? 0) / 2 {
+                if seconds > best[old]?.seconds ?? 0 { best[old] = (new, seconds) }
+            }
+        }
+        var carried: [Int: String] = [:]
+        for (old, choice) in best { carried[choice.new] = names[old] }
+        return carried
     }
 
     public static func render(
-        lines: [TranscriptLine], assigned: [Int?], names: [Int: String], model: String
+        lines: [TranscriptLine], assigned: [Int?], names: [Int: String], model: String, missing: Int = 0
     ) -> String {
         let long = (lines.last?.end ?? 0) >= 3600
         var text =
-            "# Transcript with speaker labels\n\nMade on this Mac by TapeUp with \(model). Times are from the start of audio.m4a.\n"
+            "# Transcript with speaker labels\n\nMade on this Mac by TapeUp with \(model). Times are from the start of audio.m4a. Voices are told apart by how they sound; lines where two people talk at once are the most often wrong.\n"
+        if missing > 0 {
+            text +=
+                "\(missing) passage\(missing == 1 ? "" : "s") could not be transcribed and \(missing == 1 ? "is" : "are") missing below.\n"
+        }
+        if lines.isEmpty { text += "\nNo speech was heard.\n" }
         for (line, voice) in zip(lines, assigned) {
             let speaker = voice.map { names[$0].map { "\($0): " } ?? "Voice \($0): " } ?? ""
             text += "\n[\(TranscriptDocument.stamp(line.start, long: long))] \(speaker)\(line.text)\n"
@@ -201,7 +237,7 @@ public enum SpeakerLabels {
 /// user gave. Kept hidden beside the labeled transcript so a rename rewrites
 /// it without running the model again.
 public struct SpeakerResult: Sendable, Equatable, Codable {
-    /// Voices asked for with a tapped count, or estimated without one.
+    /// Voices found: as many as the tapped count, or fewer when fewer were heard.
     public var count: Int
     public var estimated: Bool
     public var voices: [Voice]
@@ -228,8 +264,11 @@ extension SpeakerLabels {
     /// Writes the labeled transcript and records it in `meta.json`.
     public static func save(_ result: SpeakerResult, lines: [TranscriptLine], in folder: URL) throws {
         let meta = MetaFile.read(folder) ?? [:]
-        let model = (meta["transcript"] as? [String: Any])?["model"] as? String ?? "Qwen3-ASR"
-        let text = render(lines: lines, assigned: result.assigned, names: result.names, model: model)
+        let transcript = meta["transcript"] as? [String: Any]
+        let text = render(
+            lines: lines, assigned: result.assigned, names: result.names,
+            model: transcript?["model"] as? String ?? "Qwen3-ASR", missing: transcript?["missing_passages"] as? Int ?? 0
+        )
         try text.write(to: folder.appendingPathComponent(fileName), atomically: true, encoding: .utf8)
         try JSONEncoder().encode(result).write(to: folder.appendingPathComponent(resultFileName), options: .atomic)
         try mark("done", in: folder) { labels in

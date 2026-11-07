@@ -311,14 +311,14 @@ public enum SpeakerFinder {
 
     public static func isDownloaded() -> Bool { FileManager.default.fileExists(atPath: marker.path) }
 
-    /// Downloads both models, resuming any partial file; `progress` gets 0 to 1.
+    /// Downloads both models without loading them, resuming any partial
+    /// file; `progress` gets 0 to 1.
     public static func download(progress: @escaping @Sendable (Double) -> Void) async throws {
-        _ = try await Nemotron3Diarizer.fromMLXPretrained(
-            cacheDir: ModelStore.directory(for: diarizerId),
-            progressHandler: { fraction, _ in progress(fraction * 0.8) })
-        _ = try await WeSpeakerModel.fromPretrained(
-            cacheDir: ModelStore.directory(for: printsId),
-            progressHandler: { fraction, _ in progress(0.8 + fraction * 0.2) })
+        try await HuggingFaceDownloader.downloadWeights(
+            modelId: diarizerId, to: ModelStore.directory(for: diarizerId),
+            additionalFiles: ["model.safetensors", "config.json"], progressHandler: { progress($0 * 0.8) })
+        try await HuggingFaceDownloader.downloadWeights(
+            modelId: printsId, to: ModelStore.directory(for: printsId), progressHandler: { progress(0.8 + $0 * 0.2) })
         try Data().write(to: marker)
     }
 
@@ -330,9 +330,10 @@ public enum SpeakerFinder {
         let file = folder.appendingPathComponent(meta["audio"] as? String ?? "audio.m4a")
         let diarizerDirectory = try ModelStore.directory(for: diarizerId)
         let printsDirectory = try ModelStore.directory(for: printsId)
+        // Decoded before taking the queue, which live transcription shares.
+        let audio = try SpeechAudio.mono(
+            file: file, microphone: sources.contains("microphone"), computer: sources.contains("computer audio"))
         return try await SpeechEngine.exclusively {
-            let audio = try SpeechAudio.mono(
-                file: file, microphone: sources.contains("microphone"), computer: sources.contains("computer audio"))
             let previousLimit = MLX.Memory.cacheLimit
             MLX.Memory.cacheLimit = 256 * 1_048_576
             defer {

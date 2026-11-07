@@ -183,7 +183,7 @@ final class AppModel {
         reload()
         transcription.finished = { [weak self] stamp in self?.transcriptFinished(stamp) }
         transcription.names = { [weak self] in self?.nameHints() }
-        speakers.makeRoom = { [weak self] in self?.transcription.releaseIfIdle() }
+        speakers.makeRoom = { [weak self] in self?.transcription.releaseIfIdle() ?? true }
     }
 
     var isRecording: Bool {
@@ -557,6 +557,7 @@ final class AppModel {
             AudioDevices.removeLeftovers()
             let folders = library.recordingFolders()
             for folder in folders { _ = try? Recorder.recover(folder: folder, startedBefore: launched) }
+            Speakers.clearInterrupted(folders)
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 reload()
@@ -695,7 +696,7 @@ final class AppModel {
     func setPeople(_ people: RecordingEntry.People) {
         guard var card else { return }
         // Labels already made follow the count.
-        if people.count != card.entry.people.count, speakers.result(for: card.entry) != nil {
+        if people.count != card.entry.people.count, speakers.started(card.entry) {
             speakers.label(card.entry, count: people.count)
         }
         card.entry.people = people

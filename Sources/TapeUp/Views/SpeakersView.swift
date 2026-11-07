@@ -11,7 +11,7 @@ struct SpeakersView: View {
         let result = model.speakers.result(for: entry)
         let work = model.speakers.work(on: entry)
         VStack(alignment: .leading, spacing: 6) {
-            if let result, work != .listening, !isDownloading(work) {
+            if let result, work == nil || work == .failed {
                 HStack {
                     SectionLabel(text: "Speakers")
                     Spacer()
@@ -35,15 +35,12 @@ struct SpeakersView: View {
         .animation(.easeOut(duration: 0.2), value: work)
     }
 
-    private func isDownloading(_ work: Speakers.Work?) -> Bool {
-        if case .downloading = work { return true }
-        return false
-    }
-
     @ViewBuilder private func status(_ work: Speakers.Work?) -> some View {
         switch work {
         case .downloading(let fraction):
             working("Getting the speaker model · \(Int((fraction * 100).rounded()))%")
+        case .waiting:
+            working("Waiting for the transcript to finish…")
         case .listening:
             working("Finding voices…")
         case .failed:
