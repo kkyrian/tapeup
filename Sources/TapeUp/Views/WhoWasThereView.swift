@@ -78,16 +78,32 @@ struct WhoWasThereView: View {
 
     // MARK: Count
 
+    /// The number of voices found without a count, shown on its chip until
+    /// a count is tapped.
+    private var estimate: Int? {
+        guard people.count == nil, let entry = model.card?.entry,
+            let result = model.speakers.result(for: entry), result.estimated
+        else { return nil }
+        return result.voices.count
+    }
+
+    private func look(_ number: Int) -> Chip.Look {
+        people.count == number ? .selected : estimate == number ? .suggested : .normal
+    }
+
     private var countChips: some View {
         HStack(spacing: 4) {
             ForEach(1...5, id: \.self) { number in
-                Chip(text: "\(number)", look: people.count == number ? .selected : .normal) {
+                Chip(text: "\(number)", look: look(number)) {
                     editingOther = false
                     setCount(people.count == number ? nil : number)
                     focusNames()
                 }
                 .accessibilityLabel(number == 1 ? "Just you" : "\(number) people")
-                .hoverHelp(number == 1 ? "Just you" : "\(number) people, including you")
+                .hoverHelp(
+                    estimate == number
+                        ? "\(number) voice\(number == 1 ? "" : "s") found"
+                        : number == 1 ? "Just you" : "\(number) people, including you")
             }
             if editingOther {
                 TextField("6+", text: $otherText)
@@ -103,7 +119,11 @@ struct WhoWasThereView: View {
                     .onAppear { otherFocused = true }
             } else {
                 let large = (people.count ?? 0) > 5
-                Chip(text: large ? "\(people.count!)" : "6+", look: large ? .selected : .normal) {
+                let estimatedLarge = (estimate ?? 0) > 5
+                Chip(
+                    text: large ? "\(people.count!)" : estimatedLarge ? "\(estimate!)" : "6+",
+                    look: large ? .selected : estimatedLarge ? .suggested : .normal
+                ) {
                     otherText = large ? "\(people.count!)" : ""
                     editingOther = true
                 }

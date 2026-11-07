@@ -134,6 +134,32 @@ enum Snapshot {
         window.orderOut(nil)
     }
 
+    /// A transcript and what the speaker model heard in it: four model
+    /// voices, two of them one person, so labels need no model.
+    private static func seedSpeakers(_ folder: URL) {
+        let said = [
+            "Thanks for making time, I wanted to walk through the pilot results first.",
+            "Sure, go ahead.", "We ran forty sessions and the drop-off was lower than we expected.",
+            "Lower by how much?", "About a third, mostly in the second week.",
+            "That matches what the field team said.", "Can we split it by site?",
+            "Yes, I have that in the appendix.", "Then let's plan the next round around the two strongest sites.",
+            "I'll draft the plan by Friday.", "Great, send it to both of us.", "Will do.",
+        ]
+        let voices = [0, 1, 0, 2, 0, 2, 1, 3, 0, 3, 1, 0]
+        var lines: [TranscriptLine] = []
+        var turns: [VoiceTurn] = []
+        for (index, text) in said.enumerated() {
+            let start = Double(index) * 150
+            lines.append(TranscriptLine(start: start, end: start + 120, text: text))
+            turns.append(VoiceTurn(start: start, end: start + 120, voice: voices[index]))
+        }
+        let prints: [Int: [Float]] = [
+            0: [1, 0, 0, 0], 1: [0, 1, 0, 0], 2: [0, 0, 1, 0], 3: [0.8, 0, 0, 0.6],
+        ]
+        try? TranscriptDocument.save(lines: lines, failures: 0, pieces: lines.count, model: .large, in: folder)
+        try? VoicePrints(turns: turns, prints: prints).save(in: folder)
+    }
+
     static func seed(_ root: URL) {
         let library = RecordingLibrary(root: root)
         try? library.prepareRoot()
@@ -156,6 +182,7 @@ enum Snapshot {
             try? RecordingLibrary.save(people: people, in: folder)
             if offset == -60 { try? RecordingLibrary.markTranscript("transcribing", in: folder) }
             if offset == -26 * 3600 { _ = try? RecordingLibrary.save(title: "Lab sync", in: folder) }
+            if offset == -3 * 86_400 - 5000 { seedSpeakers(folder) }
         }
         try? PeopleList(
             you: "Sam",

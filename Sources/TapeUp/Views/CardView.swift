@@ -27,6 +27,9 @@ struct CardView: View {
             .disabled(card.finishing)
             Divider().padding(.vertical, 2)
             WhoWasThereView(model: model, people: card.entry.people)
+            if card.entry.transcript == .done, !card.finishing {
+                SpeakersView(model: model, entry: card.entry)
+            }
         }
         .padding(Style.inset)
         .onAppear { if card.justRecorded, !card.finishing { flashSaved() } }

@@ -399,3 +399,68 @@ struct SpeakerLabelsTests {
         #expect(TranscriptDocument.lines(in: folder) == lines)
     }
 }
+
+struct VoiceFoldingTests {
+    /// A unit print in four dimensions.
+    private func print(_ values: Float...) -> [Float] {
+        let length = sqrt(values.reduce(0) { $0 + $1 * $1 })
+        return values.map { $0 / length }
+    }
+
+    private func heard(_ voices: [(voice: Int, talk: Double, print: [Float]?)]) -> VoicePrints {
+        var start = 0.0
+        var turns: [VoiceTurn] = []
+        var prints: [Int: [Float]] = [:]
+        for entry in voices {
+            turns.append(VoiceTurn(start: start, end: start + entry.talk, voice: entry.voice))
+            start += entry.talk
+            prints[entry.voice] = entry.print
+        }
+        return VoicePrints(turns: turns, prints: prints)
+    }
+
+    @Test func theEstimateFoldsAlikeVoicesAndStrays() {
+        let found = heard([
+            (0, 100, print(1, 0, 0, 0)), (1, 60, print(0, 1, 0, 0)),
+            (2, 30, print(1, 0.6, 0, 0)), (3, 4, print(0, 0, 1, 0)),
+        ])
+        let person = VoiceFolding.fold(found, count: nil)
+        #expect(Set(person.values).count == 2)
+        #expect(person[2] == person[0])
+        #expect(person[0] != person[1])
+    }
+
+    @Test func aTappedCountFoldsTheSmallestVoiceNotTheMostAlikePair() {
+        // Two real people who sound fairly alike, and a split-off piece of the second.
+        let found = heard([
+            (0, 100, print(1, 0, 0, 0)), (1, 90, print(0.75, 0.66, 0, 0)), (2, 20, print(0.1, 0.4, 0.9, 0)),
+        ])
+        let person = VoiceFolding.fold(found, count: 2)
+        #expect(person[2] == person[1])
+        #expect(person[0] != person[1])
+    }
+
+    @Test func aVoiceWithNoPrintJoinsTheVoiceThatTalkedMost() {
+        let found = heard([(0, 100, print(1, 0, 0, 0)), (1, 90, print(0, 1, 0, 0)), (2, 5, nil)])
+        #expect(VoiceFolding.fold(found, count: 2)[2] == 0)
+        #expect(VoiceFolding.fold(found, count: nil)[2] == 0)
+    }
+
+    @Test func aCountAboveWhatWasHeardKeepsEveryVoice() {
+        let found = heard([(0, 100, print(1, 0, 0, 0)), (1, 90, print(0, 1, 0, 0))])
+        #expect(Set(VoiceFolding.fold(found, count: 4).values).count == 2)
+        #expect(VoiceFolding.fold(VoicePrints(turns: [], prints: [:]), count: nil).isEmpty)
+    }
+
+    @Test func labelingNumbersPeopleByTalkAndSaysWhetherItEstimated() {
+        let lines = [
+            TranscriptLine(start: 0, end: 50, text: "First."), TranscriptLine(start: 100, end: 190, text: "Second."),
+        ]
+        let found = heard([(0, 100, print(1, 0, 0, 0)), (1, 90, print(0, 1, 0, 0))])
+        let estimate = SpeakerLabels.label(lines: lines, heard: found, count: nil)
+        #expect(estimate.estimated && estimate.count == 2)
+        #expect(estimate.assigned == [2, 1])
+        let one = SpeakerLabels.label(lines: lines, heard: found, count: 1)
+        #expect(!one.estimated && one.count == 1 && one.assigned == [1, 1])
+    }
+}

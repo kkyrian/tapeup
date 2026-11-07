@@ -49,8 +49,13 @@ final class AppModel {
     var card: Card?
     private(set) var copiedFlash = false
     private(set) var transcriptCopiedFlash = false
+    /// Count copies, so only the latest one's timer ends its flash.
+    private var copies = 0
+    private var transcriptCopies = 0
     /// Transcripts: the model, live transcription, saved recordings waiting.
     let transcription: Transcription
+    /// Speaker labels, made when asked.
+    let speakers: Speakers
     /// True when the panel was opened by the user and holds the keyboard, so
     /// a field may take the cursor at once. False after a shortcut stop, so
     /// the card never takes typing away from a call.
@@ -126,6 +131,7 @@ final class AppModel {
             UserDefaults.standard.set(root.path, forKey: "recordingsRoot")
             library = RecordingLibrary(root: root)
             transcription.library = library
+            speakers.library = library
             reload()
         }
     }
@@ -169,6 +175,7 @@ final class AppModel {
         let library = RecordingLibrary(root: saved ?? RecordingLibrary.defaultRoot)
         self.library = library
         transcription = Transcription(library: library)
+        speakers = Speakers(library: library)
         refreshAccess()
         deviceObservation = AudioDevices.observeDefaults(queue: .main) { [weak self] in
             MainActor.assumeIsolated { self?.refreshDevices() }
@@ -176,6 +183,7 @@ final class AppModel {
         reload()
         transcription.finished = { [weak self] stamp in self?.transcriptFinished(stamp) }
         transcription.names = { [weak self] in self?.nameHints() }
+        speakers.makeRoom = { [weak self] in self?.transcription.releaseIfIdle() }
     }
 
     var isRecording: Bool {
@@ -571,15 +579,16 @@ final class AppModel {
         card?.copied = true
         // The button says Copied for a moment; the copied lines stay.
         copiedFlash = true
-        let folder = entry.folder
+        copies += 1
+        let copy = copies
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-            if self?.card?.entry.folder == folder { self?.copiedFlash = false }
+            if self?.copies == copy { self?.copiedFlash = false }
         }
     }
 
     /// Copies the transcript's text, the labeled one once it exists.
     func copyTranscript(_ entry: RecordingEntry) {
-        let labeled = entry.folder.appendingPathComponent("transcript-with-speaker-labels.md")
+        let labeled = entry.folder.appendingPathComponent(SpeakerLabels.fileName)
         let file = FileManager.default.fileExists(atPath: labeled.path) ? labeled : entry.transcriptFile
         guard let text = try? String(contentsOf: file, encoding: .utf8) else {
             problem = "Could not read the transcript."
@@ -588,9 +597,10 @@ final class AppModel {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
         transcriptCopiedFlash = true
-        let folder = entry.folder
+        transcriptCopies += 1
+        let copy = transcriptCopies
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-            if self?.card?.entry.folder == folder { self?.transcriptCopiedFlash = false }
+            if self?.transcriptCopies == copy { self?.transcriptCopiedFlash = false }
         }
     }
 
@@ -675,8 +685,19 @@ final class AppModel {
         NSWorkspace.shared.open(root)
     }
 
+    /// Labels the open recording's speakers: as many voices as the count
+    /// says, or the estimate without one.
+    func labelSpeakers() {
+        guard let entry = card?.entry else { return }
+        speakers.label(entry, count: entry.people.count)
+    }
+
     func setPeople(_ people: RecordingEntry.People) {
         guard var card else { return }
+        // Labels already made follow the count.
+        if people.count != card.entry.people.count, speakers.result(for: card.entry) != nil {
+            speakers.label(card.entry, count: people.count)
+        }
         card.entry.people = people
         self.card = card
         if card.entry.folder == activeFolder {

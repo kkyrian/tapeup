@@ -1,3 +1,4 @@
+import AVFoundation
 import Accelerate
 import Foundation
 
@@ -401,5 +402,36 @@ extension TranscriptDocument {
         try JSONEncoder().encode(lines).write(to: folder.appendingPathComponent(linesFileName), options: .atomic)
         try RecordingLibrary.markTranscript(
             "done", model: model.name, sideLabels: labeled, missing: failures, in: folder)
+    }
+}
+
+/// A saved recording as 16 kHz mono, both sides mixed, for the speaker model.
+public enum SpeechAudio {
+    public static func mono(file: URL, microphone: Bool, computer: Bool) throws -> [Float] {
+        let source = try AVAudioFile(forReading: file)
+        guard Int(source.processingFormat.sampleRate) == TranscriptPipeline.fileRate,
+            source.processingFormat.channelCount == 2,
+            let buffer = AVAudioPCMBuffer(pcmFormat: source.processingFormat, frameCapacity: 48_000 * 30)
+        else { throw CocoaError(.fileReadCorruptFile) }
+        let decimator = Decimator()
+        var samples: [Float] = []
+        samples.reserveCapacity(Int(source.length / 3) + 1)
+        while source.framePosition < source.length {
+            try source.read(into: buffer)
+            let count = Int(buffer.frameLength)
+            guard count > 0, let data = buffer.floatChannelData else { break }
+            let left = UnsafeBufferPointer(start: data[0], count: count)
+            let right = UnsafeBufferPointer(start: data[1], count: count)
+            var mixed = [Float](repeating: 0, count: count)
+            if microphone && !computer {
+                mixed = Array(left)
+            } else if computer && !microphone {
+                mixed = Array(right)
+            } else {
+                vDSP_vasm(left.baseAddress!, 1, right.baseAddress!, 1, [0.5], &mixed, 1, vDSP_Length(count))
+            }
+            samples += decimator.process(mixed)
+        }
+        return samples
     }
 }

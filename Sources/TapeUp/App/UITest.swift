@@ -163,6 +163,41 @@ enum UITest {
         check("card-back")
         expect(abs(panel.window.frame.height - idleHeight) <= 8, "list height close to before")
 
+        // Speaker labels from voices already heard: the count sets how many,
+        // without one the estimate is shown on its chip, names rewrite the file.
+        if let labeled = model.recent.first(where: { VoicePrints.read(in: $0.folder) != nil }) {
+            model.open(labeled)
+            check("card-speakers-offered")
+            expect(labeled.transcript == .done, "the seeded recording is transcribed")
+            model.labelSpeakers()
+            check("card-speakers-two")
+            let two = model.speakers.result(for: labeled)
+            expect(two?.voices.count == 2 && two?.estimated == false, "the count of 2 finds 2 voices")
+            var people = labeled.people
+            people.count = nil
+            model.setPeople(people)
+            check("card-speakers-estimated")
+            let estimate = model.speakers.result(for: labeled)
+            expect(estimate?.estimated == true && estimate?.voices.count == 3, "without a count, 3 voices estimated")
+            model.speakers.name(1, "Priya Shah", in: labeled)
+            check("card-speakers-named")
+            let file = labeled.folder.appendingPathComponent(SpeakerLabels.fileName)
+            let text = (try? String(contentsOf: file, encoding: .utf8)) ?? ""
+            expect(text.contains("Priya Shah: Thanks for making time"), "the name is in the labeled transcript")
+            model.copyTranscript(labeled)
+            expect(
+                NSPasteboard.general.string(forType: .string)?.contains("Voice 2:") == true,
+                "Copy transcript copies the labeled one")
+            people.count = 3
+            model.setPeople(people)
+            check("card-speakers-same-count")
+            expect(
+                model.speakers.result(for: labeled)?.names[1] == "Priya Shah", "tapping the same number keeps names")
+            model.closeCard()
+        } else {
+            expect(false, "a seeded recording has voices to label")
+        }
+
         let victim = model.recent[2]
         model.trash(victim)
         check("trashed")
@@ -221,6 +256,13 @@ enum UITest {
                 expect(
                     model.card?.entry.clipboardText.contains("\ntranscript: ") == true, "Copy path names the transcript"
                 )
+                // The speaker model, for real, inside the app.
+                model.labelSpeakers()
+                for _ in 0..<240 where model.card.flatMap({ model.speakers.work(on: $0.entry) }) != nil { settle(0.25) }
+                check("saved-speakers")
+                expect(
+                    model.card.flatMap { model.speakers.result(for: $0.entry) } != nil,
+                    "speakers labeled on the recording just made")
             }
             expect(!floating.window.isVisible, "floating controls hide after stop")
             if let saved = model.card?.entry, let meta = MetaFile.read(saved.folder) {

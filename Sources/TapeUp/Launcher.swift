@@ -60,6 +60,39 @@ enum Launcher {
         }
     }
 
+    /// Labels the speakers of one transcribed recording, downloading the
+    /// speaker models if needed; `turns` gets the folded turns for scoring.
+    static func speakers(folder: URL, count: Int?, turns: String?) {
+        Task.detached {
+            let began = Date()
+            do {
+                guard let lines = TranscriptDocument.lines(in: folder) else { throw CocoaError(.fileNoSuchFile) }
+                if !SpeakerFinder.isDownloaded() { try await SpeakerFinder.download { _ in } }
+                let heard = try await SpeakerFinder.listen(folder: folder)
+                let listened = Date()
+                try heard.save(in: folder)
+                let result = SpeakerLabels.label(lines: lines, heard: heard, count: count)
+                try SpeakerLabels.save(result, lines: lines, in: folder)
+                if let turns {
+                    let person = VoiceFolding.fold(heard, count: count)
+                    let segments = heard.turns.map {
+                        ["start": $0.start, "end": $0.end, "speaker": Double(person[$0.voice] ?? $0.voice)]
+                    }
+                    try JSONSerialization.data(withJSONObject: ["segments": segments]).write(
+                        to: URL(fileURLWithPath: turns))
+                }
+                let seconds = { (date: Date) in (date.timeIntervalSince(began) * 10).rounded() / 10 }
+                print(
+                    #"{"voices":\#(result.voices.count),"estimated":\#(result.estimated),"model_voices":\#(Set(heard.turns.map(\.voice)).count),"listen_seconds":\#(seconds(listened)),"total_seconds":\#(seconds(Date()))}"#
+                )
+                exit(0)
+            } catch {
+                FileHandle.standardError.write(Data("speakers failed: \(error)\n".utf8))
+                exit(1)
+            }
+        }
+    }
+
     /// Feeds a saved recording through the live path, a quarter second at a
     /// time from another thread as the recorder does, to test it on real speech.
     private nonisolated static func feedLive(folder: URL, engine: SpeechEngine, names: String?) async throws {

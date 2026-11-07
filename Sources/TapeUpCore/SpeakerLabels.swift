@@ -1,7 +1,7 @@
 import Foundation
 
 /// A stretch of audio the speaker model gave to one voice.
-public struct VoiceTurn: Sendable, Equatable {
+public struct VoiceTurn: Sendable, Equatable, Codable {
     public var start: Double
     public var end: Double
     public var voice: Int
@@ -10,6 +10,113 @@ public struct VoiceTurn: Sendable, Equatable {
         self.start = start
         self.end = end
         self.voice = voice
+    }
+}
+
+/// What the speaker model heard: its turns and a voice print for each voice
+/// it found. Kept hidden beside the recording, so asking for another number
+/// of voices takes a moment and no model.
+public struct VoicePrints: Sendable, Equatable, Codable {
+    public var turns: [VoiceTurn]
+    /// Unit-length prints by voice; a voice with no usable audio has none.
+    public var prints: [Int: [Float]]
+
+    public init(turns: [VoiceTurn], prints: [Int: [Float]]) {
+        self.turns = turns
+        self.prints = prints
+    }
+
+    static let fileName = ".voice-prints.json"
+
+    public static func read(in folder: URL) -> VoicePrints? {
+        guard let data = try? Data(contentsOf: folder.appendingPathComponent(fileName)) else { return nil }
+        return try? JSONDecoder().decode(VoicePrints.self, from: data)
+    }
+
+    public func save(in folder: URL) throws {
+        try JSONEncoder().encode(self).write(to: folder.appendingPathComponent(Self.fileName), options: .atomic)
+    }
+}
+
+/// Folds the speaker model's voices into people. The model splits a long
+/// talker into several voices, so voices that sound alike, or talk very
+/// little, join the voice they sound most like. Rules and numbers were
+/// tested on real meetings of one, two and four people.
+public enum VoiceFolding {
+    /// Prints at least this alike are one person.
+    static let sameVoice: Float = 0.6
+    /// A voice with less of the talk than this is a stray.
+    static let strayShare = 0.03
+
+    /// Each model voice's person. With `count`, the voice with the least talk
+    /// joins the one it sounds most like until `count` remain; merging the
+    /// two most alike first merged two real people in testing. Without one,
+    /// the estimate rules above decide.
+    public static func fold(_ heard: VoicePrints, count: Int?) -> [Int: Int] {
+        var groups: [Int: (print: [Float]?, talk: Double)] = [:]
+        for turn in heard.turns {
+            groups[turn.voice, default: (heard.prints[turn.voice], 0)].talk += turn.end - turn.start
+        }
+        var into: [Int: Int] = [:]
+        func merge(_ lost: Int, into keep: Int) {
+            let kept = groups[keep]!
+            let gone = groups[lost]!
+            var print = kept.print ?? gone.print
+            if let a = kept.print, let b = gone.print {
+                let joined = zip(a, b).map { $0 * Float(kept.talk) + $1 * Float(gone.talk) }
+                let length = sqrt(joined.reduce(0) { $0 + $1 * $1 })
+                print = length > 0 ? joined.map { $0 / length } : a
+            }
+            groups[keep] = (print, kept.talk + gone.talk)
+            groups[lost] = nil
+            into[lost] = keep
+        }
+        func alike(_ a: Int, _ b: Int) -> Float {
+            guard let x = groups[a]!.print, let y = groups[b]!.print else { return -1 }
+            return zip(x, y).reduce(0) { $0 + $1.0 * $1.1 }
+        }
+        /// Least talk first; ties by number, so the result never depends on dictionary order.
+        func smallestFirst() -> [Int] {
+            groups.keys.sorted { (groups[$0]!.talk, $0) < (groups[$1]!.talk, $1) }
+        }
+        func nearest(to voice: Int) -> Int {
+            groups.keys.filter { $0 != voice }.sorted().max { alike(voice, $0) < alike(voice, $1) }!
+        }
+        func join(_ voice: Int, _ other: Int) {
+            if (groups[other]!.talk, -other) >= (groups[voice]!.talk, -voice) {
+                merge(voice, into: other)
+            } else {
+                merge(other, into: voice)
+            }
+        }
+        if let count {
+            while groups.count > max(1, count) {
+                let voice = smallestFirst()[0]
+                join(voice, groups[voice]!.print == nil ? smallestFirst().last! : nearest(to: voice))
+            }
+        } else {
+            let total = groups.values.reduce(0) { $0 + $1.talk }
+            var changed = true
+            while changed && groups.count > 1 {
+                changed = false
+                for voice in smallestFirst() {
+                    let other = nearest(to: voice)
+                    let stray = total > 0 && groups[voice]!.talk / total < strayShare
+                    if stray || groups[voice]!.print == nil || alike(voice, other) >= sameVoice {
+                        join(voice, other)
+                        changed = true
+                        break
+                    }
+                }
+            }
+        }
+        var person: [Int: Int] = [:]
+        for voice in Set(heard.turns.map(\.voice)) {
+            var root = voice
+            while let next = into[root] { root = next }
+            person[voice] = root
+        }
+        return person
     }
 }
 
@@ -60,10 +167,20 @@ public enum SpeakerLabels {
     }
 
     /// How well a line serves as a quote: long enough to recognize, short
-    /// enough to read at a glance.
+    /// enough to fit the card's one line.
     private static func score(_ text: String) -> Double {
         let length = Double(text.count)
-        return length == 0 ? -.infinity : -abs(length - 60)
+        return length == 0 ? -.infinity : -abs(length - 45)
+    }
+
+    /// Labels the lines from what the model heard, folded to `count` voices
+    /// or to the estimate.
+    public static func label(lines: [TranscriptLine], heard: VoicePrints, count: Int?) -> SpeakerResult {
+        let person = VoiceFolding.fold(heard, count: count)
+        let turns = heard.turns.map { VoiceTurn(start: $0.start, end: $0.end, voice: person[$0.voice] ?? $0.voice) }
+        let assigned = assign(lines: lines, turns: turns)
+        let voices = voices(lines: lines, assigned: assigned)
+        return SpeakerResult(count: count ?? voices.count, estimated: count == nil, voices: voices, assigned: assigned)
     }
 
     public static func render(

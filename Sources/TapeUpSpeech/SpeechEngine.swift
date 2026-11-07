@@ -1,6 +1,7 @@
 import AVFoundation
 import AudioCommon
 import Foundation
+import MLX
 import Qwen3ASR
 import SpeechVAD
 import TapeUpCore
@@ -294,5 +295,81 @@ public enum FolderTranscriber {
         let session = try await engine.session(
             names: names, microphone: sources.contains("microphone"), computer: sources.contains("computer audio"))
         return try await session.transcribe(file: audio, headphones: meta["output_headphones"] as? Bool == true)
+    }
+}
+
+/// Finds who spoke when: Nemotron 3 diarization, then a WeSpeaker voice print
+/// for each voice it found, so voices can be folded into people afterwards.
+/// Chosen on real meetings for its accuracy and speed (about 8 s for 100
+/// minutes on an M4 Max) at under 3 GB.
+public enum SpeakerFinder {
+    static let diarizerId = Nemotron3Diarizer.defaultMLXModelId
+    static let printsId = WeSpeakerModel.defaultModelId
+    public static let downloadBytes: Int64 = 128_000_000
+
+    private static var marker: URL { ModelStore.base.appendingPathComponent("models/.speakers-complete") }
+
+    public static func isDownloaded() -> Bool { FileManager.default.fileExists(atPath: marker.path) }
+
+    /// Downloads both models, resuming any partial file; `progress` gets 0 to 1.
+    public static func download(progress: @escaping @Sendable (Double) -> Void) async throws {
+        _ = try await Nemotron3Diarizer.fromMLXPretrained(
+            cacheDir: ModelStore.directory(for: diarizerId),
+            progressHandler: { fraction, _ in progress(fraction * 0.8) })
+        _ = try await WeSpeakerModel.fromPretrained(
+            cacheDir: ModelStore.directory(for: printsId),
+            progressHandler: { fraction, _ in progress(0.8 + fraction * 0.2) })
+        try Data().write(to: marker)
+    }
+
+    /// The voices in a saved recording. Both models load for this and are
+    /// let go afterwards; nothing else runs on the models meanwhile.
+    public static func listen(folder: URL) async throws -> VoicePrints {
+        guard let meta = MetaFile.read(folder) else { throw CocoaError(.fileNoSuchFile) }
+        let sources = meta["sources"] as? [String] ?? ["microphone", "computer audio"]
+        let file = folder.appendingPathComponent(meta["audio"] as? String ?? "audio.m4a")
+        let diarizerDirectory = try ModelStore.directory(for: diarizerId)
+        let printsDirectory = try ModelStore.directory(for: printsId)
+        return try await SpeechEngine.exclusively {
+            let audio = try SpeechAudio.mono(
+                file: file, microphone: sources.contains("microphone"), computer: sources.contains("computer audio"))
+            let previousLimit = MLX.Memory.cacheLimit
+            MLX.Memory.cacheLimit = 256 * 1_048_576
+            defer {
+                MLX.Memory.cacheLimit = previousLimit
+                MLX.Memory.clearCache()
+            }
+            let diarizer = try await Nemotron3Diarizer.fromMLXPretrained(
+                cacheDir: diarizerDirectory, offlineMode: true)
+            let turns = try diarizer.diarize(audio: audio, sampleRate: 16_000).segments.map {
+                VoiceTurn(start: Double($0.startTime), end: Double($0.endTime), voice: $0.speakerId)
+            }
+            let embedder = try await WeSpeakerModel.fromPretrained(cacheDir: printsDirectory, offlineMode: true)
+            var prints: [Int: [Float]] = [:]
+            for voice in Set(turns.map(\.voice)) {
+                prints[voice] = voicePrint(of: turns.filter { $0.voice == voice }, in: audio, embedder: embedder)
+            }
+            return VoicePrints(turns: turns, prints: prints)
+        }
+    }
+
+    /// The talk-weighted mean print of a voice's 30 longest turns, each
+    /// heard for at most 8 s; nil when it has no turn long enough to judge.
+    private static func voicePrint(of turns: [VoiceTurn], in audio: [Float], embedder: WeSpeakerModel) -> [Float]? {
+        let longest = turns.sorted { $0.end - $0.start > $1.end - $1.start }
+        var pieces = Array(longest.filter { $0.end - $0.start >= 1 }.prefix(30))
+        if pieces.isEmpty, let first = longest.first { pieces = [first] }
+        var sum: [Float] = []
+        for piece in pieces {
+            let start = max(0, Int(piece.start * 16_000))
+            let end = min(audio.count, Int(min(piece.end, piece.start + 8) * 16_000))
+            guard end - start >= 4_800 else { continue }
+            let print = embedder.embed(audio: Array(audio[start..<end]), sampleRate: 16_000)
+            if sum.isEmpty { sum = [Float](repeating: 0, count: print.count) }
+            let weight = Float(end - start)
+            for index in sum.indices where index < print.count { sum[index] += print[index] * weight }
+        }
+        let length = sqrt(sum.reduce(0) { $0 + $1 * $1 })
+        return length > 0 ? sum.map { $0 / length } : nil
     }
 }

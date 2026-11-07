@@ -35,6 +35,15 @@ case "transcribe":
         model: Launcher.value(after: "--model", in: arguments).flatMap(SpeechModel.init(rawValue:)),
         live: arguments.contains("--live"))
     app.run()
+case "speakers":
+    guard arguments.count > 2 else {
+        Launcher.fail("usage: TapeUp speakers <recording folder> [--voices N] [--turns out.json]", code: 2)
+    }
+    Launcher.speakers(
+        folder: URL(fileURLWithPath: arguments[2]),
+        count: Launcher.value(after: "--voices", in: arguments).flatMap(Int.init),
+        turns: Launcher.value(after: "--turns", in: arguments))
+    app.run()
 case "record":
     guard let out = Launcher.value(after: "--out", in: arguments) else {
         Launcher.fail("usage: TapeUp record --out <dir> [--seconds N]", code: 2)

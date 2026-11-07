@@ -174,6 +174,14 @@ final class Transcription {
         Task.detached(priority: .background) { _ = try? await old.value }
     }
 
+    /// Frees the speech model now unless a transcript needs it, to make room
+    /// for the speaker model.
+    func releaseIfIdle() {
+        guard !busy else { return }
+        unload?.cancel()
+        release()
+    }
+
     /// Frees the model's memory a minute after the last transcript.
     private func scheduleUnload() {
         guard !busy else { return }
