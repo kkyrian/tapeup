@@ -285,6 +285,32 @@ struct TranscriptDocumentTests {
         #expect(!TranscriptDocument.sidesKnown(meta: ["sources": both]))
         #expect(!TranscriptDocument.sidesKnown(meta: ["sources": ["microphone"], "output_headphones": true]))
     }
+
+    @Test func missingPassagesAreSaidInFileAndMeta() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try MetaFile.update(folder) { $0["status"] = "recorded" }
+        try TranscriptDocument.save(
+            lines: [.init(start: 1, end: 2, side: nil, text: "Hello.")], failures: 2, pieces: 5, model: .large,
+            in: folder)
+        let text = try String(contentsOf: folder.appendingPathComponent("transcript.md"), encoding: .utf8)
+        #expect(text.contains("2 passages could not be transcribed"))
+        let meta = try #require(MetaFile.read(folder))
+        #expect((meta["transcript"] as? [String: Any])?["missing_passages"] as? Int == 2)
+        #expect(meta["status"] as? String == "transcribed")
+    }
+
+    @Test func aRecordingThatFailedToEncodeKeepsItsStatus() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try MetaFile.update(folder) { $0["status"] = "recording" }
+        try TranscriptDocument.save(lines: [], failures: 0, pieces: 0, model: .small, in: folder)
+        let meta = try #require(MetaFile.read(folder))
+        #expect(meta["status"] as? String == "recording")
+        #expect((meta["transcript"] as? [String: Any])?["missing_passages"] == nil)
+    }
 }
 
 struct SpeechModelTests {

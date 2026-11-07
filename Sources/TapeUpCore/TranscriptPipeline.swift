@@ -338,9 +338,13 @@ public enum NameHints {
 public enum TranscriptDocument {
     public static let fileName = "transcript.md"
 
-    public static func render(lines: [TranscriptLine], labeled: Bool, model: String) -> String {
+    public static func render(lines: [TranscriptLine], labeled: Bool, model: String, missing: Int = 0) -> String {
         let long = (lines.last?.end ?? 0) >= 3600
         var text = "# Transcript\n\nMade on this Mac by TapeUp with \(model). Times are from the start of audio.m4a.\n"
+        if missing > 0 {
+            text +=
+                "\(missing) passage\(missing == 1 ? "" : "s") could not be transcribed and \(missing == 1 ? "is" : "are") missing below.\n"
+        }
         if labeled {
             text +=
                 "Lines are labeled by side: Microphone is what this Mac's microphone heard, Computer audio is what the Mac played. Either side can be more than one person.\n"
@@ -380,8 +384,9 @@ extension TranscriptDocument {
             return
         }
         let labeled = sidesKnown(meta: MetaFile.read(folder) ?? [:])
-        let text = render(lines: lines, labeled: labeled, model: model.name)
+        let text = render(lines: lines, labeled: labeled, model: model.name, missing: failures)
         try text.write(to: folder.appendingPathComponent(fileName), atomically: true, encoding: .utf8)
-        try RecordingLibrary.markTranscript("done", model: model.name, sideLabels: labeled, in: folder)
+        try RecordingLibrary.markTranscript(
+            "done", model: model.name, sideLabels: labeled, missing: failures, in: folder)
     }
 }

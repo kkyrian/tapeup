@@ -76,7 +76,11 @@ enum Launcher {
             session.feed(
                 left: Array(UnsafeBufferPointer(start: data[0], count: count)),
                 right: Array(UnsafeBufferPointer(start: data[1], count: count)), headphones: headphones)
+            // A file reads faster than anyone speaks; stay within what a
+            // recording would let pile up.
+            while session.behind > 30 { try await Task.sleep(for: .milliseconds(50)) }
         }
+        guard !session.overloaded else { throw CocoaError(.featureUnsupported) }
         let outcome = await session.finish()
         try TranscriptDocument.save(
             lines: outcome.lines, failures: outcome.failures, pieces: outcome.pieces, model: engine.model, in: folder)

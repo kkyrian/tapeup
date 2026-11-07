@@ -293,7 +293,9 @@ struct LiveLines: View {
 
     private var text: String {
         if !transcription.liveRunning {
-            return "The transcript is made once \(transcription.model.name) has downloaded."
+            return transcription.download == .ready
+                ? "The transcript is made from the recording once it is saved."
+                : "The transcript is made once \(transcription.model.name) has downloaded."
         }
         let lines = transcription.latest.map(\.text)
         return lines.isEmpty ? "Words appear here a few seconds after they are said." : lines.joined(separator: " ")

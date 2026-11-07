@@ -90,16 +90,20 @@ enum CoreAudioSystem {
     static func isHeadphones(_ device: AudioDeviceID) -> Bool {
         guard device != kAudioObjectUnknown else { return false }
         let name = name(of: device).lowercased()
-        if ["airpods", "headphone", "headset", "earbud", "buds", "beats", "earphone"].contains(where: name.contains) {
-            return true
-        }
+        // A speaker taken for headphones would put every line in the
+        // transcript twice, so only names that say headphones count.
+        let speakers = ["speaker", "pill", "homepod", "soundbar", "boom", "sonos", "flip", "charge", "soundlink"]
+        if speakers.contains(where: name.contains) { return false }
+        let headphones = [
+            "airpods", "headphone", "headset", "earbud", "buds", "beats", "earphone", "pods", "quietcomfort",
+            "wh-1000", "wf-1000",
+        ]
+        if headphones.contains(where: name.contains) { return true }
         switch value(device, kAudioDevicePropertyTransportType, default: UInt32(0)) {
         case kAudioDeviceTransportTypeBuiltIn:
             let source = value(
                 device, kAudioDevicePropertyDataSource, kAudioObjectPropertyScopeOutput, default: UInt32(0))
             return source == 0x6864_706E  // 'hdpn'
-        case kAudioDeviceTransportTypeBluetooth, kAudioDeviceTransportTypeBluetoothLE:
-            return !["speaker", "homepod", "soundbar", "boom", "sonos"].contains(where: name.contains)
         default:
             return false
         }

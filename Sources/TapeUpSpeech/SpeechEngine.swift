@@ -42,11 +42,12 @@ public enum ModelStore {
     }
 }
 
-/// A loaded model and the one queue everything it runs on. MLX models are
-/// not thread safe, so every pipeline that uses them is fed on `queue`.
+/// A loaded model. MLX is not thread safe, so all model work, loading
+/// included and across engines, runs one piece at a time on `queue`.
 public final class SpeechEngine: @unchecked Sendable {
     public let model: SpeechModel
-    let queue = DispatchQueue(label: "tapeup.speech", qos: .userInitiated)
+    static let queue = DispatchQueue(label: "tapeup.speech", qos: .userInitiated)
+    var queue: DispatchQueue { Self.queue }
     private let recognizer: QwenRecognizer
 
     private init(model: SpeechModel, recognizer: QwenRecognizer) {
@@ -55,25 +56,51 @@ public final class SpeechEngine: @unchecked Sendable {
     }
 
     public static func load(_ model: SpeechModel) async throws -> SpeechEngine {
-        let asr = try await Qwen3ASRModel.fromPretrained(
-            modelId: model.id, cacheDir: ModelStore.directory(for: model.id), offlineMode: true)
-        return SpeechEngine(model: model, recognizer: QwenRecognizer(model: asr))
+        try await exclusively {
+            let asr = try await Qwen3ASRModel.fromPretrained(
+                modelId: model.id, cacheDir: ModelStore.directory(for: model.id), offlineMode: true)
+            return SpeechEngine(model: model, recognizer: QwenRecognizer(model: asr))
+        }
+    }
+
+    /// Runs async model work with `queue` held, so nothing else touches MLX
+    /// meanwhile. The queue's thread waits; the work runs on its own.
+    static func exclusively<T: Sendable>(_ work: @escaping @Sendable () async throws -> T) async throws -> T {
+        try await withCheckedThrowingContinuation { continuation in
+            queue.async {
+                let done = DispatchSemaphore(value: 0)
+                Task {
+                    do { continuation.resume(returning: try await work()) } catch {
+                        continuation.resume(throwing: error)
+                    }
+                    done.signal()
+                }
+                done.wait()
+            }
+        }
     }
 
     /// A new transcript, fed live or from a file. Each session has its own
     /// voice detectors, since a detector carries state from chunk to chunk.
     public func session(names: String?, microphone: Bool, computer: Bool) async throws -> TranscriptSession {
         let directory = try ModelStore.directory(for: SileroVADModel.defaultModelId)
-        var detectors: [SileroVADModel] = []
-        for _ in 0..<2 {
-            detectors.append(try await SileroVADModel.fromPretrained(cacheDir: directory, offlineMode: true))
-        }
+        let detectors = try await Self.exclusively {
+            var detectors: [SileroVADModel] = []
+            for _ in 0..<2 {
+                detectors.append(try await SileroVADModel.fromPretrained(cacheDir: directory, offlineMode: true))
+            }
+            return Detectors(models: detectors)
+        }.models
         return TranscriptSession(
             engine: self, detectors: detectors, hints: model.takesHints ? names : nil, microphone: microphone,
             computer: computer)
     }
 
     fileprivate var speechRecognizer: SpeechRecognizer { recognizer }
+}
+
+private struct Detectors: @unchecked Sendable {
+    let models: [SileroVADModel]
 }
 
 /// One transcript in the making. Feed it from any thread; the work happens
@@ -89,6 +116,16 @@ public final class TranscriptSession: @unchecked Sendable {
     private let engine: SpeechEngine
     private let pipeline: TranscriptPipeline
     private let latestLines = OSAllocatedUnfairLock(initialState: [TranscriptLine]())
+    private let backlog = OSAllocatedUnfairLock(initialState: Backlog())
+
+    private struct Backlog {
+        var frames = 0
+        var overloaded = false
+    }
+
+    /// Live audio waiting for the model, at most two minutes behind; past
+    /// that the session gives up and the transcript is made from the file.
+    private static let backlogLimit = 48_000 * 120
 
     fileprivate init(
         engine: SpeechEngine, detectors: [SileroVADModel], hints: String?, microphone: Bool, computer: Bool
@@ -111,12 +148,32 @@ public final class TranscriptSession: @unchecked Sendable {
     public var latest: [TranscriptLine] { latestLines.withLock { $0 } }
 
     public func feed(left: [Float], right: [Float], headphones: Bool) {
+        let frames = left.count
+        let accepted = backlog.withLock { backlog in
+            if backlog.frames > Self.backlogLimit { backlog.overloaded = true }
+            if backlog.overloaded { return false }
+            backlog.frames += frames
+            return true
+        }
+        guard accepted else { return }
         engine.queue.async { [self] in
+            defer { backlog.withLock { $0.frames -= frames } }
+            guard !overloaded else { return }
             pipeline.feed(left: left, right: right, headphones: headphones)
             let last = Array(pipeline.lines.suffix(2))
             latestLines.withLock { $0 = last }
         }
     }
+
+    /// True once the live audio fell too far behind; what was heard is
+    /// then incomplete, and the queued audio is skipped.
+    public var overloaded: Bool { backlog.withLock { $0.overloaded } }
+
+    /// Seconds of live audio waiting for the model.
+    public var behind: Double { Double(backlog.withLock { $0.frames }) / 48_000 }
+
+    /// Stops work on audio still queued, for a session that will not be finished.
+    public func abandon() { backlog.withLock { $0.overloaded = true } }
 
     public func finish() async -> Outcome {
         await withCheckedContinuation { continuation in
@@ -219,16 +276,23 @@ final class SileroDetector: VoiceDetector {
 /// arrived, interrupted, retried after a failure, or asked for later.
 public enum FolderTranscriber {
     public static func run(folder: URL, engine: SpeechEngine, names: String?) async throws {
+        let outcome = try await transcribe(folder: folder, engine: engine, names: names)
+        try TranscriptDocument.save(
+            lines: outcome.lines, failures: outcome.failures, pieces: outcome.pieces, model: engine.model,
+            in: folder)
+    }
+
+    /// The lines heard, without saving them: the folder may be renamed while
+    /// this runs, so the caller looks it up again to save.
+    public static func transcribe(
+        folder: URL, engine: SpeechEngine, names: String?
+    ) async throws -> TranscriptSession.Outcome {
         guard let meta = MetaFile.read(folder) else { throw CocoaError(.fileNoSuchFile) }
         let sources = meta["sources"] as? [String] ?? ["microphone", "computer audio"]
         let audio = folder.appendingPathComponent(meta["audio"] as? String ?? "audio.m4a")
         try RecordingLibrary.markTranscript("transcribing", model: engine.model.name, in: folder)
         let session = try await engine.session(
             names: names, microphone: sources.contains("microphone"), computer: sources.contains("computer audio"))
-        let outcome = try await session.transcribe(
-            file: audio, headphones: meta["output_headphones"] as? Bool == true)
-        try TranscriptDocument.save(
-            lines: outcome.lines, failures: outcome.failures, pieces: outcome.pieces, model: engine.model,
-            in: folder)
+        return try await session.transcribe(file: audio, headphones: meta["output_headphones"] as? Bool == true)
     }
 }
