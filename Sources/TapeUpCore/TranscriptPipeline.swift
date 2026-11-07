@@ -20,7 +20,7 @@ public protocol SpeechRecognizer: AnyObject {
 }
 
 /// Which channel a line was heard on, when the two can be told apart.
-public enum Side: String, Sendable, Equatable {
+public enum Side: String, Sendable, Equatable, Codable {
     case microphone
     case computer
 
@@ -28,7 +28,7 @@ public enum Side: String, Sendable, Equatable {
     public var label: String { self == .microphone ? "Microphone" : "Computer audio" }
 }
 
-public struct TranscriptLine: Sendable, Equatable {
+public struct TranscriptLine: Sendable, Equatable, Codable {
     /// Seconds from the start of `audio.m4a`.
     public var start: Double
     public var end: Double
@@ -337,6 +337,14 @@ public enum NameHints {
 /// `transcript.md`: one paragraph per piece, its time first.
 public enum TranscriptDocument {
     public static let fileName = "transcript.md"
+    /// The lines with their times, kept for speaker labels; hidden, since
+    /// `transcript.md` is the file for people and agents.
+    public static let linesFileName = ".transcript-lines.json"
+
+    public static func lines(in folder: URL) -> [TranscriptLine]? {
+        guard let data = try? Data(contentsOf: folder.appendingPathComponent(linesFileName)) else { return nil }
+        return try? JSONDecoder().decode([TranscriptLine].self, from: data)
+    }
 
     public static func render(lines: [TranscriptLine], labeled: Bool, model: String, missing: Int = 0) -> String {
         let long = (lines.last?.end ?? 0) >= 3600
@@ -386,6 +394,7 @@ extension TranscriptDocument {
         let labeled = sidesKnown(meta: MetaFile.read(folder) ?? [:])
         let text = render(lines: lines, labeled: labeled, model: model.name, missing: failures)
         try text.write(to: folder.appendingPathComponent(fileName), atomically: true, encoding: .utf8)
+        try JSONEncoder().encode(lines).write(to: folder.appendingPathComponent(linesFileName), options: .atomic)
         try RecordingLibrary.markTranscript(
             "done", model: model.name, sideLabels: labeled, missing: failures, in: folder)
     }

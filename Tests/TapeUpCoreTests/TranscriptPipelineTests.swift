@@ -322,3 +322,45 @@ struct SpeechModelTests {
         #expect(SpeechModel.choose(memoryBytes: 48 * gb, onBattery: false) == .large)
     }
 }
+
+struct SpeakerLabelsTests {
+    let lines = [
+        TranscriptLine(start: 0, end: 4, text: "Hello there."),
+        TranscriptLine(start: 5, end: 15, text: "I have been thinking about the study design all week."),
+        TranscriptLine(start: 16, end: 18, text: "Right."),
+        TranscriptLine(start: 40, end: 42, text: "Anyone?"),
+    ]
+
+    @Test func eachLineTakesTheVoiceHeardLongestAndVoicesAreNumberedByTalk() {
+        let turns = [
+            VoiceTurn(start: 0, end: 4.5, voice: 7),
+            VoiceTurn(start: 4.5, end: 6, voice: 7),
+            VoiceTurn(start: 6, end: 15, voice: 3),
+            VoiceTurn(start: 16, end: 18, voice: 7),
+        ]
+        let assigned = SpeakerLabels.assign(lines: lines, turns: turns)
+        #expect(assigned == [2, 1, 2, nil])
+        let voices = SpeakerLabels.voices(lines: lines, assigned: assigned)
+        #expect(voices.map(\.id) == [1, 2])
+        #expect(voices[0].seconds == 10)
+        #expect(voices[0].quote.hasPrefix("I have been"))
+        #expect(voices[1].quote == "Hello there.")
+    }
+
+    @Test func namedAndUnnamedVoicesRender() {
+        let text = SpeakerLabels.render(
+            lines: lines, assigned: [2, 1, 2, nil], names: [1: "Priya"], model: "Qwen3-ASR 1.7B")
+        #expect(text.contains("[00:05] Priya: I have been"))
+        #expect(text.contains("[00:00] Voice 2: Hello there."))
+        #expect(text.contains("[00:40] Anyone?"))
+    }
+
+    @Test func linesAreKeptForLabelsLater() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try MetaFile.update(folder) { $0["status"] = "recorded" }
+        try TranscriptDocument.save(lines: lines, failures: 0, pieces: 4, model: .large, in: folder)
+        #expect(TranscriptDocument.lines(in: folder) == lines)
+    }
+}
