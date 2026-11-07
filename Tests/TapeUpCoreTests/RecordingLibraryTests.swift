@@ -180,9 +180,11 @@ struct TranscriptStateTests {
         defer { try? FileManager.default.removeItem(at: root) }
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let guide = root.appendingPathComponent("AGENTS.md")
-        try RecordingLibrary.earlierAgentsGuides[0].write(to: guide, atomically: true, encoding: .utf8)
-        try RecordingLibrary(root: root).prepareRoot()
-        #expect(try String(contentsOf: guide, encoding: .utf8) == RecordingLibrary.agentsGuide)
+        for earlier in RecordingLibrary.earlierAgentsGuides {
+            try earlier.write(to: guide, atomically: true, encoding: .utf8)
+            try RecordingLibrary(root: root).prepareRoot()
+            #expect(try String(contentsOf: guide, encoding: .utf8) == RecordingLibrary.agentsGuide)
+        }
         let edited = RecordingLibrary.earlierAgentsGuides[0] + "Summaries go in notes/.\n"
         try edited.write(to: guide, atomically: true, encoding: .utf8)
         try RecordingLibrary(root: root).prepareRoot()
