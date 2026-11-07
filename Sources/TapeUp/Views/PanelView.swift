@@ -2,7 +2,7 @@ import SwiftUI
 import TapeUpCore
 
 /// Everything inside the drop-down panel. One page at a time: the recorder
-/// with Recent, a recording's card, or People. Pages swap without a
+/// with Recent, a recording's card, People or Settings. Pages swap without a
 /// cross-fade, so the window never sizes itself to two pages at once.
 struct PanelView: View {
     static let width = Style.width
@@ -35,6 +35,8 @@ struct PanelView: View {
     @ViewBuilder private var page: some View {
         if model.showingPeople {
             PeopleView(model: model)
+        } else if model.showingSettings {
+            SettingsView(model: model)
         } else if let card = model.card {
             CardView(model: model, card: card)
         } else {

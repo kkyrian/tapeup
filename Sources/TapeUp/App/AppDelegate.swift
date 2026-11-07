@@ -10,7 +10,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotKey: HotKey?
     private var commands: NSObjectProtocol?
     private var floating: FloatingControls!
-    private lazy var agentMenu = AgentMenu(agents: model.agents)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -62,49 +61,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func statusItemClicked() {
         guard NSApp.currentEvent?.type == .rightMouseDown else { return panel.toggle() }
-        model.agents.refresh()
+        model.agents.refreshIfOn()
         panel.close()
         statusItem.menu = appMenu()
         statusItem.button?.performClick(nil)
         statusItem.menu = nil
     }
 
-    /// The same app-wide items as the panel's ··· menu, on right-click.
+    /// The same items as the panel's ··· menu, on right-click.
     private func appMenu() -> NSMenu {
         let menu = NSMenu()
-        func item(_ title: String, on: Bool? = nil, _ action: @escaping @MainActor () -> Void) -> NSMenuItem {
-            let item = ClosureMenuItem(title: title, action: action)
-            if let on { item.state = on ? .on : .off }
-            return item
+        func item(_ title: String, _ action: @escaping @MainActor () -> Void) -> NSMenuItem {
+            ClosureMenuItem(title: title, action: action)
         }
         menu.addItem(
             item("People…") { [weak self] in
                 self?.model.openPeople()
                 self?.panel.show()
             })
-        let folder = item("Change Recordings Folder…") { [weak self] in
-            guard let self else { return }
-            FolderChooser.choose(model: model)
-        }
-        folder.isEnabled = model.phase == .idle
-        menu.addItem(folder)
         menu.addItem(
-            item("Floating Controls While Recording", on: model.showsFloatingControls) { [weak self] in
-                self?.model.showsFloatingControls.toggle()
+            item(model.agents.settingsTitle) { [weak self] in
+                self?.model.openSettings()
+                self?.panel.show()
             })
-        menu.addItem(
-            item("Open at Login", on: model.launchAtLogin) { [weak self] in
-                guard let self else { return }
-                model.launchAtLogin.toggle()
-            })
-        let agent = NSMenuItem(title: model.agents.menuTitle, action: nil, keyEquivalent: "")
-        let agents = NSMenu()
-        agents.autoenablesItems = false
-        // Filled as it opens, with the state the check just found.
-        agents.delegate = agentMenu
-        agentMenu.fill(agents)
-        agent.submenu = agents
-        menu.insertItem(agent, at: 1)
         menu.addItem(.separator())
         menu.addItem(item("Quit TapeUp") { NSApp.terminate(nil) })
         menu.autoenablesItems = false
@@ -186,29 +165,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 "TapeUp, \(model.paused ? "paused" : "recording"), \(Format.spokenDuration(model.elapsed))")
         }
     }
-}
-
-/// The right-click Agent submenu, the same rows as in ···.
-@MainActor
-final class AgentMenu: NSObject, NSMenuDelegate {
-    let agents: Agents
-
-    init(agents: Agents) { self.agents = agents }
-
-    func fill(_ menu: NSMenu) {
-        menu.removeAllItems()
-        let caption = NSMenuItem(title: Agents.caption, action: nil, keyEquivalent: "")
-        caption.isEnabled = false
-        menu.addItem(caption)
-        for row in agents.rows {
-            let item = ClosureMenuItem(title: row.title, action: row.action)
-            item.state = row.checked ? .on : .off
-            item.isEnabled = row.enabled
-            menu.addItem(item)
-        }
-    }
-
-    func menuNeedsUpdate(_ menu: NSMenu) { fill(menu) }
 }
 
 /// A menu item that runs a closure.

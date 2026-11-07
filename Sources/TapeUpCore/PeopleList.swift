@@ -128,6 +128,34 @@ public struct PeopleList: Sendable, Equatable {
         people.removeAll { $0.name == name }
     }
 
+    /// True when the name is the user's or a listed person's, ignoring case.
+    public func contains(_ name: String, except: String? = nil) -> Bool {
+        let name = name.lowercased()
+        if you?.lowercased() == name { return true }
+        return people.contains { $0.name.lowercased() == name && $0.name != except }
+    }
+
+    /// Renames a person or changes their note, in place. False when the new
+    /// name is empty or already someone else's.
+    @discardableResult
+    public mutating func update(_ name: String, to person: Person) -> Bool {
+        guard let index = people.firstIndex(where: { $0.name == name }), let newName = Self.clean(person.name),
+            !contains(newName, except: name)
+        else { return false }
+        people[index] = Person(name: newName, context: Self.clean(person.context))
+        return true
+    }
+
+    /// Sets the user's own name; empty clears it. False when someone listed
+    /// already has the name.
+    @discardableResult
+    public mutating func setYou(_ name: String?) -> Bool {
+        let name = Self.clean(name)
+        if let name, people.contains(where: { $0.name.lowercased() == name.lowercased() }) { return false }
+        you = name
+        return true
+    }
+
     // MARK: File
 
     public static func url(in root: URL) -> URL { root.appendingPathComponent(fileName) }
@@ -140,7 +168,18 @@ public struct PeopleList: Sendable, Equatable {
     /// list, so callers never save over a list they failed to understand.
     public static func loadChecked(from root: URL) throws -> PeopleList {
         guard let text = try? String(contentsOf: url(in: root), encoding: .utf8) else { return PeopleList() }
-        return try parse(text)
+        do {
+            return try parse(text)
+        } catch {
+            // TapeUp's own file with everyone removed is an empty list, not junk.
+            if let object = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any],
+                object["format"] as? String == format,
+                object["people"] == nil || (object["people"] as? [Any])?.isEmpty == true
+            {
+                return PeopleList(you: clean(object["you"] as? String))
+            }
+            throw error
+        }
     }
 
     /// Moves an unreadable `people.json` aside so it is kept, not overwritten.
@@ -170,7 +209,7 @@ public struct PeopleList: Sendable, Equatable {
     private static func clean(_ text: String?) -> String? {
         guard let text else { return nil }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : String(trimmed.prefix(80))
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     // MARK: Instructions for the user's assistant

@@ -74,6 +74,37 @@ struct PeopleListTests {
         }
     }
 
+    @Test func editsInPlaceAndRefusesTakenNames() {
+        var list = PeopleList(you: "Sam", people: [.init(name: "Ana"), .init(name: "Bo", context: "TA")])
+        var ok = list.update("Ana", to: .init(name: " Ana Ortiz ", context: "advisor"))
+        #expect(ok)
+        #expect(list.people == [.init(name: "Ana Ortiz", context: "advisor"), .init(name: "Bo", context: "TA")])
+        ok = list.update("Bo", to: .init(name: "ana ortiz"))
+        #expect(!ok)
+        ok = list.update("Bo", to: .init(name: "SAM"))
+        #expect(!ok)
+        ok = list.update("Bo", to: .init(name: "  "))
+        #expect(!ok)
+        ok = list.update("Bo", to: .init(name: "bo", context: " "))
+        #expect(ok)
+        #expect(list.people[1] == .init(name: "bo"))
+        ok = list.setYou("Ana Ortiz")
+        #expect(!ok)
+        ok = list.setYou("Priya Shah")
+        #expect(ok && list.you == "Priya Shah")
+        ok = list.setYou(" ")
+        #expect(ok && list.you == nil)
+    }
+
+    @Test func anEmptiedListStillLoads() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try PeopleList(you: "Sam").save(to: root)
+        #expect(try PeopleList.loadChecked(from: root) == PeopleList(you: "Sam"))
+        try PeopleList().save(to: root)
+        #expect(try PeopleList.loadChecked(from: root).isEmpty)
+    }
+
     @Test func refusesToLoadAnUnreadableFile() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

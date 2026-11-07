@@ -130,7 +130,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     func show(takingFocus: Bool = true) {
         model.refreshAccess()
         model.reload()
-        model.agents.refreshIfOn()
+        if model.showingSettings { model.agents.refresh() } else { model.agents.refreshIfOn() }
         if model.card?.justRecorded == false, !isVisible { model.closeCard() }
         panel.contentView?.layoutSubtreeIfNeeded()
         target = nil

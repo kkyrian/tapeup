@@ -29,7 +29,7 @@ goes to the cloud. Your own agents take it from there.
   request; Claude Code or Codex saves `people.json` directly, and a chat
   assistant's answer is pasted back with one click.
 
-Recordings go to `~/TapeUp` (change it from the ··· menu). Each folder holds
+Recordings go to `~/TapeUp` (change it in Settings, from the ··· menu). Each folder holds
 `audio.m4a` (left: your mic, right: your Mac's audio), `transcript.md` and
 `meta.json`; the `AGENTS.md` at the root explains the layout to any agent.
 With headphones, transcript lines say which side they came from:

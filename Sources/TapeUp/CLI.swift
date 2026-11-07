@@ -31,7 +31,7 @@ enum CLI {
         works, on stderr with error, message, suggestion and retryable when it
         does not. Usage errors exit 2, other failures 1.
         People are listed in people.json in the recordings folder; edit it directly.
-        The agent is turned on only by the user, in TapeUp's ··· menu under Agent.
+        The agent is turned on only by the user, in TapeUp's Settings, under Your AI.
 
         """
 
@@ -166,7 +166,7 @@ enum CLI {
             } else if let word = rest.first, rest.count == 1, AgentKind(rawValue: word) != nil || word == "on" {
                 fail(
                     "needs_user", "Only the user turns the agent on.",
-                    suggestion: "Ask them to pick it in TapeUp's ··· menu, under Agent.")
+                    suggestion: "Ask them to pick it in TapeUp's Settings, under Your AI.")
             } else if !rest.isEmpty {
                 fail("usage", "TapeUp agent [off] [--model M] [--effort E]", suggestion: "Run TapeUp help.")
             }
@@ -174,7 +174,7 @@ enum CLI {
                 if !changes.isEmpty {
                     fail(
                         "no_agent", "No agent is on.",
-                        suggestion: "The user picks one in TapeUp's ··· menu, under Agent.")
+                        suggestion: "The user picks one in TapeUp's Settings, under Your AI.")
                 }
                 succeed("Agent: off", ["agent": NSNull()])
             }

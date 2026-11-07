@@ -1,15 +1,16 @@
 import SwiftUI
 import TapeUpCore
 
-/// Who you record with, written by your own AI assistant: copy one request,
-/// and either the assistant saves the list itself or you paste its answer.
+/// Who you record with: a list you add to, edit and prune by hand, which
+/// your own AI assistant can also fill in.
 struct PeopleView: View {
     @Bindable var model: AppModel
     @State private var filter = ""
+    /// The copy-and-paste steps for filling the list from your AI.
+    @State private var filling = false
     @FocusState private var filterFocused: Bool
 
     private var list: PeopleList { model.peopleList }
-    private var hasList: Bool { !list.people.isEmpty || list.you != nil }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -17,104 +18,94 @@ struct PeopleView: View {
                 IconButton(symbol: "chevron.left", help: "Back", action: model.closePeople)
                     .frame(width: Style.textEdge - Style.inset, alignment: .leading)
                 Text("People").font(.system(size: 13, weight: .semibold))
-                if !list.people.isEmpty {
+                // A notice takes the count's place, so nothing moves.
+                if let notice = shortNotice {
+                    notice.padding(.leading, 8)
+                } else if !list.people.isEmpty {
                     Text("  \(list.people.count)").font(.system(size: 13).monospacedDigit()).foregroundStyle(.secondary)
                 }
-                Spacer()
+                Spacer(minLength: 4)
+                LinkButton(filling ? "Done" : "Fill from your AI") { filling.toggle() }
+                    .hoverHelp(filling ? "Hide the steps" : "Have your AI assistant write the list")
             }
-
-            if hasList {
-                HStack(spacing: 2) {
-                    // A notice takes the label's place, so nothing moves.
-                    if model.peopleNotice == nil || copied {
-                        Text(copied ? "Waiting…" : "From your AI")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    } else {
-                        status.lineLimit(1).hoverHelp(longNotice)
-                    }
-                    Spacer(minLength: 0)
-                    textButton(copied ? "Copied" : "Copy request", action: model.copyAssistantPrompt)
-                    textButton("Paste answer", action: model.pasteAssistantAnswer)
-                }
-            } else {
-                // The explanation and any notice share one slot of fixed height.
-                Group {
-                    if model.peopleNotice == nil {
-                        Text(
-                            "Your AI assistant writes the list. TapeUp suggests names from it when you note who was there."
-                        )
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                    } else {
-                        status
-                    }
-                }
-                .frame(maxWidth: .infinity, minHeight: 44, alignment: .topLeading)
-                VStack(spacing: 6) {
-                    FlatButton(kind: .primary, action: model.copyAssistantPrompt) {
-                        Label(
-                            copied ? "Copied" : "Copy request for your AI",
-                            systemImage: copied ? "checkmark" : "doc.on.doc"
-                        )
-                        .contentTransition(.symbolEffect(.replace))
-                    }
-                    FlatButton(kind: .plain, action: model.pasteAssistantAnswer) {
-                        Label("Paste answer", systemImage: "doc.on.clipboard")
-                    }
-                }
+            if filling {
+                fillSteps
+                Divider()
             }
-
-            if hasList {
-                people
-            }
+            people
         }
         .padding(Style.inset)
+        .onChange(of: model.peopleNotice) { _, notice in
+            // The list arrived from the assistant: the steps are done.
+            if case .added = notice { filling = false }
+        }
     }
 
-    private func textButton(_ title: String, action: @escaping () -> Void) -> some View {
-        LinkButton(title, action: action)
-    }
+    // MARK: Filling from your AI
 
     private var copied: Bool { model.peopleNotice == .copied }
 
-    private var longNotice: String {
-        model.peopleNotice == .pasteFailed
-            ? "No list on the clipboard. Copy the assistant's whole answer, then paste again." : ""
-    }
-
-    @ViewBuilder private var status: some View {
-        switch model.peopleNotice {
-        case .copied:
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                ProgressView().controlSize(.mini)
-                Text("Claude Code or Codex saves it here directly. From a chat app, paste its answer.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+    private var fillSteps: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Group {
+                if copied {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        ProgressView().controlSize(.mini)
+                        Text("Claude Code or Codex saves it here directly. From a chat app, paste its answer.")
+                    }
+                } else if model.peopleNotice == .pasteFailed {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Image(systemName: "exclamationmark.circle.fill").foregroundStyle(.orange)
+                        Text("No list on the clipboard. Copy the assistant's whole answer, then paste again.")
+                    }
+                } else {
+                    Text("Copy a request for your AI assistant. It writes everyone you record with into this list.")
+                }
             }
-        case .added(let count):
-            noticeLine(
-                count == 0 ? "Updated" : "\(count) added", failed: false)
-        case .pasteFailed:
-            noticeLine(hasList ? "Nothing to paste" : longNotice, failed: true)
-        case nil:
-            EmptyView()
+            .font(.system(size: 11))
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, minHeight: 30, alignment: .topLeading)
+            HStack(spacing: 6) {
+                FlatButton(kind: .primary, action: model.copyAssistantPrompt) {
+                    Label(copied ? "Copied" : "Copy request", systemImage: copied ? "checkmark" : "doc.on.doc")
+                        .contentTransition(.symbolEffect(.replace))
+                }
+                FlatButton(kind: .plain, action: model.pasteAssistantAnswer) {
+                    Label("Paste answer", systemImage: "doc.on.clipboard")
+                }
+            }
         }
     }
 
-    private func noticeLine(_ text: String, failed: Bool) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Image(systemName: failed ? "exclamationmark.circle.fill" : "checkmark.circle.fill")
-                .foregroundStyle(failed ? Color.orange : Color.green)
-            Text(text).font(.system(size: 12)).fixedSize(horizontal: false, vertical: true)
+    /// What just happened, in a few words beside the title.
+    private var shortNotice: AnyView? {
+        let text: String
+        var failed = false
+        switch model.peopleNotice {
+        case .added(let count): text = count == 0 ? "Updated" : "\(count) added"
+        case .pasteFailed where !filling:
+            text = "Nothing to paste"
+            failed = true
+        case .taken(let name):
+            text = "\(name) is already listed"
+            failed = true
+        default: return nil
         }
-        .task(id: model.peopleNotice) {
-            try? await Task.sleep(for: .seconds(failed ? 6 : 3))
-            if !Task.isCancelled { model.clearPeopleNotice() }
-        }
+        return AnyView(
+            HStack(spacing: 4) {
+                Image(systemName: failed ? "exclamationmark.circle.fill" : "checkmark.circle.fill")
+                    .foregroundStyle(failed ? Color.orange : Color.green)
+                Text(text).lineLimit(1).truncationMode(.middle)
+            }
+            .font(.system(size: 11))
+            .task(id: model.peopleNotice) {
+                try? await Task.sleep(for: .seconds(failed ? 4 : 3))
+                if !Task.isCancelled { model.clearPeopleNotice() }
+            })
     }
+
+    // MARK: The list
 
     private var shown: [PeopleList.Person] {
         let query = filter.trimmingCharacters(in: .whitespaces)
@@ -136,51 +127,278 @@ struct PeopleView: View {
                 .padding(.horizontal, 8)
                 .frame(height: 28)
                 .background(Style.fill, in: .rect(cornerRadius: 6, style: .continuous))
-                .onAppear { if model.panelFocused { filterFocused = true } }
             }
-            ScrollView {
-                LazyVStack(spacing: 0) {
-                    if let you = list.you, filter.isEmpty {
-                        HStack(spacing: 6) {
-                            Text(you).font(.system(size: 13))
-                            Text("you").font(.system(size: 12)).foregroundStyle(.tertiary)
-                            Spacer()
+            ScrollViewReader { scroller in
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        if filter.isEmpty {
+                            // Someone added lands at the end: bring them into view.
+                            AddPersonRow(model: model) { name in
+                                withAnimation(.easeOut(duration: 0.2)) { scroller.scrollTo(name, anchor: .bottom) }
+                            }
+                            YouRow(model: model, you: list.you)
                         }
-                        .padding(.horizontal, 6)
-                        .frame(height: 28)
-                    }
-                    ForEach(shown, id: \.name) { person in
-                        PersonRow(person: person) { model.removePerson(person.name) }
+                        ForEach(shown, id: \.name) { person in
+                            PersonRow(model: model, person: person).id(person.name)
+                        }
                     }
                 }
             }
-            .frame(height: min(CGFloat(max(shown.count + (list.you == nil ? 0 : 1), 1)) * 28, 224))
+            .frame(height: min(CGFloat(shown.count + (filter.isEmpty ? 2 : 0)) * 28, 252))
             .padding(.horizontal, -6)
         }
     }
 }
 
-/// A person in the list; remove appears on hover.
-private struct PersonRow: View {
-    let person: PeopleList.Person
-    let remove: () -> Void
-    @State private var hovering = false
+/// Type a name, and a note if you like, then Return: the person is listed
+/// and the field is ready for the next one.
+private struct AddPersonRow: View {
+    let model: AppModel
+    let added: (String) -> Void
+    @State private var name = ""
+    @State private var note = ""
+    @FocusState private var focus: Field?
+
+    private enum Field { case name, note }
 
     var body: some View {
-        HStack(spacing: 8) {
-            Text(person.name).font(.system(size: 13)).lineLimit(1)
-            if let context = person.context {
-                Text(context).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
-            }
-            Spacer(minLength: 4)
-            if hovering {
-                IconButton(symbol: "xmark", help: "Remove \(person.name)", size: 20, action: remove)
+        HStack(spacing: 6) {
+            Image(systemName: "plus")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Color.accentColor)
+            TextField("Add a person", text: $name)
+                .focused($focus, equals: .name)
+                .onSubmit(add)
+            if !name.trimmingCharacters(in: .whitespaces).isEmpty {
+                TextField("Note", text: $note)
+                    .focused($focus, equals: .note)
+                    .onSubmit(add)
+                    .frame(width: 104)
+                    .transition(.opacity)
             }
         }
+        .textFieldStyle(.plain)
+        .font(.system(size: 13))
+        .onExitCommand(perform: clear)
         .padding(.horizontal, 6)
         .frame(height: 28)
-        .background(hovering ? Style.fill : .clear, in: .rect(cornerRadius: 6, style: .continuous))
+        .background(focus != nil ? Style.fill : .clear, in: .rect(cornerRadius: 6, style: .continuous))
+        .animation(.easeOut(duration: 0.15), value: name.isEmpty)
+        // While something is typed, Escape clears it instead of closing the panel.
+        .onChange(of: name.isEmpty) { _, empty in model.renaming = !empty }
+        .onDisappear { if !name.isEmpty { model.renaming = false } }
         .contentShape(.rect)
+        .onTapGesture {
+            model.focusPanel()
+            focus = .name
+        }
+    }
+
+    private func add() {
+        guard model.addPerson(name, note: note) else { return }
+        let person = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        clear()
+        DispatchQueue.main.async { added(person) }
+        focus = .name
+    }
+
+    private func clear() {
+        name = ""
+        note = ""
+    }
+}
+
+/// The user's own name, first on the list. Click to set or change it.
+private struct YouRow: View {
+    let model: AppModel
+    let you: String?
+    @State private var editing = false
+    @State private var text = ""
+    @State private var hovering = false
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if editing {
+                TextField("Your name", text: $text)
+                    .textFieldStyle(.plain)
+                    .focused($focused)
+                    .onSubmit(commit)
+                    .onExitCommand(perform: finish)
+            } else {
+                Text(you ?? "Your name")
+                    .foregroundStyle(you == nil ? .tertiary : .primary)
+                    .lineLimit(1)
+                if hovering {
+                    Image(systemName: "pencil").font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
+                }
+            }
+            Text("you").font(.system(size: 12)).foregroundStyle(.tertiary)
+            Spacer(minLength: 4)
+        }
+        .font(.system(size: 13))
+        .rowChrome(editing: editing, hovering: hovering)
         .onHover { hovering = $0 }
+        .onTapGesture { if !editing { begin() } }
+        .endsOnClickOutside(editing, perform: commit)
+        .onChange(of: model.panelVisible) { _, visible in if !visible { commit() } }
+        .accessibilityElement(children: editing ? .contain : .combine)
+        .accessibilityAddTraits(editing ? [] : .isButton)
+        .accessibilityHint(editing ? "" : "Set your name")
+    }
+
+    private func begin() {
+        text = you ?? ""
+        editing = true
+        model.renaming = true
+        model.focusPanel()
+        DispatchQueue.main.async { focused = true }
+    }
+
+    private func commit() {
+        guard editing else { return }
+        if text.trimmingCharacters(in: .whitespaces) == (you ?? "") || model.setYou(text) { finish() }
+    }
+
+    private func finish() {
+        editing = false
+        model.renaming = false
+    }
+}
+
+/// A person on the list. Click to edit the name and note in place; Return or
+/// a click elsewhere keeps the change, Escape puts it back. Remove on hover.
+private struct PersonRow: View {
+    let model: AppModel
+    let person: PeopleList.Person
+    @State private var editing = false
+    @State private var name = ""
+    @State private var note = ""
+    @State private var hovering = false
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if editing {
+                TextField("Name", text: $name)
+                    .focused($focused)
+                    .onSubmit(commit)
+                TextField("Note", text: $note)
+                    .onSubmit(commit)
+                    .frame(width: 104)
+            } else {
+                Text(person.name).lineLimit(1)
+                if let context = person.context {
+                    Text(context).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
+                }
+                Spacer(minLength: 4)
+                if hovering {
+                    IconButton(symbol: "xmark", help: "Remove \(person.name)", size: 20) {
+                        model.removePerson(person.name)
+                    }
+                }
+            }
+        }
+        .textFieldStyle(.plain)
+        .font(.system(size: 13))
+        .onExitCommand(perform: finish)
+        .rowChrome(editing: editing, hovering: hovering)
+        .onHover { hovering = $0 }
+        .onTapGesture { if !editing { begin() } }
+        .endsOnClickOutside(editing, perform: commit)
+        // Closing the panel keeps what was typed, like a click elsewhere.
+        .onChange(of: model.panelVisible) { _, visible in if !visible { commit() } }
+        .accessibilityElement(children: editing ? .contain : .combine)
+        .accessibilityAddTraits(editing ? [] : .isButton)
+        .accessibilityHint(editing ? "" : "Edit")
+        .accessibilityAction(named: "Remove") { model.removePerson(person.name) }
+    }
+
+    private func begin() {
+        name = person.name
+        note = person.context ?? ""
+        editing = true
+        // Escape then cancels the edit instead of closing the panel.
+        model.renaming = true
+        model.focusPanel()
+        DispatchQueue.main.async { focused = true }
+    }
+
+    private func finish() {
+        editing = false
+        model.renaming = false
+    }
+
+    /// An emptied name keeps the old one; a name someone else has stays in
+    /// the field, with a notice, until it is changed or Escape is pressed.
+    private func commit() {
+        guard editing else { return }
+        let newName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let newNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        if (newName.isEmpty || newName == person.name) && newNote == (person.context ?? "") {
+            finish()
+        } else if model.updatePerson(person.name, to: newName, note: newNote) {
+            finish()
+        }
+    }
+}
+
+extension View {
+    /// The list rows' padding, height and fill: a field's fill while
+    /// editing, the hover fill otherwise.
+    fileprivate func rowChrome(editing: Bool, hovering: Bool) -> some View {
+        padding(.horizontal, 6)
+            .frame(height: 28)
+            .background(
+                editing ? Style.fill : hovering ? Style.fillHover.opacity(0.6) : .clear,
+                in: .rect(cornerRadius: 6, style: .continuous)
+            )
+            .contentShape(.rect)
+    }
+
+    /// Runs `perform` on a click outside this view while `active`. The panel
+    /// never loses focus to a click inside it, so a field cannot tell.
+    func endsOnClickOutside(_ active: Bool, perform: @escaping () -> Void) -> some View {
+        modifier(ClickOutside(active: active, perform: perform))
+    }
+}
+
+private struct ClickOutside: ViewModifier {
+    let active: Bool
+    let perform: () -> Void
+    @State private var frame = CGRect.zero
+    @State private var monitor: Any?
+
+    func body(content: Content) -> some View {
+        content
+            .onGeometryChange(for: CGRect.self) {
+                $0.frame(in: .global)
+            } action: {
+                frame = $0
+            }
+            .onChange(of: active, initial: true) { _, now in now ? start() : stop() }
+            .onAppear { if active { start() } }
+            .onDisappear(perform: stop)
+    }
+
+    private func start() {
+        stop()
+        // Clicks in other windows (the floating controls, a dialog) are not
+        // clicks elsewhere in this one.
+        let window = NSApp.keyWindow
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { event in
+            MainActor.assumeIsolated {
+                if event.window === window, let height = event.window?.contentView?.bounds.height {
+                    let point = CGPoint(x: event.locationInWindow.x, y: height - event.locationInWindow.y)
+                    if !frame.contains(point) { perform() }
+                }
+            }
+            return event
+        }
+    }
+
+    private func stop() {
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        monitor = nil
     }
 }

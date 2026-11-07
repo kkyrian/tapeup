@@ -34,8 +34,10 @@ final class AppModel {
     private var suggester = NameSuggester(entries: [], people: PeopleList())
     private var peopleModified: Date?
 
-    /// The page in place of the recorder: who you record with, set up with your AI.
+    /// The page in place of the recorder: who you record with.
     var showingPeople = false
+    /// The page in place of the recorder: the folder, your AI and the app.
+    var showingSettings = false
     /// What the people page reports after a copy, a paste or the file changing.
     private(set) var peopleNotice: PeopleNotice?
 
@@ -43,6 +45,8 @@ final class AppModel {
         case copied
         case added(Int)
         case pasteFailed
+        /// A name typed by hand is already on the list.
+        case taken(String)
     }
 
     /// The card on screen: the recording just saved, or one opened from Recent.
@@ -250,6 +254,7 @@ final class AppModel {
             activeFolder = folder
             card = nil
             showingPeople = false
+            showingSettings = false
             phase = .recording(started: recorder.started)
             testing = false
             elapsed = 0
@@ -271,6 +276,9 @@ final class AppModel {
     /// Stops and saves. The card appears at once; the audio finishes in the background.
     func stop(then completion: (@MainActor () -> Void)? = nil) {
         guard case .recording(let started) = phase, let recorder else { return }
+        // The saved card shows, whichever page was open.
+        showingPeople = false
+        showingSettings = false
         tickClock()
         paused = false
         pausedSince = nil
@@ -550,16 +558,89 @@ final class AppModel {
     }
 
     func removePerson(_ name: String) {
+        changePeople { list in
+            list.remove(name)
+            return true
+        }
+    }
+
+    /// Adds a person typed by hand. False when the name is already listed.
+    @discardableResult
+    func addPerson(_ name: String, note: String?) -> Bool {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return false }
+        let added = changePeople { list in
+            guard !list.contains(name) else { return false }
+            list.add(.init(name: name, context: note))
+            return true
+        }
+        if !added { peopleNotice = .taken(name) }
+        return added
+    }
+
+    /// Renames a person or changes their note; an empty name keeps the old
+    /// one. False when the new name is someone else's. A person no longer
+    /// in the file (an assistant rewrote it) ends the edit with nothing saved.
+    @discardableResult
+    func updatePerson(_ name: String, to newName: String, note: String?) -> Bool {
+        var trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { trimmed = name }
+        var taken = false
+        changePeople { list in
+            guard list.people.contains(where: { $0.name == name }) else { return false }
+            taken = !list.update(name, to: .init(name: trimmed, context: note))
+            return !taken
+        }
+        if taken { peopleNotice = .taken(trimmed) }
+        return !taken
+    }
+
+    /// Sets the user's own name; empty clears it.
+    @discardableResult
+    func setYou(_ name: String) -> Bool {
+        let set = changePeople { $0.setYou(name) }
+        if !set { peopleNotice = .taken(name.trimmingCharacters(in: .whitespacesAndNewlines)) }
+        return set
+    }
+
+    /// Changes the list as it is on disk now and saves it; a refused
+    /// change saves nothing.
+    @discardableResult
+    private func changePeople(_ change: (inout PeopleList) -> Bool) -> Bool {
         var list = currentPeopleFile()
-        list.remove(name)
-        try? list.save(to: root)
+        let before = list
+        guard change(&list) else {
+            loadPeople()
+            return false
+        }
+        guard list != before else { return true }
+        do {
+            try library.prepareRoot()
+            try list.save(to: root)
+        } catch {
+            problem = "Could not save the people list: \(error.localizedDescription)"
+        }
         loadPeople()
+        return true
     }
 
     func openPeople() {
-        card = nil
+        // A card still saving comes back when the page closes.
+        if card?.finishing != true { card = nil }
         peopleNotice = nil
+        showingSettings = false
         showingPeople = true
+    }
+
+    func openSettings() {
+        if card?.finishing != true { card = nil }
+        showingPeople = false
+        showingSettings = true
+        agents.refresh()
+    }
+
+    func closeSettings() {
+        showingSettings = false
     }
 
     func closePeople() {
@@ -586,6 +667,7 @@ final class AppModel {
 
     func open(_ entry: RecordingEntry) {
         showingPeople = false
+        showingSettings = false
         card = Card(entry: entry, finishing: false, justRecorded: false)
         titles.suggest(for: entry, agent: true)
     }

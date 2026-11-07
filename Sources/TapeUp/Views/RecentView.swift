@@ -151,39 +151,18 @@ struct RecentRow: View {
     }
 }
 
-/// App-wide settings, also on right-click of the menu-bar icon.
+/// Where to go: People and Settings, also on right-click of the menu-bar icon.
 struct MoreMenu: View {
     @Bindable var model: AppModel
 
     var body: some View {
-        MoreButton(help: "TapeUp", badge: model.agents.needsAttention, opening: model.agents.refresh) {
+        MoreButton(help: "TapeUp", badge: model.agents.needsAttention) {
             Button("People…", action: model.openPeople)
-            Menu(model.agents.menuTitle) {
-                Text(Agents.caption)
-                ForEach(Array(model.agents.rows.enumerated()), id: \.offset) { _, row in
-                    Button(action: row.action) {
-                        if row.checked { Label(row.title, systemImage: "checkmark") } else { Text(row.title) }
-                    }
-                    .disabled(!row.enabled)
-                }
-            }
-            Button("Change Recordings Folder…") { FolderChooser.choose(model: model) }
-                .disabled(model.phase != .idle)
-            Toggle("Floating Controls While Recording", isOn: $model.showsFloatingControls)
-            Toggle("Open at Login", isOn: launchAtLogin)
+            Button(model.agents.settingsTitle, action: model.openSettings)
             Divider()
             Button("Quit TapeUp") { NSApp.terminate(nil) }
                 .keyboardShortcut("q")
         }
-    }
-
-    private var launchAtLogin: Binding<Bool> {
-        Binding(
-            get: {
-                _ = model.launchAtLoginRevision
-                return model.launchAtLogin
-            },
-            set: { model.launchAtLogin = $0 })
     }
 }
 

@@ -39,7 +39,7 @@ enum AgentState: Equatable, Sendable {
     case checking, notInstalled, signedOut, signedIn
 }
 
-/// The agent the user picked in the ··· menu, its sign-in state, and the
+/// The agent the user picked in Settings, its sign-in state, and the
 /// calls: one at a time, the model given no tools and held to a JSON shape.
 @MainActor @Observable
 final class Agents {
@@ -86,7 +86,7 @@ final class Agents {
     }
 
     /// Checks both agents, at most every few seconds and one check at a
-    /// time: when the Agent menu is about to open.
+    /// time: when Settings opens.
     func refresh() {
         guard checking == nil, Date().timeIntervalSince(checkedAt) > 3 else { return }
         checkedAt = Date()
@@ -110,48 +110,47 @@ final class Agents {
         refresh()
     }
 
-    /// The Agent menu, the same in ··· and on right-click: Off, then each
-    /// agent as it stands. Only a signed-in agent can be picked.
-    struct Row {
-        var title: String
-        var checked = false
-        var enabled = true
-        var action: @MainActor () -> Void
+    /// What the user's AI does, on the Settings page.
+    static let caption = "Use your agent to suggest titles and participant names."
+
+    /// The Settings item in ··· and on right-click, saying when the chosen
+    /// agent can no longer be called.
+    var settingsTitle: String {
+        guard needsAttention, let chosen else { return "Settings…" }
+        return "Settings… · \(chosen.name) \(state(of: chosen) == .notInstalled ? "Not Installed" : "Signed Out")"
     }
 
-    static let caption = "Suggests titles and names"
-
-    var menuTitle: String { needsAttention ? "Agent · Signed Out" : "Agent" }
-
-    var rows: [Row] {
-        var rows = [Row(title: "Off", checked: chosen == nil) { [weak self] in self?.choose(nil) }]
-        for kind in AgentKind.allCases {
-            let picked = chosen == kind
-            switch state(of: kind) {
-            case .checking:
-                rows.append(Row(title: kind.name, checked: picked, enabled: false) {})
-            case .signedIn:
-                rows.append(Row(title: kind.name, checked: picked) { [weak self] in self?.choose(kind) })
-            case .signedOut:
-                rows.append(
-                    Row(title: "Sign In to \(kind.name)…", checked: picked) { [weak self] in self?.signIn(kind) })
-            case .notInstalled:
-                rows.append(Row(title: "Install \(kind.name)…", checked: picked) { [weak self] in self?.install(kind) })
-            }
-        }
-        return rows
-    }
+    /// Agents the user started installing or signing in to in Terminal,
+    /// each until it is installed or signed in.
+    private(set) var waiting: [AgentKind: AgentState] = [:]
 
     func install(_ kind: AgentKind) {
         Terminal.run(kind.installCommand)
-        checkedAt = .distantPast
+        waiting[kind] = .notInstalled
     }
 
     func signIn(_ kind: AgentKind) {
         guard let path = AgentRunner.found(kind)?.path else { return install(kind) }
         Terminal.run(([path] + kind.signInArguments).map(Terminal.quote).joined(separator: " "))
-        // The state is checked again when the menu next opens.
-        checkedAt = .distantPast
+        waiting[kind] = .signedOut
+    }
+
+    /// While the Settings page shows: checks every few seconds on agents
+    /// being installed or signed in to in Terminal, so their rows change
+    /// on their own once that is done. Gives up after ten minutes.
+    func followTerminal() async {
+        let until = Date().addingTimeInterval(600)
+        while !waiting.isEmpty, Date() < until {
+            do { try await Task.sleep(for: .seconds(3)) } catch { return }
+            for (kind, from) in waiting {
+                let state = await AgentRunner.state(kind)
+                states[kind] = state
+                // Installed (it then asks to sign in) or signed in: done.
+                if state != from, state != .checking { waiting[kind] = nil }
+            }
+        }
+        // Given up on: the row offers Install or Sign In again.
+        if !Task.isCancelled { waiting.removeAll() }
     }
 
     /// Asks the chosen agent, if any, waiting for earlier calls. A call
@@ -308,7 +307,8 @@ enum AgentRunner {
                 tuned
                 ? ["--model", model ?? "sonnet", "--effort", effort ?? "low", "--setting-sources", ""]
                 : ["--settings", #"{"disableAllHooks":true}"#]
-            let output = try await Run.run(binary, arguments, input: prompt, in: work, timeout: 120)
+            let output = try await Run.run(
+                binary, arguments, input: prompt, in: work, timeout: 120, stoppable: true)
             // One result object, or every message when the user's settings ask for verbose output.
             let parsed = try? JSONSerialization.jsonObject(with: Data(output.stdout.utf8))
             let messages = parsed as? [[String: Any]] ?? (parsed as? [String: Any]).map { [$0] } ?? []
@@ -332,7 +332,8 @@ enum AgentRunner {
                 if let model { arguments += ["-m", model] }
                 arguments += ["-c", "model_reasoning_effort=\(effort ?? "low")"]
             }
-            let output = try await Run.run(binary, arguments + ["-"], input: prompt, in: work, timeout: 120)
+            let output = try await Run.run(
+                binary, arguments + ["-"], input: prompt, in: work, timeout: 120, stoppable: true)
             guard output.status == 0, let data = try? Data(contentsOf: answerFile),
                 (try? JSONSerialization.jsonObject(with: data)) is [String: Any]
             else { throw AgentFailure(Self.reason(output)) }
@@ -379,7 +380,7 @@ enum Run {
 
     static func run(
         _ executable: URL, _ arguments: [String], input: String? = nil, in folder: URL? = nil,
-        timeout: TimeInterval, keepOutput: Bool = true
+        timeout: TimeInterval, keepOutput: Bool = true, stoppable: Bool = false
     ) async throws -> Output {
         let scratch = FileManager.default.temporaryDirectory.appendingPathComponent("tapeup-run-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
@@ -415,7 +416,7 @@ enum Run {
                 done.resume(throwing: error)
                 return
             }
-            lock.withLock { _ = running.insert(process) }
+            if stoppable { lock.withLock { _ = running.insert(process) } }
             DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
                 guard process.isRunning else { return }
                 late.set()

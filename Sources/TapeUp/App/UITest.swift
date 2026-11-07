@@ -107,8 +107,27 @@ enum UITest {
         let idleHeight = panel.window.frame.height
         model.openPeople()
         check("people")
+        let seeded = model.peopleList
+        expect(model.addPerson("Nora Quinn", note: "advisor"), "a person is added by hand")
+        expect(!model.addPerson("nora quinn", note: nil), "a listed name is refused")
+        expect(model.peopleNotice == .taken("nora quinn"), "and the page says so")
+        expect(model.updatePerson("Nora Quinn", to: "Nora Quinn-Lee", note: "lab"), "a person is edited in place")
+        if let you = seeded.you {
+            expect(!model.updatePerson("Nora Quinn-Lee", to: you, note: nil), "no one can take the user's name")
+        }
+        check("people-edited")
+        expect(
+            model.peopleList.people.last == .init(name: "Nora Quinn-Lee", context: "lab"),
+            "people.json holds the edit (\(model.peopleList.people.last.map(\.name) ?? "none"))")
+        model.removePerson("Nora Quinn-Lee")
+        expect(model.peopleList == seeded, "removing them leaves the list as it was")
         model.closePeople()
         check("people-back")
+        model.openSettings()
+        check("settings")
+        model.closeSettings()
+        check("settings-back")
+        expect(abs(panel.window.frame.height - idleHeight) <= 1, "back from Settings at the same height")
         expect(abs(panel.window.frame.height - idleHeight) <= 1, "back to the same height as before")
 
         model.toggleTesting()
@@ -166,25 +185,27 @@ enum UITest {
         // Speaker labels from voices already heard: the count sets how many,
         // without one the estimate is shown on its chip, names rewrite the file.
         if let labeled = model.recent.first(where: { VoicePrints.read(in: $0.folder) != nil }) {
+            // A made title may rename the folder at any point; follow the card.
+            func current() -> RecordingEntry { model.card?.entry ?? labeled }
             model.open(labeled)
             check("card-speakers-offered")
             expect(labeled.transcript == .done, "the seeded recording is transcribed")
             model.labelSpeakers()
             check("card-speakers-two")
-            let two = model.speakers.result(for: labeled)
+            let two = model.speakers.result(for: current())
             expect(two?.voices.count == 2 && two?.estimated == false, "the count of 2 finds 2 voices")
             var people = labeled.people
             people.count = nil
             model.setPeople(people)
             check("card-speakers-estimated")
-            let estimate = model.speakers.result(for: labeled)
+            let estimate = model.speakers.result(for: current())
             expect(estimate?.estimated == true && estimate?.voices.count == 3, "without a count, 3 voices estimated")
-            model.speakers.name(1, "Priya Shah", in: labeled)
+            model.speakers.name(1, "Priya Shah", in: current())
             check("card-speakers-named")
-            let file = labeled.folder.appendingPathComponent(SpeakerLabels.fileName)
+            let file = current().folder.appendingPathComponent(SpeakerLabels.fileName)
             let text = (try? String(contentsOf: file, encoding: .utf8)) ?? ""
             expect(text.contains("Priya Shah: Thanks for making time"), "the name is in the labeled transcript")
-            model.copyTranscript(labeled)
+            model.copyTranscript(current())
             expect(
                 NSPasteboard.general.string(forType: .string)?.contains("Voice 2:") == true,
                 "Copy transcript copies the labeled one")
@@ -192,7 +213,7 @@ enum UITest {
             model.setPeople(people)
             check("card-speakers-same-count")
             expect(
-                model.speakers.result(for: labeled)?.names[1] == "Priya Shah", "tapping the same number keeps names")
+                model.speakers.result(for: current())?.names[1] == "Priya Shah", "tapping the same number keeps names")
             // A title made by the on-device model names the recording.
             if Titles.available {
                 for _ in 0..<80 where model.card?.entry.title == nil { settle(0.25) }
@@ -290,8 +311,8 @@ enum UITest {
                         model.speakers.result(for: current())?.suggested.isEmpty == true, "and suggests no names")
                     expect(model.agents.needsAttention, "a signed-out agent puts a dot on ···")
                     expect(
-                        model.agents.rows.contains { $0.title == "Sign In to \(agent.name)…" && $0.checked },
-                        "the Agent menu offers to sign in")
+                        model.agents.settingsTitle == "Settings… · \(agent.name) Signed Out",
+                        "the Settings item says the agent is signed out")
                 } else {
                     expect(false, "the second agent recording is listed (\(other.lastPathComponent))")
                 }
@@ -388,7 +409,14 @@ enum UITest {
             }
             model.start()
             settle(3)
-            check("recording")
+            // Screenshots are the test's own main-thread work; leave them out.
+            var shots: [ClosedRange<Double>] = []
+            func timedCheck(_ name: String) {
+                let from = Date().timeIntervalSince(began)
+                check(name)
+                shots.append(from...Date().timeIntervalSince(began))
+            }
+            timedCheck("recording")
             expect(model.isRecording, "recording started")
             if model.transcription.download == .ready {
                 expect(model.transcription.liveRunning, "transcribing while recording")
@@ -397,13 +425,15 @@ enum UITest {
             let pausedAt = Date()
             model.togglePause()
             settle(2)
-            check("paused")
+            timedCheck("paused")
             model.togglePause()
             let pausedFor = Date().timeIntervalSince(pausedAt)
             settle(2)
             let wall = Date().timeIntervalSince(began)
             beat.invalidate()
-            let stalls = zip(beats.times, beats.times.dropFirst()).filter { $1 - $0 > 0.25 }
+            let stalls = zip(beats.times, beats.times.dropFirst()).filter { gap in
+                gap.1 - gap.0 > 0.25 && !shots.contains { $0.overlaps(gap.0...gap.1) }
+            }
             expect(
                 stalls.isEmpty,
                 "main thread never stalls while recording \(stalls.map { String(format: "%.1fs at %.1fs", $1 - $0, $0) })"
