@@ -193,16 +193,12 @@ enum UITest {
             check("card-speakers-same-count")
             expect(
                 model.speakers.result(for: labeled)?.names[1] == "Priya Shah", "tapping the same number keeps names")
-            // A title suggested by the on-device model, accepted in one click.
+            // A title made by the on-device model names the recording.
             if Titles.available {
-                for _ in 0..<80 where model.card?.entry.titleSuggestion == nil { settle(0.25) }
-                check("card-title-suggested")
-                let suggestion = model.card?.entry.titleSuggestion
-                expect(suggestion != nil, "a title is suggested from the transcript (\(suggestion ?? "none"))")
-                expect(model.card?.entry.title == nil, "nothing is named until the suggestion is accepted")
-                model.acceptSuggestedTitle()
-                check("card-title-accepted")
-                expect(model.card?.entry.title == suggestion, "Use names the recording")
+                for _ in 0..<80 where model.card?.entry.title == nil { settle(0.25) }
+                check("card-title-made")
+                let title = model.card?.entry.title
+                expect(title != nil, "the recording is named from its transcript (\(title ?? "none"))")
             }
             model.closeCard()
         } else {
@@ -222,12 +218,14 @@ enum UITest {
             if let entry = model.recent.first(where: { $0.folder.lastPathComponent == folder.lastPathComponent }) {
                 let began = Date()
                 model.open(entry)
-                for _ in 0..<600 where model.card?.entry.titleSuggestion == nil { settle(0.25) }
-                let title = model.card?.entry.titleSuggestion
+                for _ in 0..<600 where model.card?.entry.title == nil { settle(0.25) }
+                let title = model.card?.entry.title
                 expect(
                     title != nil,
-                    "\(agent.name) suggests a title after the tuned call fails (\(title ?? "none"), \(Int(Date().timeIntervalSince(began))) s)"
+                    "\(agent.name) names the recording after the tuned call fails (\(title ?? "none"), \(Int(Date().timeIntervalSince(began))) s)"
                 )
+                // Named, the recording's folder carries its title.
+                let entry = model.card?.entry ?? entry
                 model.agents.testingModel = nil
                 let asked = Date()
                 model.labelSpeakers()
@@ -253,6 +251,7 @@ enum UITest {
                 let events =
                     (try? String(contentsOf: entry.folder.appendingPathComponent("events.jsonl"), encoding: .utf8))
                     ?? ""
+                expect(events.contains("\"by\":\"\(agent.rawValue)\""), "the title is logged as the agent's")
                 expect(
                     events.components(separatedBy: "agent failed").count == 1,
                     "only the failing tuned call is retried, nothing logged (\(events.suffix(1500)))")
@@ -271,9 +270,15 @@ enum UITest {
                 if let entry = model.recent.first(where: { $0.folder.lastPathComponent == other.lastPathComponent }) {
                     model.open(entry)
                     model.labelSpeakers()
-                    let events = entry.folder.appendingPathComponent("events.jsonl")
+                    // The made title renames the folder; follow it by its stamp.
+                    let stamp = RecordingLibrary.stamp(of: entry.folder)
+                    func current() -> RecordingEntry {
+                        RecordingLibrary(root: model.root).folder(withStamp: stamp).flatMap(RecordingLibrary.entry(at:))
+                            ?? entry
+                    }
                     func failures() -> Int {
-                        ((try? String(contentsOf: events, encoding: .utf8)) ?? "").components(
+                        let events = current().folder.appendingPathComponent("events.jsonl")
+                        return ((try? String(contentsOf: events, encoding: .utf8)) ?? "").components(
                             separatedBy: "agent failed"
                         ).count - 1
                     }
@@ -282,7 +287,7 @@ enum UITest {
                     check("list-agent-signed-out")
                     expect(failures() == 2, "a failing agent is logged once per suggestion (\(failures()))")
                     expect(
-                        model.speakers.result(for: entry)?.suggested.isEmpty == true, "and suggests no names")
+                        model.speakers.result(for: current())?.suggested.isEmpty == true, "and suggests no names")
                     expect(model.agents.needsAttention, "a signed-out agent puts a dot on ···")
                     expect(
                         model.agents.rows.contains { $0.title == "Sign In to \(agent.name)…" && $0.checked },

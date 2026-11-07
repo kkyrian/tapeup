@@ -192,7 +192,7 @@ final class AppModel {
         transcription.finished = { [weak self] stamp in self?.transcriptFinished(stamp) }
         transcription.names = { [weak self] in self?.nameHints() }
         speakers.makeRoom = { [weak self] in self?.transcription.releaseIfIdle() ?? true }
-        titles.suggested = { [weak self] stamp in self?.refreshCard(stamp) }
+        titles.named = { [weak self] stamp, title in self?.nameIfUnnamed(stamp, title) }
         titles.agents = agents
         speakers.agents = agents
         speakers.knownNames = { [weak self] entry in
@@ -321,6 +321,8 @@ final class AppModel {
             card.entry = entry
             card.finishing = false
             self.card = card
+            // The transcript may have finished while the audio was saving.
+            titles.suggest(for: entry, agent: true)
         }
     }
 
@@ -588,10 +590,19 @@ final class AppModel {
         titles.suggest(for: entry, agent: true)
     }
 
-    /// Accepts the suggested title as the recording's name.
-    func acceptSuggestedTitle() {
-        guard let suggestion = card?.entry.titleSuggestion, card?.entry.title == nil else { return }
-        setTitle(suggestion)
+    /// A made title, given unless the user named the recording or is
+    /// typing a name for it right now.
+    private func nameIfUnnamed(_ stamp: String, _ title: String) {
+        guard let folder = library.folder(withStamp: stamp), RecordingLibrary.entry(at: folder)?.title == nil else {
+            return
+        }
+        if renaming, let card, RecordingLibrary.stamp(of: card.entry.folder) == stamp { return }
+        if folder == activeFolder {
+            pendingTitle = pendingTitle ?? (folder, title)
+            return
+        }
+        _ = try? RecordingLibrary.save(title: title, in: folder)
+        refreshCard(stamp)
     }
 
     func closeCard() { card = nil }
@@ -648,6 +659,7 @@ final class AppModel {
             let folder = library.folder(withStamp: stamp), let entry = RecordingLibrary.entry(at: folder)
         else { return }
         self.card?.entry = entry
+        titles.suggest(for: entry, agent: true)
     }
 
     /// Names and terms for the speech model: the people list, who was at

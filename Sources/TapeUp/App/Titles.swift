@@ -7,15 +7,15 @@ import TapeUpCore
     import FoundationModels
 #endif
 
-/// Suggested titles from the user's agent when one is chosen, otherwise from
-/// Apple's on-device model where Apple Intelligence runs (macOS 26 and
-/// later). One recording at a time, once per recording; the suggestion
-/// waits in `meta.json` until the user accepts or replaces it.
+/// Titles from the user's agent when one is chosen, otherwise from Apple's
+/// on-device model where Apple Intelligence runs (macOS 26 and later),
+/// given to recordings the user has not named; the user can rename them.
+/// One recording at a time; each attempt is a line in `events.jsonl`.
 @MainActor @Observable
 final class Titles {
     var library: RecordingLibrary
-    /// A suggestion was saved for this stamp.
-    var suggested: (String) -> Void = { _ in }
+    /// Names the recording with this stamp, unless the user named it first.
+    var named: (String, String) -> Void = { _, _ in }
     var agents: Agents?
 
     private var queue: [(stamp: String, agent: Bool)] = []
@@ -41,8 +41,7 @@ final class Titles {
     /// waits for the user to open it, so the agent is never called in bulk.
     func suggest(for entry: RecordingEntry, agent: Bool) {
         let stamp = RecordingLibrary.stamp(of: entry.folder)
-        guard canSuggest, entry.transcript == .done, entry.title == nil, entry.titleSuggestion == nil,
-            tried.insert(stamp).inserted
+        guard canSuggest, entry.transcript == .done, entry.title == nil, tried.insert(stamp).inserted
         else { return }
         if agents?.chosen != nil, !agent {
             tried.remove(stamp)
@@ -69,19 +68,24 @@ final class Titles {
             let excerpt = TitleExcerpt.make(lines: lines)
             guard excerpt.count >= 40 else { return }
             var title: String?
-            if agent, let agents {
+            var source = "apple"
+            if agent, let kind = agents?.chosen, let agents {
                 title = await Self.ask(agents, excerpt: excerpt, people: entry.people.names, stamp: stamp, in: library)
+                source = kind.rawValue
             }
-            if title == nil { title = await Self.make(excerpt: excerpt, people: entry.people.names) }
+            if title == nil {
+                title = await Self.make(excerpt: excerpt, people: entry.people.names)
+                source = "apple"
+            }
+            guard let folder = library.folder(withStamp: stamp) else { return }
             guard let title else {
                 // Tried again the next time the card opens.
                 tried.remove(stamp)
+                EventLog.append("title not made", ["agent": agent], in: folder)
                 return
             }
-            guard let folder = library.folder(withStamp: stamp), RecordingLibrary.entry(at: folder)?.title == nil
-            else { return }
-            try? RecordingLibrary.save(titleSuggestion: title, in: folder)
-            suggested(stamp)
+            EventLog.append("title made", ["by": source, "title": title], in: folder)
+            named(stamp, title)
         }
     }
 
