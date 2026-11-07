@@ -346,9 +346,39 @@ public enum TranscriptDocument {
     /// `transcript.md` is the file for people and agents.
     public static let linesFileName = ".transcript-lines.json"
 
+    /// The lines with their times: from the hidden lines file, or read back
+    /// from `transcript.md` for transcripts made before that file existed.
     public static func lines(in folder: URL) -> [TranscriptLine]? {
-        guard let data = try? Data(contentsOf: folder.appendingPathComponent(linesFileName)) else { return nil }
-        return try? JSONDecoder().decode([TranscriptLine].self, from: data)
+        if let data = try? Data(contentsOf: folder.appendingPathComponent(linesFileName)) {
+            return try? JSONDecoder().decode([TranscriptLine].self, from: data)
+        }
+        guard let text = try? String(contentsOf: folder.appendingPathComponent(fileName), encoding: .utf8) else {
+            return nil
+        }
+        return parse(text)
+    }
+
+    /// Lines from a rendered transcript. Only starts are written, so each
+    /// line ends where the next begins, at most a piece's 20 s later.
+    static func parse(_ text: String) -> [TranscriptLine] {
+        var lines: [TranscriptLine] = []
+        for row in text.split(separator: "\n") where row.hasPrefix("[") {
+            guard let close = row.firstIndex(of: "]") else { continue }
+            let parts = row[row.index(after: row.startIndex)..<close].split(separator: ":").compactMap { Int($0) }
+            guard parts.count >= 2 else { continue }
+            let start = Double(parts.reduce(0) { $0 * 60 + $1 })
+            var said = row[row.index(after: close)...].trimmingCharacters(in: .whitespaces)
+            var side: Side?
+            for candidate in [Side.microphone, .computer] where said.hasPrefix("\(candidate.label): ") {
+                side = candidate
+                said = String(said.dropFirst(candidate.label.count + 2))
+            }
+            lines.append(TranscriptLine(start: start, end: start + 20, side: side, text: said))
+        }
+        for index in lines.indices.dropLast() where lines[index + 1].start > lines[index].start {
+            lines[index].end = min(lines[index].end, lines[index + 1].start)
+        }
+        return lines
     }
 
     public static func render(lines: [TranscriptLine], labeled: Bool, model: String, missing: Int = 0) -> String {

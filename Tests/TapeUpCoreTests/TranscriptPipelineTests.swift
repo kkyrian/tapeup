@@ -398,6 +398,22 @@ struct SpeakerLabelsTests {
         try TranscriptDocument.save(lines: lines, failures: 0, pieces: 4, model: .large, in: folder)
         #expect(TranscriptDocument.lines(in: folder) == lines)
     }
+
+    @Test func linesAreReadBackFromAnOlderTranscript() {
+        let sided = [
+            TranscriptLine(start: 5, end: 9, side: .microphone, text: "Can you hear me?"),
+            TranscriptLine(start: 3700, end: 3790, side: .computer, text: "Yes: loud and clear."),
+        ]
+        let text = TranscriptDocument.render(lines: sided, labeled: true, model: "Qwen3-ASR 1.7B")
+        let read = TranscriptDocument.parse(text)
+        #expect(read.map(\.start) == [5, 3700])
+        #expect(read.map(\.side) == [.microphone, .computer])
+        #expect(read.map(\.text) == ["Can you hear me?", "Yes: loud and clear."])
+        #expect(read.map(\.end) == [25, 3720])
+        let plain = TranscriptDocument.parse(TranscriptDocument.render(lines: lines, labeled: false, model: "m"))
+        #expect(plain.map(\.text) == lines.map(\.text))
+        #expect(plain[0].end == 5)
+    }
 }
 
 struct VoiceFoldingTests {
