@@ -12,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var floating: FloatingControls!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        EditMenu.install()
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.autosaveName = "TapeUp"
         guard let button = statusItem.button else { return }

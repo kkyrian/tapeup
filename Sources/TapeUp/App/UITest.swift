@@ -15,6 +15,15 @@ enum UITest {
         "transcribe",
     ]
 
+    private static func textField(placeholder: String, in view: NSView?) -> NSTextField? {
+        guard let view else { return nil }
+        if let field = view as? NSTextField, field.placeholderString == placeholder { return field }
+        for child in view.subviews {
+            if let found = textField(placeholder: placeholder, in: child) { return found }
+        }
+        return nil
+    }
+
     static func run(out: String, record: Bool, agent: AgentKind? = nil) {
         let outURL = URL(fileURLWithPath: out)
         try? FileManager.default.createDirectory(at: outURL, withIntermediateDirectories: true)
@@ -26,6 +35,7 @@ enum UITest {
         defaults.set(root.path, forKey: "recordingsRoot")
         for key in keys.dropFirst() { defaults.removeObject(forKey: key) }
 
+        EditMenu.install()
         let model = AppModel()
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         item.button?.title = "UITest"
@@ -108,6 +118,35 @@ enum UITest {
         model.openPeople()
         check("people")
         let seeded = model.peopleList
+        // ⌘V the way a person pastes a name copied from an email, through
+        // the key equivalent, not by setting the text.
+        if let field = textField(placeholder: "Add a person", in: panel.window.contentView) {
+            let board = NSPasteboard.general
+            let kept = board.pasteboardItems?.map { item in
+                item.types.compactMap { type in item.data(forType: type).map { (type, $0) } }
+            }
+            board.clearContents()
+            board.setString("Priya Shah", forType: .string)
+            panel.window.makeFirstResponder(field)
+            settle(0.2)
+            let paste = NSEvent.keyEvent(
+                with: .keyDown, location: .zero, modifierFlags: .command, timestamp: 0,
+                windowNumber: panel.window.windowNumber, context: nil, characters: "v",
+                charactersIgnoringModifiers: "v", isARepeat: false, keyCode: 9)
+            expect(NSApp.mainMenu?.performKeyEquivalent(with: paste!) == true, "⌘V reaches the text field")
+            settle(0.2)
+            expect(field.stringValue == "Priya Shah", "a pasted name lands in Add a person (\(field.stringValue))")
+            field.stringValue = ""
+            panel.window.makeFirstResponder(nil)
+            board.clearContents()
+            for item in kept ?? [] {
+                let restored = NSPasteboardItem()
+                for (type, data) in item { restored.setData(data, forType: type) }
+                board.writeObjects([restored])
+            }
+        } else {
+            expect(false, "the Add a person field is on the page")
+        }
         expect(model.addPerson("Nora Quinn", note: "advisor"), "a person is added by hand")
         expect(!model.addPerson("nora quinn", note: nil), "a listed name is refused")
         expect(model.peopleNotice == .taken("nora quinn"), "and the page says so")
