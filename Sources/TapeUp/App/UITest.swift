@@ -193,6 +193,17 @@ enum UITest {
             check("card-speakers-same-count")
             expect(
                 model.speakers.result(for: labeled)?.names[1] == "Priya Shah", "tapping the same number keeps names")
+            // A title suggested by the on-device model, accepted in one click.
+            if Titles.available {
+                for _ in 0..<80 where model.card?.entry.titleSuggestion == nil { settle(0.25) }
+                check("card-title-suggested")
+                let suggestion = model.card?.entry.titleSuggestion
+                expect(suggestion != nil, "a title is suggested from the transcript (\(suggestion ?? "none"))")
+                expect(model.card?.entry.title == nil, "nothing is named until the suggestion is accepted")
+                model.acceptSuggestedTitle()
+                check("card-title-accepted")
+                expect(model.card?.entry.title == suggestion, "Use names the recording")
+            }
             model.closeCard()
         } else {
             expect(false, "a seeded recording has voices to label")

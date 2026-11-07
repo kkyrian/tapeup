@@ -69,6 +69,11 @@ struct CardView: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
             }
+            if let suggestion = card.entry.titleSuggestion, card.entry.title == nil, !model.renaming {
+                UseButton(help: "Use \u{201C}\(suggestion)\u{201D} as the title", action: model.acceptSuggestedTitle)
+                    .padding(.leading, 4)
+                    .transition(.opacity)
+            }
             if !card.finishing {
                 IconButton(symbol: "trash", help: "Move to Trash") { model.trash(card.entry) }
                     .padding(.leading, 4)
@@ -104,7 +109,11 @@ struct TitleField<Subtitle: View>: View {
                 Button(action: begin) { block }
                     .buttonStyle(.plain)
                     .hoverHelp("Rename")
-                    .accessibilityLabel(entry.title.map { "\($0), rename" } ?? "Add a title")
+                    .accessibilityLabel(
+                        entry.title.map { "\($0), rename" } ?? entry.titleSuggestion.map {
+                            "Suggested title \($0), add a title"
+                        }
+                            ?? "Add a title")
             }
         }
         .onHover { hovering = $0 }
@@ -120,16 +129,17 @@ struct TitleField<Subtitle: View>: View {
         VStack(alignment: .leading, spacing: 2) {
             Group {
                 if editing {
-                    TextField("Title", text: $text)
+                    TextField(entry.titleSuggestion ?? "Title", text: $text)
                         .textFieldStyle(.plain)
                         .focused($focused)
-                        .onSubmit(commit)
+                        .onSubmit(submit)
                         .onExitCommand(perform: cancel)
                         .onChange(of: focused) { _, now in if !now { commit() } }
                 } else {
                     HStack(spacing: 5) {
-                        Text(entry.title ?? "Add a title")
+                        Text(entry.title ?? entry.titleSuggestion ?? "Add a title")
                             .foregroundStyle(entry.title == nil ? .tertiary : .primary)
+                            .fontWeight(entry.title == nil && entry.titleSuggestion != nil ? .regular : nil)
                             .lineLimit(1)
                             .truncationMode(.tail)
                         Image(systemName: "pencil")
@@ -170,6 +180,16 @@ struct TitleField<Subtitle: View>: View {
             }
             return event
         }
+    }
+
+    /// Return on an empty field takes the suggestion; a click away does not.
+    private func submit() {
+        if text.trimmingCharacters(in: .whitespaces).isEmpty, let suggestion = entry.titleSuggestion,
+            entry.title == nil
+        {
+            text = suggestion
+        }
+        commit()
     }
 
     private func commit() {
@@ -253,6 +273,31 @@ struct TranscriptButton: View {
         case .failed: return "The transcript could not be made. Try again"
         case .none, .pending: return "Make a transcript on this Mac"
         }
+    }
+}
+
+/// Accepts a suggested title in one click.
+struct UseButton: View {
+    let help: String
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Text("Use")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Color.accentColor)
+                .padding(.horizontal, 8)
+                .frame(height: 22)
+                .background(
+                    Color.accentColor.opacity(hovering ? 0.22 : 0.12), in: .capsule
+                )
+                .contentShape(.capsule)
+        }
+        .buttonStyle(Pressable())
+        .onHover { hovering = $0 }
+        .hoverHelp(help)
+        .accessibilityLabel(help)
     }
 }
 

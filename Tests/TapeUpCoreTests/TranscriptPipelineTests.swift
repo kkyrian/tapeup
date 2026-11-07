@@ -499,3 +499,22 @@ struct VoiceFoldingTests {
         #expect(!one.estimated && one.count == 1 && one.assigned == [1, 1])
     }
 }
+
+struct TitleExcerptTests {
+    @Test func aShortTranscriptIsReadWhole() {
+        let lines = [TranscriptLine(start: 0, end: 1, text: "Hi."), TranscriptLine(start: 2, end: 3, text: "Hello.")]
+        #expect(TitleExcerpt.make(lines: lines) == "Hi.\nHello.")
+    }
+
+    @Test func aLongTranscriptIsSampledAcrossItsLengthWithinTheBudget() {
+        let lines = (0..<1_000).map {
+            TranscriptLine(start: Double($0), end: Double($0) + 1, text: "Line \($0) of the meeting.")
+        }
+        let excerpt = TitleExcerpt.make(lines: lines, budget: 2_000)
+        #expect(excerpt.count <= 2_000)
+        #expect(excerpt.hasPrefix("Line 0 "))
+        #expect(excerpt.contains("Line 9"))
+        let last = excerpt.split(separator: "\n").last.map(String.init) ?? ""
+        #expect(Int(last.split(separator: " ")[1])! > 900)
+    }
+}

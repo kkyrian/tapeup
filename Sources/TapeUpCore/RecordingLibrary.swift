@@ -11,13 +11,16 @@ public struct RecordingEntry: Sendable, Identifiable, Equatable {
     public var people: People
     /// The name the user gave it; the folder keeps its dated name.
     public var title: String?
+    /// A title made from the transcript, shown until the user names it.
+    public var titleSuggestion: String?
     public var transcript: Transcript
 
     public init(
         folder: URL, started: Date, duration: Double, audio: URL, status: String, people: People,
-        title: String? = nil, transcript: Transcript = .none
+        title: String? = nil, titleSuggestion: String? = nil, transcript: Transcript = .none
     ) {
         self.title = title
+        self.titleSuggestion = titleSuggestion
         self.transcript = transcript
         self.folder = folder
         self.started = started
@@ -181,6 +184,7 @@ public struct RecordingLibrary: Sendable {
             folder: folder, started: started, duration: meta["duration_seconds"] as? Double ?? 0,
             audio: folder.appendingPathComponent(audioName), status: meta["status"] as? String ?? "recording",
             people: people, title: (meta["title"] as? String).flatMap { $0.isEmpty ? nil : $0 },
+            titleSuggestion: (meta["title_suggestion"] as? String).flatMap { $0.isEmpty ? nil : $0 },
             transcript: transcriptState(meta, folder: folder))
     }
 
@@ -262,6 +266,12 @@ public struct RecordingLibrary: Sendable {
         return visible.isEmpty ? stamp : "\(stamp) \(visible)"
     }
 
+    /// Keeps a suggested title in `meta.json`; nothing is renamed until the
+    /// user accepts it.
+    public static func save(titleSuggestion: String, in folder: URL) throws {
+        try MetaFile.update(folder) { $0["title_suggestion"] = titleSuggestion }
+    }
+
     public static func save(people: RecordingEntry.People, in folder: URL) throws {
         try MetaFile.update(folder) { meta in
             if people.isEmpty {
@@ -277,6 +287,80 @@ public struct RecordingLibrary: Sendable {
     static func readMeta(_ folder: URL) -> [String: Any]? { MetaFile.read(folder) }
 
     static let agentsGuide = """
+        # TapeUp recordings
+
+        Recordings are filed by year: each folder inside `2026/` and the like is
+        one recording made by TapeUp, named for the minute it started
+        (`YYYY-MM-DD-HHMM`, with `-2`, `-3` when two start in the same minute), then
+        its title once the user names it (`2026/2026-11-06-1430 Lab sync`). A
+        rename moves the folder, so look recordings up by folder, not by a saved path.
+
+        - `audio.m4a`: stereo AAC. **Left channel: the microphone** (the person at
+          this Mac). **Right channel: everything the Mac played** (the other people
+          on a call, a video, a lecture). Never modified once written; write
+          derived files beside it. When the user recorded only one source, the
+          other channel is silent.
+        - `transcript.md`: made on this Mac while recording, one paragraph per
+          stretch of speech, each starting with its time from the start of
+          `audio.m4a`. Never rewritten once finished. See "Sides" below.
+        - `transcript-with-speaker-labels.md`: present once the user asked for
+          speaker labels: the same lines, each starting with who spoke, a name
+          the user picked or `Voice 1`, `Voice 2` (numbered by talk time). Rewritten
+          when the user names a voice or changes the count.
+        - `meta.json`: `started` (ISO 8601), `duration_seconds`, `status`,
+          `title` when the user named the recording, `title_suggestion` when
+          TapeUp suggested one the user has not accepted (not a name), `sources` (what was
+          recorded: `microphone`, `computer audio` or both), `paused_seconds`
+          when the user paused (paused time is left out of the audio),
+          `devices` (inputs and outputs used, in order), `timeline` (silence
+          inserted where a device switched), `transcript` (`status`: `waiting`,
+          `transcribing`, `done` or `failed`; `model`; `side_labels`;
+          `missing_passages` when some speech could not be transcribed),
+          `speaker_labels` once asked for (`status`: `finding`, `done` or
+          `failed`; `voices`; `voices_estimated`, true when the user gave no
+          count; `names`), and, when
+          the user filled it in, `who_was_there` with an optional `count`
+          (including the user) and optional `names`.
+        - `events.jsonl`: what happened while recording, one JSON object per line.
+
+        `people.json` beside this file lists the people the user records with
+        (`you` is the user; each person has a `name` and an optional `context`).
+        TapeUp suggests names from it and gives the names to the speech model, so
+        they are spelled right in transcripts.
+
+        `status` is `recording` while it runs, `recorded` once `audio.m4a` is
+        final, and `transcribed` once `transcript.md` is. If a folder still says
+        `recording` with an `audio.caf`, TapeUp stopped unexpectedly; it finishes
+        such folders the next time it opens.
+
+        ## Sides
+
+        When the computer audio played into headphones for the whole recording,
+        each line of `transcript.md` starts with the side it was heard on:
+        `Microphone` (said at this Mac) or `Computer audio` (played by the Mac,
+        such as the other people on a call). Either side can be more than one
+        person: several people can share one microphone, and a call can have many
+        people on the other end. A side is never a person's name.
+
+        With speakers, the microphone also hears the call, so the two sides
+        cannot be told apart and lines carry no side (`side_labels` is false).
+        Telling individual voices apart is a separate step the user asks for; it
+        writes `transcript-with-speaker-labels.md` and leaves `transcript.md` as
+        it is. Voice labels come from how voices sound: lines where two people
+        talk at once, or people sharing one microphone, are the most often wrong.
+
+        ## Your rules
+
+        Write your own instructions for agents here: how to name transcripts,
+        where summaries go, who usually attends. TapeUp never rewrites this file
+        once you change it.
+
+        """
+
+    /// Guides earlier versions wrote. A file still identical to one is
+    /// TapeUp's own text, not the user's, and is brought up to date.
+    static let earlierAgentsGuides = [
+        """
         # TapeUp recordings
 
         Recordings are filed by year: each folder inside `2026/` and the like is
@@ -344,11 +428,7 @@ public struct RecordingLibrary: Sendable {
         where summaries go, who usually attends. TapeUp never rewrites this file
         once you change it.
 
-        """
-
-    /// Guides earlier versions wrote. A file still identical to one is
-    /// TapeUp's own text, not the user's, and is brought up to date.
-    static let earlierAgentsGuides = [
+        """,
         """
         # TapeUp recordings
 

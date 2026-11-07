@@ -56,6 +56,8 @@ final class AppModel {
     let transcription: Transcription
     /// Speaker labels, made when asked.
     let speakers: Speakers
+    /// Suggested titles from the on-device model.
+    let titles: Titles
     /// True when the panel was opened by the user and holds the keyboard, so
     /// a field may take the cursor at once. False after a shortcut stop, so
     /// the card never takes typing away from a call.
@@ -132,6 +134,7 @@ final class AppModel {
             library = RecordingLibrary(root: root)
             transcription.library = library
             speakers.library = library
+            titles.library = library
             reload()
         }
     }
@@ -176,6 +179,7 @@ final class AppModel {
         self.library = library
         transcription = Transcription(library: library)
         speakers = Speakers(library: library)
+        titles = Titles(library: library)
         refreshAccess()
         deviceObservation = AudioDevices.observeDefaults(queue: .main) { [weak self] in
             MainActor.assumeIsolated { self?.refreshDevices() }
@@ -184,6 +188,7 @@ final class AppModel {
         transcription.finished = { [weak self] stamp in self?.transcriptFinished(stamp) }
         transcription.names = { [weak self] in self?.nameHints() }
         speakers.makeRoom = { [weak self] in self?.transcription.releaseIfIdle() ?? true }
+        titles.suggested = { [weak self] stamp in self?.refreshCard(stamp) }
     }
 
     var isRecording: Bool {
@@ -569,6 +574,13 @@ final class AppModel {
     func open(_ entry: RecordingEntry) {
         showingPeople = false
         card = Card(entry: entry, finishing: false, justRecorded: false)
+        titles.suggest(for: entry)
+    }
+
+    /// Accepts the suggested title as the recording's name.
+    func acceptSuggestedTitle() {
+        guard let suggestion = card?.entry.titleSuggestion, card?.entry.title == nil else { return }
+        setTitle(suggestion)
     }
 
     func closeCard() { card = nil }
@@ -610,6 +622,14 @@ final class AppModel {
 
     /// A transcript was written or failed: refresh the list and the open card.
     private func transcriptFinished(_ stamp: String) {
+        refreshCard(stamp)
+        if let folder = library.folder(withStamp: stamp), let entry = RecordingLibrary.entry(at: folder) {
+            titles.suggest(for: entry)
+        }
+    }
+
+    /// Reads a recording again after work on it finished: the list, and the card if it is open.
+    private func refreshCard(_ stamp: String) {
         reload()
         guard let card, RecordingLibrary.stamp(of: card.entry.folder) == stamp, !card.finishing,
             let folder = library.folder(withStamp: stamp), let entry = RecordingLibrary.entry(at: folder)

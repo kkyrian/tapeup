@@ -470,3 +470,22 @@ public enum SpeechAudio {
         return samples
     }
 }
+
+/// What a small on-device model reads to title a recording: lines spread
+/// evenly across it, within what the model can take in.
+public enum TitleExcerpt {
+    public static func make(lines: [TranscriptLine], budget: Int = 6_000) -> String {
+        let total = lines.reduce(0) { $0 + $1.text.count + 1 }
+        guard total > budget else { return lines.map(\.text).joined(separator: "\n") }
+        // Every nth line, so the sample spans the whole recording.
+        let step = Int((Double(total) / Double(budget)).rounded(.up))
+        var picked: [String] = []
+        var used = 0
+        for (index, line) in lines.enumerated() where index % step == 0 {
+            guard used + line.text.count + 1 <= budget else { continue }
+            picked.append(line.text)
+            used += line.text.count + 1
+        }
+        return picked.joined(separator: "\n")
+    }
+}
