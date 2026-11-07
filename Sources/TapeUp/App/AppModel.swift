@@ -168,7 +168,7 @@ final class AppModel {
     private var pendingPeople: (folder: URL, people: RecordingEntry.People)?
     private var pendingTitle: (folder: URL, title: String?)?
     /// The folder being recorded or saved; kept out of Recent until it is final.
-    private var activeFolder: URL?
+    private(set) var activeFolder: URL?
     /// The shortcut shown on the buttons, or nil when another app holds it.
     var shortcutLabel: String? = HotKey.recordShortcutLabel
 
@@ -629,7 +629,7 @@ final class AppModel {
     }
 
     /// Reads a recording again after work on it finished: the list, and the card if it is open.
-    private func refreshCard(_ stamp: String) {
+    func refreshCard(_ stamp: String) {
         reload()
         guard let card, RecordingLibrary.stamp(of: card.entry.folder) == stamp, !card.finishing,
             let folder = library.folder(withStamp: stamp), let entry = RecordingLibrary.entry(at: folder)
@@ -660,10 +660,18 @@ final class AppModel {
 
     /// Switches the recordings folder; with `moving`, the recordings already
     /// made go along. Never while recording, so no folder is mid-write.
-    func changeRoot(to destination: URL, moving: Bool) {
-        guard phase == .idle, destination.standardizedFileURL != root.standardizedFileURL else { return }
+    func changeRoot(to destination: URL, moving: Bool, done: (@MainActor @Sendable (String?) -> Void)? = nil) {
+        guard phase == .idle else {
+            done?("TapeUp is recording; change the folder after it stops.")
+            return
+        }
+        guard destination.standardizedFileURL != root.standardizedFileURL else {
+            done?(nil)
+            return
+        }
         guard moving else {
             root = destination
+            done?(nil)
             return
         }
         let library = library
@@ -676,9 +684,12 @@ final class AppModel {
                 case .success(let result) where !result.skipped.isEmpty:
                     problem =
                         "\(result.skipped.count) recording\(result.skipped.count == 1 ? "" : "s") stayed in \(library.root.lastPathComponent): the new folder already has one with the same name."
+                    done?(problem)
                 case .failure(let error):
                     problem = "Some recordings could not be moved: \(error.localizedDescription)"
-                default: break
+                    done?(problem)
+                default:
+                    done?(nil)
                 }
             }
         }
@@ -785,5 +796,56 @@ final class AppModel {
         computerAccess = .granted
         peopleNotice = notice
         self.problem = problem
+    }
+}
+
+// MARK: Requests from the command line
+
+extension AppModel {
+    /// Answers a `TapeUp` command sent while the app runs, so the work shows
+    /// in the panel and only one model loads. `reply` gets an error message,
+    /// or nil and the folder the command acted on.
+    func handle(_ request: [String: String], reply: @escaping @MainActor @Sendable (String?, URL?) -> Void) {
+        let command = request["command"] ?? ""
+        if command == "folder" {
+            let destination = URL(fileURLWithPath: request["value"] ?? root.path)
+            changeRoot(to: destination, moving: request["move"] == "1") { [weak self] problem in
+                reply(problem, self?.root)
+            }
+            return
+        }
+        guard let target = request["recording"], let folder = library.recording(target),
+            let entry = RecordingLibrary.entry(at: folder)
+        else {
+            reply("No recording \(request["recording"] ?? "") in \(root.path).", nil)
+            return
+        }
+        guard folder != activeFolder, entry.status != "recording" else {
+            reply("That recording is still running; try again after it stops.", nil)
+            return
+        }
+        let stamp = RecordingLibrary.stamp(of: folder)
+        switch command {
+        case "title":
+            do {
+                let renamed = try RecordingLibrary.save(title: request["value"], in: folder)
+                refreshCard(stamp)
+                reply(nil, renamed)
+            } catch {
+                reply("Could not save the title: \(error.localizedDescription)", nil)
+            }
+        case "transcribe":
+            makeTranscript(entry)
+            reply(nil, folder)
+        case "speakers":
+            guard entry.transcript == .done else {
+                reply("That recording has no transcript yet; run transcribe first.", nil)
+                return
+            }
+            speakers.label(entry, count: request["voices"].flatMap(Int.init))
+            reply(nil, folder)
+        default:
+            reply("Unknown command \(command).", nil)
+        }
     }
 }

@@ -209,6 +209,48 @@ enum UITest {
             expect(false, "a seeded recording has voices to label")
         }
 
+        // The command line, answered by this running model.
+        let link = CommandLink.listen(model)
+        func command(_ words: [String]) -> (status: Int32, out: String) {
+            let process = Process()
+            process.executableURL = Bundle.main.executableURL
+            process.arguments = words + ["--json"]
+            let pipe = Pipe()
+            process.standardOutput = pipe
+            process.standardError = pipe
+            try? process.run()
+            while process.isRunning { settle(0.1) }
+            return (
+                process.terminationStatus,
+                String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            )
+        }
+        if let target = model.recent.first(where: { $0.title == nil && $0.transcript == .none }) {
+            let stamp = RecordingLibrary.stamp(of: target.folder)
+            let named = command(["title", stamp, "Budget review"])
+            expect(
+                named.status == 0 && named.out.contains("Budget review"),
+                "TapeUp title names a recording (\(named.out))")
+            expect(
+                model.recent.contains { $0.title == "Budget review" }, "the app's list shows the name at once")
+            let speakers = command(["speakers", stamp])
+            expect(
+                speakers.status == 1 && speakers.out.contains("no_transcript"),
+                "TapeUp speakers explains a missing transcript (\(speakers.out))")
+            let transcribed = command(["transcribe", stamp])
+            expect(
+                transcribed.status == 1 && transcribed.out.contains("transcription_failed"),
+                "TapeUp transcribe waits for the app and reports a recording with no audio (\(transcribed.out))")
+            let missing = command(["title", "1999-01-01-0000", "x"])
+            expect(
+                missing.status == 1 && missing.out.contains("not_found"), "an unknown recording is named in the error")
+            let folder = command(["folder"])
+            expect(
+                folder.out.replacingOccurrences(of: "\\/", with: "/").contains(model.root.path),
+                "TapeUp folder shows this folder (\(folder.out))")
+        }
+        DistributedNotificationCenter.default().removeObserver(link)
+
         let victim = model.recent[2]
         model.trash(victim)
         check("trashed")

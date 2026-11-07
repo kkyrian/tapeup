@@ -294,6 +294,19 @@ extension SpeakerLabels {
         }
     }
 
+    /// Labels a recording from what the model heard, keeping names on the
+    /// same people, and saves it.
+    @discardableResult
+    public static func relabel(_ heard: VoicePrints, count: Int?, in folder: URL) throws -> SpeakerResult {
+        guard let lines = TranscriptDocument.lines(in: folder) else { throw CocoaError(.fileNoSuchFile) }
+        var labeled = label(lines: lines, heard: heard, count: count)
+        if let earlier = result(in: folder), earlier.assigned.count == lines.count {
+            labeled.names = carry(earlier.names, from: earlier.assigned, to: labeled.assigned, lines: lines)
+        }
+        try save(labeled, lines: lines, in: folder)
+        return labeled
+    }
+
     /// Gives a voice a name, or takes it away, and rewrites the labeled transcript.
     public static func name(_ voice: Int, _ name: String?, in folder: URL) throws {
         guard var result = result(in: folder), let lines = TranscriptDocument.lines(in: folder) else {

@@ -22,12 +22,13 @@ final class Titles {
 
     init(library: RecordingLibrary) { self.library = library }
 
-    static var available: Bool {
+    /// Checked once at launch: also whether suggestions already saved are shown.
+    static let available: Bool = {
         #if canImport(FoundationModels)
             if #available(macOS 26, *) { return SystemLanguageModel.default.isAvailable }
         #endif
         return false
-    }
+    }()
 
     /// Suggests a title for a transcribed recording the user has not named.
     func suggest(for entry: RecordingEntry) {
@@ -50,10 +51,17 @@ final class Titles {
             }
             guard let self, let folder = library.folder(withStamp: stamp),
                 let entry = RecordingLibrary.entry(at: folder), entry.title == nil,
-                let lines = TranscriptDocument.lines(in: folder), !lines.isEmpty
+                let lines = TranscriptDocument.lines(in: folder)
             else { return }
-            guard let title = await Self.make(excerpt: TitleExcerpt.make(lines: lines), people: entry.people.names),
-                let folder = library.folder(withStamp: stamp), RecordingLibrary.entry(at: folder)?.title == nil
+            // Too little said to name; the model would invent a topic.
+            let excerpt = TitleExcerpt.make(lines: lines)
+            guard excerpt.count >= 40 else { return }
+            guard let title = await Self.make(excerpt: excerpt, people: entry.people.names) else {
+                // Tried again the next time the card opens.
+                tried.remove(stamp)
+                return
+            }
+            guard let folder = library.folder(withStamp: stamp), RecordingLibrary.entry(at: folder)?.title == nil
             else { return }
             try? RecordingLibrary.save(titleSuggestion: title, in: folder)
             suggested(stamp)
@@ -109,28 +117,33 @@ final class Titles {
             if !people.isEmpty {
                 instructions += "\nPeople in this recording besides the user: \(people.joined(separator: ", "))."
             }
+            let first: String
             do {
                 let session = LanguageModelSession(instructions: instructions)
-                var title = try await session.respond(to: excerpt, generating: SuggestedTitle.self).content.title
-                // A meeting held in another language can still come back in it.
-                if let code = language.language.languageCode?.identifier, dominant(title) != code {
-                    let translate = LanguageModelSession(
-                        instructions:
-                            "Translate recording titles into short natural \(name). Reply with the title only.")
-                    title = try await translate.respond(to: title, generating: SuggestedTitle.self).content.title
-                }
-                return Titles.tidy(title)
+                first = try await session.respond(to: excerpt, generating: SuggestedTitle.self).content.title
             } catch {
                 return nil
             }
+            // A meeting held in another language can come back in it. Short
+            // titles are often misread, so only a confident reading counts,
+            // and the first title stands if translating fails.
+            guard let code = language.language.languageCode?.identifier, let other = confidentLanguage(first),
+                other != code
+            else { return Titles.tidy(first) }
+            let translate = LanguageModelSession(
+                instructions: "Translate recording titles into short natural \(name). Reply with the title only.")
+            let translated = try? await translate.respond(to: first, generating: SuggestedTitle.self).content.title
+            return Titles.tidy(translated ?? first)
         }
 
-        private static func dominant(_ text: String) -> String? {
+        /// The title's language when the recognizer is nearly sure of it.
+        private static func confidentLanguage(_ text: String) -> String? {
             let recognizer = NLLanguageRecognizer()
             recognizer.processString(text)
-            return recognizer.dominantLanguage.map {
-                Locale(identifier: $0.rawValue).language.languageCode?.identifier ?? $0.rawValue
-            }
+            guard let (language, probability) = recognizer.languageHypotheses(withMaximum: 1).first,
+                probability >= 0.9
+            else { return nil }
+            return Locale(identifier: language.rawValue).language.languageCode?.identifier ?? language.rawValue
         }
     }
 #endif

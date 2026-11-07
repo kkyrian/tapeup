@@ -8,6 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var panel: PanelController!
     private var hotKey: HotKey?
+    private var commands: NSObjectProtocol?
     private var floating: FloatingControls!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -21,6 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel = PanelController(model: model, anchor: button)
         floating = FloatingControls(model: model) { [weak self] in self?.stopShowingCard() }
         hotKey = HotKey.record { [weak self] in self?.shortcutPressed() }
+        commands = CommandLink.listen(model)
         if hotKey == nil { model.shortcutLabel = nil }
         renderStatusItem()
         model.recoverLeftovers()

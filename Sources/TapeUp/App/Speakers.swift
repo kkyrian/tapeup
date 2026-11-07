@@ -54,6 +54,7 @@ final class Speakers {
             return
         }
         work[stamp] = SpeakerFinder.isDownloaded() ? .listening : .downloading(0)
+        try? SpeakerLabels.mark("finding", in: entry.folder)
         let previous = listening
         listening = Task { [weak self] in
             // One recording at a time: the model holds a few gigabytes.
@@ -71,7 +72,6 @@ final class Speakers {
                 }
                 work[stamp] = .listening
                 guard let folder = library.folder(withStamp: stamp) else { throw CocoaError(.fileNoSuchFile) }
-                try? SpeakerLabels.mark("finding", in: folder)
                 let heard = try await SpeakerFinder.listen(folder: folder)
                 // The folder may have been renamed meanwhile.
                 guard let folder = library.folder(withStamp: stamp) else { throw CocoaError(.fileNoSuchFile) }
@@ -108,14 +108,8 @@ final class Speakers {
 
     private func save(stamp: String, heard: VoicePrints) {
         do {
-            guard let folder = library.folder(withStamp: stamp), let lines = TranscriptDocument.lines(in: folder)
-            else { throw CocoaError(.fileNoSuchFile) }
-            var result = SpeakerLabels.label(lines: lines, heard: heard, count: wanted[stamp] ?? nil)
-            if let earlier = SpeakerLabels.result(in: folder), earlier.assigned.count == lines.count {
-                result.names = SpeakerLabels.carry(
-                    earlier.names, from: earlier.assigned, to: result.assigned, lines: lines)
-            }
-            try SpeakerLabels.save(result, lines: lines, in: folder)
+            guard let folder = library.folder(withStamp: stamp) else { throw CocoaError(.fileNoSuchFile) }
+            try SpeakerLabels.relabel(heard, count: wanted[stamp] ?? nil, in: folder)
             work[stamp] = nil
             wanted[stamp] = nil
             version += 1

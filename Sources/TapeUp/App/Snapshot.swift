@@ -10,7 +10,17 @@ enum Snapshot {
         let outURL = URL(fileURLWithPath: out)
         try? FileManager.default.createDirectory(at: outURL, withIntermediateDirectories: true)
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("tapeup-snapshot-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: root) }
+        // Setting the model's folder saves it as the user's; put theirs back
+        // on the way out, which `exit` reaches and a `defer` would not.
+        let savedRoot = UserDefaults.standard.object(forKey: "recordingsRoot")
+        func restore() {
+            if let savedRoot {
+                UserDefaults.standard.set(savedRoot, forKey: "recordingsRoot")
+            } else {
+                UserDefaults.standard.removeObject(forKey: "recordingsRoot")
+            }
+            try? FileManager.default.removeItem(at: root)
+        }
         let empty = root.appendingPathComponent("empty")
         let full = root.appendingPathComponent("full")
         seed(full)
@@ -110,6 +120,7 @@ enum Snapshot {
                 problem: "Could not start recording: the microphone is in use by another app.")
         }
         print(outURL.path)
+        restore()
         exit(0)
     }
 

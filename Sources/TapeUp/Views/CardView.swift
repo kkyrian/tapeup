@@ -69,7 +69,9 @@ struct CardView: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
             }
-            if let suggestion = card.entry.titleSuggestion, card.entry.title == nil, !model.renaming {
+            if let suggestion = card.entry.titleSuggestion, card.entry.title == nil, Titles.available,
+                !model.renaming
+            {
                 UseButton(help: "Use \u{201C}\(suggestion)\u{201D} as the title", action: model.acceptSuggestedTitle)
                     .padding(.leading, 4)
                     .transition(.opacity)
@@ -97,6 +99,9 @@ struct TitleField<Subtitle: View>: View {
     @State private var clickMonitor: Any?
     @FocusState private var focused: Bool
 
+    /// Shown only where the model runs, as SYSTEM.md describes.
+    private var suggestion: String? { Titles.available ? entry.titleSuggestion : nil }
+
     var body: some View {
         // One container, so its modifiers see a single view whether or not
         // the name is being edited.
@@ -110,7 +115,7 @@ struct TitleField<Subtitle: View>: View {
                     .buttonStyle(.plain)
                     .hoverHelp("Rename")
                     .accessibilityLabel(
-                        entry.title.map { "\($0), rename" } ?? entry.titleSuggestion.map {
+                        entry.title.map { "\($0), rename" } ?? suggestion.map {
                             "Suggested title \($0), add a title"
                         }
                             ?? "Add a title")
@@ -129,7 +134,7 @@ struct TitleField<Subtitle: View>: View {
         VStack(alignment: .leading, spacing: 2) {
             Group {
                 if editing {
-                    TextField(entry.titleSuggestion ?? "Title", text: $text)
+                    TextField(suggestion ?? "Title", text: $text)
                         .textFieldStyle(.plain)
                         .focused($focused)
                         .onSubmit(submit)
@@ -137,9 +142,9 @@ struct TitleField<Subtitle: View>: View {
                         .onChange(of: focused) { _, now in if !now { commit() } }
                 } else {
                     HStack(spacing: 5) {
-                        Text(entry.title ?? entry.titleSuggestion ?? "Add a title")
+                        Text(entry.title ?? suggestion ?? "Add a title")
                             .foregroundStyle(entry.title == nil ? .tertiary : .primary)
-                            .fontWeight(entry.title == nil && entry.titleSuggestion != nil ? .regular : nil)
+                            .fontWeight(entry.title == nil && suggestion != nil ? .regular : nil)
                             .lineLimit(1)
                             .truncationMode(.tail)
                         Image(systemName: "pencil")
@@ -184,7 +189,7 @@ struct TitleField<Subtitle: View>: View {
 
     /// Return on an empty field takes the suggestion; a click away does not.
     private func submit() {
-        if text.trimmingCharacters(in: .whitespaces).isEmpty, let suggestion = entry.titleSuggestion,
+        if text.trimmingCharacters(in: .whitespaces).isEmpty, let suggestion,
             entry.title == nil
         {
             text = suggestion

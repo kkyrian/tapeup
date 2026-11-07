@@ -226,6 +226,12 @@ public struct RecordingLibrary: Sendable {
 
     /// The folder whose name starts with `stamp`, wherever a rename has put
     /// it. Transcripts finish after the card may have renamed the folder.
+    /// A recording named the way a person or agent would: its folder path,
+    /// its folder name, or the time stamp it starts with.
+    public func recording(_ argument: String) -> URL? {
+        folder(withStamp: Self.stamp(of: URL(fileURLWithPath: argument).lastPathComponent))
+    }
+
     public func folder(withStamp stamp: String) -> URL? {
         let year = root.appendingPathComponent(String(stamp.prefix(4)), isDirectory: true)
         let names = (try? FileManager.default.contentsOfDirectory(atPath: year.path)) ?? []
@@ -241,7 +247,11 @@ public struct RecordingLibrary: Sendable {
     @discardableResult
     public static func save(title: String?, in folder: URL) throws -> URL {
         let trimmed = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        try MetaFile.update(folder) { meta in meta["title"] = trimmed.isEmpty ? nil : trimmed }
+        try MetaFile.update(folder) { meta in
+            meta["title"] = trimmed.isEmpty ? nil : trimmed
+            // A name given settles the suggestion.
+            if !trimmed.isEmpty { meta["title_suggestion"] = nil }
+        }
         let name = folderName(stamp: stamp(of: folder.lastPathComponent), title: trimmed)
         guard name != folder.lastPathComponent else { return folder }
         let renamed = folder.deletingLastPathComponent().appendingPathComponent(name, isDirectory: true)
@@ -348,6 +358,14 @@ public struct RecordingLibrary: Sendable {
         writes `transcript-with-speaker-labels.md` and leaves `transcript.md` as
         it is. Voice labels come from how voices sound: lines where two people
         talk at once, or people sharing one microphone, are the most often wrong.
+
+        ## Commands
+
+        `/Applications/TapeUp.app/Contents/MacOS/TapeUp help` lists what you can
+        do from the command line: show or change this folder, name a recording,
+        make its transcript again, label its speakers. A recording is named by
+        its folder or the time it starts with (`2026-11-06-1430`). Recordings are
+        started only in the app.
 
         ## Your rules
 
