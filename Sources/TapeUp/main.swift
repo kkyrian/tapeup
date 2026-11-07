@@ -27,7 +27,9 @@ case "uitest":
         UITest.run(
             out: Launcher.value(after: "--out", in: arguments) ?? "tmp/uitest",
             record: arguments.contains("--record"),
-            agent: Launcher.value(after: "--agent", in: arguments).flatMap(AgentKind.init))
+            // Calls the user's agent for real, so only where make uitest-agents asks.
+            agent: ProcessInfo.processInfo.environment["TAPEUP_AGENT_TEST"] == "1"
+                ? Launcher.value(after: "--agent", in: arguments).flatMap(AgentKind.init) : nil)
     }
 case "permissions":
     Launcher.reportPermissions(to: Launcher.value(after: "--out", in: arguments))

@@ -10,6 +10,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotKey: HotKey?
     private var commands: NSObjectProtocol?
     private var floating: FloatingControls!
+    private lazy var agentMenu = AgentMenu(agents: model.agents)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -26,7 +27,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if hotKey == nil { model.shortcutLabel = nil }
         renderStatusItem()
         model.recoverLeftovers()
-        model.agents.refresh()
+        model.agents.refreshIfOn()
 
         // A menu-bar app that shows nothing on first launch looks broken.
         if !UserDefaults.standard.bool(forKey: "hasLaunched") {
@@ -38,6 +39,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         panel.show()
         return false
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        Run.stopAll()
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -56,8 +61,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func statusItemClicked() {
-        model.agents.refresh()
         guard NSApp.currentEvent?.type == .rightMouseDown else { return panel.toggle() }
+        model.agents.refresh()
         panel.close()
         statusItem.menu = appMenu()
         statusItem.button?.performClick(nil)
@@ -92,17 +97,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 guard let self else { return }
                 model.launchAtLogin.toggle()
             })
-        let agent = NSMenuItem(title: "Agent", action: nil, keyEquivalent: "")
+        let agent = NSMenuItem(title: model.agents.menuTitle, action: nil, keyEquivalent: "")
         let agents = NSMenu()
         agents.autoenablesItems = false
-        let caption = NSMenuItem(title: "Suggests titles and names", action: nil, keyEquivalent: "")
-        caption.isEnabled = false
-        agents.addItem(caption)
-        for row in model.agents.rows {
-            let entry = item(row.title, on: row.checked ? true : nil, row.action)
-            entry.isEnabled = row.enabled
-            agents.addItem(entry)
-        }
+        // Filled as it opens, with the state the check just found.
+        agents.delegate = agentMenu
+        agentMenu.fill(agents)
         agent.submenu = agents
         menu.insertItem(agent, at: 1)
         menu.addItem(.separator())
@@ -186,6 +186,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 "TapeUp, \(model.paused ? "paused" : "recording"), \(Format.spokenDuration(model.elapsed))")
         }
     }
+}
+
+/// The right-click Agent submenu, the same rows as in ···.
+@MainActor
+final class AgentMenu: NSObject, NSMenuDelegate {
+    let agents: Agents
+
+    init(agents: Agents) { self.agents = agents }
+
+    func fill(_ menu: NSMenu) {
+        menu.removeAllItems()
+        let caption = NSMenuItem(title: Agents.caption, action: nil, keyEquivalent: "")
+        caption.isEnabled = false
+        menu.addItem(caption)
+        for row in agents.rows {
+            let item = ClosureMenuItem(title: row.title, action: row.action)
+            item.state = row.checked ? .on : .off
+            item.isEnabled = row.enabled
+            menu.addItem(item)
+        }
+    }
+
+    func menuNeedsUpdate(_ menu: NSMenu) { fill(menu) }
 }
 
 /// A menu item that runs a closure.

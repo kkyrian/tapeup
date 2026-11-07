@@ -585,7 +585,7 @@ final class AppModel {
     func open(_ entry: RecordingEntry) {
         showingPeople = false
         card = Card(entry: entry, finishing: false, justRecorded: false)
-        titles.suggest(for: entry)
+        titles.suggest(for: entry, agent: true)
     }
 
     /// Accepts the suggested title as the recording's name.
@@ -635,7 +635,9 @@ final class AppModel {
     private func transcriptFinished(_ stamp: String) {
         refreshCard(stamp)
         if let folder = library.folder(withStamp: stamp), let entry = RecordingLibrary.entry(at: folder) {
-            titles.suggest(for: entry)
+            // The user's agent only for the recording on the card.
+            let atCard = card.map { RecordingLibrary.stamp(of: $0.entry.folder) == stamp } ?? false
+            titles.suggest(for: entry, agent: atCard)
         }
     }
 
@@ -875,7 +877,7 @@ extension AppModel {
                         suggestion: "Run TapeUp transcribe \(stamp) first."), nil)
                 return
             }
-            speakers.label(entry, count: request["voices"].flatMap(Int.init))
+            speakers.label(entry, count: request["voices"].flatMap(Int.init), askAgent: false)
             reply(nil, folder)
         default:
             reply(Refusal("usage", "TapeUp does not know the command \(command)."), nil)

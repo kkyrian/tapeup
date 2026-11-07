@@ -154,6 +154,13 @@ enum CLI {
                 rest.removeSubrange(index...(index + 1))
             }
             refuseFlags(rest, usage: "TapeUp agent [off] [--model M] [--effort E]")
+            let efforts = ["minimal", "low", "medium", "high", "xhigh", "max", "default"]
+            if let effort = changes["Effort"], !efforts.contains(effort) {
+                fail("usage", "--effort is one of \(efforts.joined(separator: ", ")).")
+            }
+            if rest == ["off"], !changes.isEmpty {
+                fail("usage", "TapeUp agent off takes no --model or --effort.", suggestion: "Run them separately.")
+            }
             if rest == ["off"] {
                 UserDefaults.standard.removeObject(forKey: "agent")
             } else if let word = rest.first, rest.count == 1, AgentKind(rawValue: word) != nil || word == "on" {

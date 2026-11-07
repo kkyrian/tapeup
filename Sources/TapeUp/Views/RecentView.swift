@@ -158,8 +158,8 @@ struct MoreMenu: View {
     var body: some View {
         MoreButton(help: "TapeUp", badge: model.agents.needsAttention, opening: model.agents.refresh) {
             Button("People…", action: model.openPeople)
-            Menu("Agent") {
-                Text("Suggests titles and names")
+            Menu(model.agents.menuTitle) {
+                Text(Agents.caption)
                 ForEach(Array(model.agents.rows.enumerated()), id: \.offset) { _, row in
                     Button(action: row.action) {
                         if row.checked { Label(row.title, systemImage: "checkmark") } else { Text(row.title) }

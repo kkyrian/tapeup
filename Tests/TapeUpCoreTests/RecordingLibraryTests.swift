@@ -200,6 +200,10 @@ struct TranscriptStateTests {
             try RecordingLibrary(root: root).prepareRoot()
             #expect(try String(contentsOf: guide, encoding: .utf8) == RecordingLibrary.agentsGuide)
         }
+        // An editor's extra blank line at the end is still TapeUp's text.
+        try (RecordingLibrary.earlierAgentsGuides[1] + "\n").write(to: guide, atomically: true, encoding: .utf8)
+        try RecordingLibrary(root: root).prepareRoot()
+        #expect(try String(contentsOf: guide, encoding: .utf8) == RecordingLibrary.agentsGuide)
         let edited = RecordingLibrary.earlierAgentsGuides[0] + "Summaries go in notes/.\n"
         try edited.write(to: guide, atomically: true, encoding: .utf8)
         try RecordingLibrary(root: root).prepareRoot()

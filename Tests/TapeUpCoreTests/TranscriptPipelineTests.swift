@@ -518,9 +518,11 @@ struct VoiceFoldingTests {
         // Voice 1 is named already, voice 9 does not exist, and Mei is taken.
         try SpeakerLabels.suggest([1: "Priya Shah", 2: "Mei", 3: "José Ortiz", 9: "Ana"], in: folder)
         #expect(SpeakerLabels.result(in: folder)?.suggested == [3: "José Ortiz"])
-        try SpeakerLabels.suggest([2: "Priya Shah", 3: "José Ortiz"], in: folder)
+        // Giving a suggested name to another voice takes it off the suggestion.
+        try SpeakerLabels.name(2, "José Ortiz", in: folder)
+        #expect(SpeakerLabels.result(in: folder)?.suggested.isEmpty == true)
         try SpeakerLabels.name(2, "Ana", in: folder)
-        #expect(SpeakerLabels.result(in: folder)?.suggested == [3: "José Ortiz"])
+        try SpeakerLabels.suggest([3: "José Ortiz"], in: folder)
         try SpeakerLabels.acceptSuggested(in: folder)
         let result = try #require(SpeakerLabels.result(in: folder))
         #expect(result.names == [1: "Mei", 2: "Ana", 3: "José Ortiz"] && result.suggested.isEmpty)

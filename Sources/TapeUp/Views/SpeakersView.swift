@@ -8,7 +8,7 @@ struct SpeakersView: View {
     let entry: RecordingEntry
 
     var body: some View {
-        let result = model.speakers.result(for: entry)
+        let result = shown(model.speakers.result(for: entry))
         let work = model.speakers.work(on: entry)
         VStack(alignment: .leading, spacing: 6) {
             if let result, work == nil || work == .failed {
@@ -37,6 +37,13 @@ struct SpeakersView: View {
             }
         }
         .animation(.easeOut(duration: 0.2), value: work)
+    }
+
+    /// Suggestions show only while an agent is on.
+    private func shown(_ result: SpeakerResult?) -> SpeakerResult? {
+        guard var result, model.agents.chosen == nil else { return result }
+        result.suggested = [:]
+        return result
     }
 
     @ViewBuilder private func status(_ work: Speakers.Work?) -> some View {
@@ -142,7 +149,7 @@ private struct NamePicker: View {
         .fixedSize()
         .onHover { hovering = $0 }
         .hoverHelp(
-            name != nil ? "Rename this voice" : suggested != nil ? "Suggested: Voice \(voice.id)" : "Name this voice"
+            name != nil ? "Rename this voice" : suggested.map { "Suggested: \($0). Use takes it" } ?? "Name this voice"
         )
         .accessibilityLabel(
             name.map { "Voice \(voice.id), \($0)" } ?? suggested.map { "Voice \(voice.id), suggested \($0)" }

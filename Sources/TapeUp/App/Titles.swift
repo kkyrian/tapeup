@@ -18,7 +18,7 @@ final class Titles {
     var suggested: (String) -> Void = { _ in }
     var agents: Agents?
 
-    private var queue: [String] = []
+    private var queue: [(stamp: String, agent: Bool)] = []
     private var running = false
     private var tried: Set<String> = []
 
@@ -36,19 +36,26 @@ final class Titles {
     var canSuggest: Bool { Self.available || agents?.chosen != nil }
 
     /// Suggests a title for a transcribed recording the user has not named.
-    func suggest(for entry: RecordingEntry) {
+    /// `agent` is true only where the user is at that recording (it is open,
+    /// or was just recorded); otherwise, with an agent on, the suggestion
+    /// waits for the user to open it, so the agent is never called in bulk.
+    func suggest(for entry: RecordingEntry, agent: Bool) {
         let stamp = RecordingLibrary.stamp(of: entry.folder)
         guard canSuggest, entry.transcript == .done, entry.title == nil, entry.titleSuggestion == nil,
             tried.insert(stamp).inserted
         else { return }
-        queue.append(stamp)
+        if agents?.chosen != nil, !agent {
+            tried.remove(stamp)
+            return
+        }
+        queue.append((stamp, agent))
         next()
     }
 
     private func next() {
         guard !running, !queue.isEmpty else { return }
         running = true
-        let stamp = queue.removeFirst()
+        let (stamp, agent) = queue.removeFirst()
         Task { [weak self] in
             defer {
                 self?.running = false
@@ -62,8 +69,8 @@ final class Titles {
             let excerpt = TitleExcerpt.make(lines: lines)
             guard excerpt.count >= 40 else { return }
             var title: String?
-            if let agents {
-                title = await Self.ask(agents, excerpt: excerpt, people: entry.people.names, folder: folder)
+            if agent, let agents {
+                title = await Self.ask(agents, excerpt: excerpt, people: entry.people.names, stamp: stamp, in: library)
             }
             if title == nil { title = await Self.make(excerpt: excerpt, people: entry.people.names) }
             guard let title else {
@@ -79,14 +86,16 @@ final class Titles {
     }
 
     /// The agent's title; nil without an agent or when the call fails.
-    private static func ask(_ agents: Agents, excerpt: String, people: [String], folder: URL) async -> String? {
+    private static func ask(
+        _ agents: Agents, excerpt: String, people: [String], stamp: String, in library: RecordingLibrary
+    ) async -> String? {
         var prompt = instructions(people: people)
         prompt += "\n\nTranscript lines:\n\(excerpt)"
         let schema: [String: Any] = [
             "type": "object", "properties": ["title": ["type": "string"]], "required": ["title"],
             "additionalProperties": false,
         ]
-        guard let data = await agents.ask("title", prompt: prompt, schema: schema, for: folder),
+        guard let data = await agents.ask("title", prompt: prompt, schema: schema, stamp: stamp, in: library),
             let answer = try? JSONDecoder().decode([String: String].self, from: data)
         else { return nil }
         return answer["title"].flatMap(tidy)

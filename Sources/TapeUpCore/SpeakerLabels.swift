@@ -340,7 +340,8 @@ extension SpeakerLabels {
             throw CocoaError(.fileNoSuchFile)
         }
         result.names[voice] = name
-        result.suggested[voice] = nil
+        // A name is on one voice only, suggested or given.
+        result.suggested = result.suggested.filter { $0.key != voice && $0.value != name }
         try save(result, lines: lines, in: folder)
     }
 
@@ -364,7 +365,11 @@ extension SpeakerLabels {
         guard var result = result(in: folder), let lines = TranscriptDocument.lines(in: folder) else {
             throw CocoaError(.fileNoSuchFile)
         }
-        for (voice, name) in result.suggested where result.names[voice] == nil { result.names[voice] = name }
+        var taken = Set(result.names.values)
+        for (voice, name) in result.suggested.sorted(by: { $0.key < $1.key })
+        where result.names[voice] == nil && taken.insert(name).inserted {
+            result.names[voice] = name
+        }
         result.suggested = [:]
         try save(result, lines: lines, in: folder)
     }

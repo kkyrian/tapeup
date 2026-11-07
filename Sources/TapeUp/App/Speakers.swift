@@ -33,6 +33,7 @@ final class Speakers {
     /// The count each recording's labels should have, updated while a listen runs.
     private var wanted: [String: Int?] = [:]
     private var listening: Task<Void, Never>?
+    private var agentWanted: Set<String> = []
 
     init(library: RecordingLibrary) { self.library = library }
 
@@ -50,9 +51,12 @@ final class Speakers {
     }
 
     /// Labels a transcribed recording with `count` voices, or the estimate.
-    func label(_ entry: RecordingEntry, count: Int?) {
+    /// `askAgent` is false for work the user did not start in the panel, so
+    /// the user's agent is never called in bulk.
+    func label(_ entry: RecordingEntry, count: Int?, askAgent: Bool = true) {
         let stamp = RecordingLibrary.stamp(of: entry.folder)
         wanted[stamp] = .some(count)
+        if askAgent { agentWanted.insert(stamp) } else { agentWanted.remove(stamp) }
         if let current = work[stamp], current != .failed { return }
         if let heard = VoicePrints.read(in: entry.folder) {
             save(stamp: stamp, heard: heard)
@@ -118,7 +122,7 @@ final class Speakers {
             work[stamp] = nil
             wanted[stamp] = nil
             version += 1
-            suggestNames(stamp: stamp, result: result)
+            if agentWanted.remove(stamp) != nil { suggestNames(stamp: stamp, result: result) }
         } catch {
             failed(stamp, error)
         }
@@ -172,7 +176,8 @@ final class Speakers {
                 }
                 var voices: [Pick]
             }
-            guard let self, let data = await agents.ask("names", prompt: prompt, schema: schema, for: folder),
+            guard let self,
+                let data = await agents.ask("names", prompt: prompt, schema: schema, stamp: stamp, in: library),
                 let answer = try? JSONDecoder().decode(Answer.self, from: data),
                 let folder = library.folder(withStamp: stamp),
                 // A recount or a name given meanwhile changed what was asked about.
@@ -193,6 +198,7 @@ final class Speakers {
     }
 
     private func failed(_ stamp: String, _ error: Error) {
+        agentWanted.remove(stamp)
         work[stamp] = .failed
         wanted[stamp] = nil
         if let folder = library.folder(withStamp: stamp) {

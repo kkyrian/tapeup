@@ -19,8 +19,8 @@ uitest:
 # The UI test again, calling the user's own Claude Code and Codex for real.
 uitest-agents:
 	scripts/bundle.sh
-	.build/TapeUp.app/Contents/MacOS/TapeUp uitest --agent claude --out tmp/uitest-claude
-	.build/TapeUp.app/Contents/MacOS/TapeUp uitest --agent codex --out tmp/uitest-codex
+	TAPEUP_AGENT_TEST=1 .build/TapeUp.app/Contents/MacOS/TapeUp uitest --agent claude --out tmp/uitest-claude
+	TAPEUP_AGENT_TEST=1 .build/TapeUp.app/Contents/MacOS/TapeUp uitest --agent codex --out tmp/uitest-codex
 
 bundle:
 	scripts/bundle.sh release
