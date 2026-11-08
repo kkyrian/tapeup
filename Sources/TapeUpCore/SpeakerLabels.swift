@@ -140,6 +140,13 @@ public enum SpeakerLabels {
     /// Each line's voice, numbered by talk time: the voice heard longest
     /// during the line, or nil when no voice overlaps it.
     public static func assign(lines: [TranscriptLine], turns: [VoiceTurn]) -> [Int?] {
+        let (raw, number) = numbered(lines: lines, turns: turns)
+        return raw.map { $0.flatMap { number[$0] } }
+    }
+
+    /// Each line's voice as the turns name it, and the number each such
+    /// voice gets by talk time.
+    static func numbered(lines: [TranscriptLine], turns: [VoiceTurn]) -> (raw: [Int?], number: [Int: Int]) {
         let raw = lines.map { line -> Int? in
             var heard: [Int: Double] = [:]
             for turn in turns {
@@ -153,8 +160,7 @@ public enum SpeakerLabels {
             if let voice { talk[voice, default: 0] += line.end - line.start }
         }
         let order = talk.sorted { $0.value > $1.value || ($0.value == $1.value && $0.key < $1.key) }.map(\.key)
-        let number = Dictionary(uniqueKeysWithValues: order.enumerated().map { ($1, $0 + 1) })
-        return raw.map { $0.flatMap { number[$0] } }
+        return (raw, Dictionary(uniqueKeysWithValues: order.enumerated().map { ($1, $0 + 1) }))
     }
 
     /// The voices found, most talk first, each with a line it said.
@@ -184,7 +190,9 @@ public enum SpeakerLabels {
         let turns = heard.turns.map { VoiceTurn(start: $0.start, end: $0.end, voice: person[$0.voice] ?? $0.voice) }
         let assigned = assign(lines: lines, turns: turns)
         let voices = voices(lines: lines, assigned: assigned)
-        return SpeakerResult(count: voices.count, estimated: count == nil, voices: voices, assigned: assigned)
+        var result = SpeakerResult(count: voices.count, estimated: count == nil, voices: voices, assigned: assigned)
+        result.folded = count
+        return result
     }
 
     /// Names from earlier labels, moved to whichever new voice holds most of
@@ -247,6 +255,9 @@ public struct SpeakerResult: Sendable, Equatable, Codable {
     /// Names the user's agent suggested for voices the user has not named,
     /// shown until the user takes or replaces them. A recount drops them.
     public var suggested: [Int: String] = [:]
+    /// The count the voices were folded to; nil for the estimate, and in
+    /// labels made before it was kept.
+    public var folded: Int?
 
     public init(count: Int, estimated: Bool, voices: [Voice], assigned: [Int?]) {
         self.count = count
@@ -263,6 +274,7 @@ public struct SpeakerResult: Sendable, Equatable, Codable {
         assigned = try values.decode([Int?].self, forKey: .assigned)
         names = try values.decodeIfPresent([Int: String].self, forKey: .names) ?? [:]
         suggested = try values.decodeIfPresent([Int: String].self, forKey: .suggested) ?? [:]
+        folded = try values.decodeIfPresent(Int.self, forKey: .folded)
     }
 }
 

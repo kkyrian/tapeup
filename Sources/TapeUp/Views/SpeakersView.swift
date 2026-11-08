@@ -29,7 +29,7 @@ struct SpeakersView: View {
                 }
                 ForEach(result.voices) { voice in
                     VoiceRow(
-                        model: model, entry: entry, voice: voice, name: result.names[voice.id],
+                        model: model, entry: entry, result: result, voice: voice, name: result.names[voice.id],
                         suggested: result.suggested[voice.id])
                 }
             } else {
@@ -37,6 +37,11 @@ struct SpeakersView: View {
             }
         }
         .animation(.easeOut(duration: 0.2), value: work)
+        // Playback stops with the page, a recount, a relabel or a recording starting.
+        .onDisappear { model.speakers.player.stop() }
+        .onChange(of: result?.assigned) { model.speakers.player.stop() }
+        .onChange(of: work) { model.speakers.player.stop() }
+        .onChange(of: model.phase == .idle) { model.speakers.player.stop() }
     }
 
     /// Suggestions show only while an agent is on.
@@ -78,15 +83,20 @@ struct SpeakersView: View {
     }
 }
 
-/// One voice: a name to pick, how long it talked, and a line it said.
+/// One voice: a name to pick, how long it talked, a line it said, and a
+/// play button that plays all it said, the line following the words.
 private struct VoiceRow: View {
     @Bindable var model: AppModel
     let entry: RecordingEntry
+    let result: SpeakerResult
     let voice: Voice
     let name: String?
     let suggested: String?
 
     var body: some View {
+        let player = model.speakers.player
+        let playing = player.isPlaying(voice.id, in: entry)
+        let quote = playing ? player.line ?? voice.quote : voice.quote
         VStack(alignment: .leading, spacing: 1) {
             HStack(spacing: 6) {
                 NamePicker(model: model, entry: entry, voice: voice, name: name, suggested: suggested)
@@ -95,14 +105,26 @@ private struct VoiceRow: View {
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
+                if FileManager.default.fileExists(atPath: entry.audio.path) {
+                    // Same size playing or not, so the row never moves.
+                    IconButton(
+                        symbol: playing ? "stop.fill" : "play.fill",
+                        help: model.phase != .idle
+                            ? "Play once the recording stops" : playing ? "Stop" : "Play this voice",
+                        size: 22, tinted: playing
+                    ) {
+                        player.toggle(voice.id, in: entry, result: result)
+                    }
+                    .disabled(model.phase != .idle)
+                }
             }
-            Text("\u{201C}\(voice.quote)\u{201D}")
+            Text("\u{201C}\(quote)\u{201D}")
                 .font(.system(size: 11))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(playing ? .primary : .secondary)
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .padding(.leading, 6)
-                .hoverHelp(voice.quote)
+                .hoverHelp(quote)
         }
     }
 }

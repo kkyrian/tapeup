@@ -25,6 +25,19 @@ enum UITest {
         return nil
     }
 
+    /// Silent stereo AAC, standing in for a recording's audio.
+    private static func writeSilence(seconds: Int, to url: URL) {
+        let rate = 16_000
+        guard let format = AVAudioFormat(standardFormatWithSampleRate: Double(rate), channels: 2),
+            let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(rate)),
+            let file = try? AVAudioFile(
+                forWriting: url,
+                settings: [AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: rate, AVNumberOfChannelsKey: 2])
+        else { return }
+        buffer.frameLength = buffer.frameCapacity
+        for _ in 0..<seconds { try? file.write(from: buffer) }
+    }
+
     static func run(out: String, record: Bool, agent: AgentKind? = nil) {
         let outURL = URL(fileURLWithPath: out)
         try? FileManager.default.createDirectory(at: outURL, withIntermediateDirectories: true)
@@ -261,6 +274,54 @@ enum UITest {
             check("card-speakers-same-count")
             expect(
                 model.speakers.result(for: current())?.names[1] == "Priya Shah", "tapping the same number keeps names")
+            // Play: a voice's turns back to back, its quote following the
+            // line heard; another voice or a second click stops it, naming
+            // keeps it going, and the row never moves. The seeded audio is
+            // silence just long enough for the first two voices' first turns.
+            let player = model.speakers.player
+            if let result = model.speakers.result(for: current()), result.voices.count >= 2 {
+                let (first, second) = (result.voices[0].id, result.voices[1].id)
+                let lines = TranscriptDocument.lines(in: current().folder) ?? []
+                let turns = SpeakerLabels.turns(
+                    of: result, heard: VoicePrints.read(in: current().folder), lines: lines)
+                let starts = [first, second].map { turns[$0]?.map(\.start).min() ?? 0 }
+                writeSilence(seconds: Int(starts.max() ?? 0) + 10, to: current().audio)
+                let opening = zip(lines, result.assigned).first { $0.1 == first }?.0.text
+                player.toggle(first, in: current(), result: result)
+                check("card-speakers-playing")
+                let playingHeight = panel.window.frame.height
+                expect(player.isPlaying(first, in: current()), "Play plays the voice")
+                expect((player.playedSeconds() ?? 0) > 0.2, "its audio is heard (\(player.playedSeconds() ?? -1) s)")
+                expect(
+                    player.line != nil && player.line == opening,
+                    "the quote is the line heard (\(player.line ?? "none"))")
+                model.speakers.name(second, "Mei", in: current())
+                settle(0.2)
+                expect(player.isPlaying(first, in: current()), "naming a voice keeps it playing")
+                player.toggle(second, in: current(), result: result)
+                settle(0.3)
+                expect(
+                    player.isPlaying(second, in: current()) && !player.isPlaying(first, in: current()),
+                    "playing another voice stops the first")
+                expect((player.playedSeconds() ?? 9) < 0.6, "and plays the second from its start")
+                player.toggle(second, in: current(), result: result)
+                check("card-speakers-stopped")
+                expect(player.playing == nil && player.line == nil, "clicking again stops")
+                expect(panel.window.frame.height == playingHeight, "playing or stopped, the rows stay put")
+                model.speakers.name(second, nil, in: current())
+                // Another count makes other voices: what was playing stops.
+                player.toggle(first, in: current(), result: result)
+                var recount = current().people
+                recount.count = 2
+                model.setPeople(recount)
+                settle(0.3)
+                expect(player.playing == nil, "a recount stops the voice playing")
+                recount.count = 3
+                model.setPeople(recount)
+                settle(0.3)
+            } else {
+                expect(false, "the seeded recording has two voices to play")
+            }
             // A title made by the on-device model names the recording.
             if Titles.available {
                 for _ in 0..<80 where model.card?.entry.title == nil { settle(0.25) }
@@ -268,7 +329,13 @@ enum UITest {
                 let title = model.card?.entry.title
                 expect(title != nil, "the recording is named from its transcript (\(title ?? "none"))")
             }
+            if let result = model.speakers.result(for: current()), let voice = result.voices.first {
+                player.toggle(voice.id, in: current(), result: result)
+                settle(0.2)
+                expect(player.playing != nil, "a voice plays before the card closes")
+            }
             model.closeCard()
+            expect(player.playing == nil, "closing the card stops the voice")
         } else {
             expect(false, "a seeded recording has voices to label")
         }
