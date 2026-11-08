@@ -44,7 +44,10 @@ if [[ -n "${TAPEUP_FEED_URL:-}" ]]; then
 fi
 # The public half of the update key (scripts/make-keys.sh writes it). Without
 # it the app runs but does not look for updates.
-public_key="${TAPEUP_ED_PUBLIC_KEY:-$(tr -d '[:space:]' <packaging/sparkle-public-key 2>/dev/null || true)}"
+public_key="${TAPEUP_ED_PUBLIC_KEY:-}"
+if [[ -z "$public_key" && -f packaging/sparkle-public-key ]]; then
+  public_key="$(tr -d '[:space:]' <packaging/sparkle-public-key)"
+fi
 if [[ -n "$public_key" ]]; then
   plutil -replace SUPublicEDKey -string "$public_key" "$plist"
 fi

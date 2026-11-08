@@ -81,7 +81,8 @@ make verify-fast
 
 # The Sparkle key: the keychain's must be the one the app is built with.
 [[ -x "$sparkle_bin/sign_update" ]] || swift package resolve >/dev/null
-public_key="${TAPEUP_ED_PUBLIC_KEY:-$(tr -d '[:space:]' <"$public_key_file" 2>/dev/null || true)}"
+public_key="${TAPEUP_ED_PUBLIC_KEY:-}"
+if [[ -z "$public_key" && -f "$public_key_file" ]]; then public_key="$(tr -d '[:space:]' <"$public_key_file")"; fi
 sign_args=(--account "$account")
 if [[ -n "${SPARKLE_KEY_FILE:-}" ]]; then
   sign_args=(--ed-key-file "$SPARKLE_KEY_FILE")
@@ -251,14 +252,15 @@ if [[ -d "$tap/.git" ]]; then
     target="$tap"
   fi
   mkdir -p "$target/Casks"
-  sed -e "s/^  version \".*\"$/  version \"$version\"/" -e "s/^  sha256 \".*\"$/  sha256 \"$sha\"/" \
+  # The template's opening comment is about the template; the cask starts at "cask".
+  sed -e '1,/^cask /{/^#/d;}' -e "s/^  version \".*\"$/  version \"$version\"/" -e "s/^  sha256 \".*\"$/  sha256 \"$sha\"/" \
     "$cask_template" >"$target/Casks/tapeup.rb"
   ruby -c "$target/Casks/tapeup.rb" >/dev/null
   grep -q "version \"$version\"" "$target/Casks/tapeup.rb" && grep -q "sha256 \"$sha\"" "$target/Casks/tapeup.rb" \
     || fail "the cask template did not take the version and sha256."
   if ((dry_run)); then
-    git -C "$target" --no-pager diff --stat
     git -C "$target" status --short
+    cat "$target/Casks/tapeup.rb"
   else
     git -C "$tap" add Casks/tapeup.rb
     git -C "$tap" commit -q -m "chore(tapeup): $version"
