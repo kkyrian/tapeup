@@ -14,7 +14,7 @@
 
 <p align="center">
   <a href="https://github.com/kkyrian/tapeup/releases/latest/download/TapeUp.dmg"><b>Download for Mac</b></a>
-  &nbsp;·&nbsp; free, MIT license &nbsp;·&nbsp; macOS 15 or later, Apple silicon
+  &nbsp;·&nbsp; free, MIT license &nbsp;·&nbsp; Apple silicon, tested on macOS 27
 </p>
 
 ```bash
