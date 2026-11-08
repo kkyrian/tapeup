@@ -29,7 +29,7 @@ struct Journey {
     var setUp: @MainActor (Take) -> Void = { _ in }
     let script: @MainActor (Take) async -> Void
 
-    static let all: [Journey] = [record, whoWasThere, handoff, people, settings, speakers, probe]
+    static let all: [Journey] = [record, floating, whoWasThere, handoff, people, settings, speakers, probe]
 
     static var said: [String] { Shots.said.map(\.1) }
 
@@ -57,6 +57,37 @@ struct Journey {
             await take.click()
             await take.stopRecording(title: "Beta launch plan")
             await take.move(to: CGPoint(x: 250, y: 330), 0.8)
+            await take.pause(2.2)
+        })
+
+    /// In a call in another app: ⌥⌘R, then pause, resume and stop from the
+    /// floating controls; the saved recording drops from the menu bar.
+    static let floating = Journey(
+        name: "floating", size: CGSize(width: 640, height: 470),
+        setUp: { take in
+            take.hideNewest()
+            take.director.call = true
+            take.director.cursor = CGPoint(x: 300, y: 330)
+        },
+        script: { take in
+            await take.pause(0.5)
+            withAnimation(.easeOut(duration: 0.12)) { take.director.keys = "⌥ ⌘ R" }
+            await take.pause(0.25)
+            take.startRecording(from: 0) { _ in [said[0]] }
+            withAnimation(.easeOut(duration: 0.25)) { take.director.pill = true }
+            await take.pause(0.6)
+            withAnimation(.easeOut(duration: 0.3)) { take.director.keys = nil }
+            await take.pause(2.0)
+            await take.move(to: take.pauseButton, 0.8)
+            await take.click { take.paused = true }
+            await take.pause(1.4)
+            await take.click { take.paused = false }
+            await take.pause(1.6)
+            await take.move(to: take.stopButton, 0.4)
+            await take.click()
+            withAnimation(.easeOut(duration: 0.15)) { take.director.pill = false }
+            await take.stopRecording(title: "Beta launch plan", showPanel: true)
+            await take.move(to: CGPoint(x: 200, y: 400), 0.8)
             await take.pause(2.2)
         })
 

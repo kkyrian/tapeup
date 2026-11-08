@@ -160,6 +160,12 @@ final class Director {
     var terminal: [String]?
     /// The terminal's input line while it is being typed.
     var typing: String?
+    /// A call going on in another app, under everything.
+    var call = false
+    /// Keys just pressed, shown large as a keystroke viewer would.
+    var keys: String?
+    /// The floating controls, centered under the menu bar.
+    var pill = false
 
     struct DrawnMenu {
         var items: [String]
@@ -185,6 +191,18 @@ final class Take {
 
     /// Where the panel's top-left corner sits on the stage.
     var panelOrigin: CGPoint { CGPoint(x: size.width - Stage.inset - PanelView.width - 18, y: Stage.inset + 26 + 6) }
+    /// Where the floating controls sit: centered under the menu bar.
+    static func pillOrigin(_ size: CGSize) -> CGPoint {
+        CGPoint(x: (size.width - FloatingControlsView.width) / 2, y: Stage.inset + 26 + 10)
+    }
+    var pauseButton: CGPoint {
+        let origin = Self.pillOrigin(size)
+        return CGPoint(x: origin.x + FloatingControlsView.width - 38, y: origin.y + 15)
+    }
+    var stopButton: CGPoint {
+        let origin = Self.pillOrigin(size)
+        return CGPoint(x: origin.x + FloatingControlsView.width - 15, y: origin.y + 15)
+    }
     /// The menu-bar item's centre.
     var item: CGPoint { CGPoint(x: size.width - Stage.inset - 174, y: Stage.inset + 13) }
 
@@ -339,18 +357,26 @@ final class Take {
         model.reload()
     }
 
+    /// Paused: the clock and the levels hold still.
+    var paused = false
+
     /// Runs the clock, the levels and the live words as a recording would.
     func startRecording(from elapsed: TimeInterval, words: @escaping (TimeInterval) -> [String]) {
         var elapsed = elapsed
+        var last = Date()
         let began = Date().addingTimeInterval(-elapsed)
         let step: @MainActor () -> Void = { [weak self] in
             guard let self else { return }
-            elapsed = Date().timeIntervalSince(began)
-            lanes.advance()
+            let now = Date()
+            if !paused {
+                elapsed += now.timeIntervalSince(last)
+                lanes.advance()
+            }
+            last = now
             model.transcription.stage(download: .ready, live: true, latest: words(elapsed))
             model.stage(
                 phase: .recording(started: began), elapsed: elapsed, microphone: "AirPods Pro",
-                output: "MacBook Pro Speakers", levels: lanes.levels)
+                output: "MacBook Pro Speakers", levels: paused ? nil : lanes.levels, paused: paused)
         }
         step()
         ticker = Timer.scheduledTimer(withTimeInterval: 1.0 / 20, repeats: true) { _ in
@@ -360,7 +386,9 @@ final class Take {
     }
 
     /// Stops the staged recording and shows its card, saving, then saved.
-    func stopRecording(title: String?) async {
+    /// - Parameter showPanel: stopped from outside the panel, which then
+    ///   drops on its own with the saved recording, as after ⌥⌘R.
+    func stopRecording(title: String?, showPanel: Bool = false) async {
         ticker?.invalidate()
         ticker = nil
         let duration = model.elapsed
@@ -386,6 +414,12 @@ final class Take {
         var finishing = entry
         finishing.transcript = .pending
         model.card = .init(entry: finishing, finishing: true, justRecorded: true)
+        if showPanel {
+            withAnimation(.easeOut(duration: 0.15)) {
+                director.itemPressed = true
+                director.panelOpen = true
+            }
+        }
         await pause(0.9)
         model.card = .init(entry: entry, finishing: false, justRecorded: true)
         guard let title else { return }
@@ -429,6 +463,9 @@ struct Stage: View {
             Shots.Palette.page(dark)
             ZStack(alignment: .topLeading) {
                 Shots.Palette.desktop(dark)
+                if director.call {
+                    CallWindow(dark: dark).padding(.leading, 18).padding(.top, 26 + 40)
+                }
                 if let lines = director.terminal {
                     Shots.Terminal(
                         text: lines.joined(separator: "\n"), typing: director.typing, compact: true, width: 740,
@@ -443,6 +480,28 @@ struct Stage: View {
                 if director.panelOpen {
                     panel
                         .offset(x: panelX - Self.inset, y: 26 + 6)
+                        .transition(.opacity)
+                }
+                if director.pill {
+                    FloatingControlsView(model: model, stop: {}, drag: { _, _ in })
+                        .background(Color(nsColor: .windowBackgroundColor), in: .capsule)
+                        .overlay(
+                            Capsule().strokeBorder(
+                                dark ? Color.white.opacity(0.14) : Color.black.opacity(0.08), lineWidth: 0.5)
+                        )
+                        .shadow(color: .black.opacity(dark ? 0.45 : 0.14), radius: 10, y: 4)
+                        .offset(x: Take.pillOrigin(size).x - Self.inset, y: Take.pillOrigin(size).y - Self.inset)
+                        .transition(.opacity)
+                }
+                if let keys = director.keys {
+                    Text(keys)
+                        .font(.system(size: 30, weight: .medium))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 22)
+                        .padding(.vertical, 12)
+                        .background(Color.black.opacity(0.62), in: .rect(cornerRadius: 14, style: .continuous))
+                        .frame(width: size.width - Self.inset * 2)
+                        .offset(y: size.height - Self.inset * 2 - 110)
                         .transition(.opacity)
                 }
                 if let menu = director.menu {
@@ -545,4 +604,57 @@ struct DrawnMenuView: View {
     }
 
     private func highlighted(_ index: Int) -> Bool { menu.highlighted == index }
+}
+
+/// A video call in some other app: four people in tiles, no one's brand.
+private struct CallWindow: View {
+    let dark: Bool
+    private let people = [("Priya Shah", "PS"), ("José Ortiz", "JO"), ("Ana", "A"), ("You", "S")]
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 7) {
+                ForEach([Color.red, .yellow, .green], id: \.self) { color in
+                    Circle().fill(color.opacity(0.85)).frame(width: 11, height: 11)
+                }
+                Spacer()
+            }
+            .overlay(Text("Beta launch").font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary))
+            .padding(.horizontal, 12)
+            .frame(height: 30)
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 6), GridItem(.flexible(), spacing: 6)], spacing: 6) {
+                ForEach(Array(people.enumerated()), id: \.offset) { index, person in
+                    ZStack(alignment: .bottomLeading) {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(dark ? Color(white: 0.2) : Color(white: 0.86))
+                        Circle()
+                            .fill(dark ? Color(white: 0.32) : Color(white: 0.72))
+                            .frame(width: 46, height: 46)
+                            .overlay(Text(person.1).font(.system(size: 16, weight: .semibold)).foregroundStyle(.white))
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        Text(person.0)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.black.opacity(0.4), in: .rect(cornerRadius: 4))
+                            .padding(6)
+                    }
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(Color.green.opacity(index == 0 ? 0.9 : 0), lineWidth: 2)
+                    )
+                    .frame(height: 118)
+                }
+            }
+            .padding(6)
+        }
+        .frame(width: 420)
+        .background(dark ? Color(white: 0.12) : Color(white: 0.96), in: .rect(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(dark ? Color.white.opacity(0.12) : Color.black.opacity(0.1), lineWidth: 0.5)
+        )
+        .shadow(color: .black.opacity(dark ? 0.4 : 0.12), radius: 14, y: 6)
+    }
 }

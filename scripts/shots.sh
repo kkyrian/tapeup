@@ -28,8 +28,13 @@ for movie in tmp/film/*.mov; do
   [ "$name" = probe ] && continue
   gif="$images/$name.gif"
   [ "$base" = "$name-dark" ] && gif="$images/$name-dark.gif"
-  # The terminal journey is wide; it shows at full width, a little smaller.
-  width=$([ "$name" = handoff ] && echo 1388 || echo 840)
+  # Twice the width each is shown at; the terminal journey, at full page
+  # width, a little less.
+  case "$name" in
+    handoff) width=1388 ;;
+    floating) width=880 ;;
+    *) width=840 ;;
+  esac
   # The first moments are the window settling; the journey starts after.
   ffmpeg -loglevel error -y -ss 0.3 -i "$movie" -vf \
     "fps=25,scale=$width:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=160:stats_mode=diff[p];[b][p]paletteuse=dither=none:diff_mode=rectangle" \

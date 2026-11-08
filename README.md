@@ -12,8 +12,12 @@
 
 <p align="center">
   <a href="https://github.com/kkyrian/tapeup/releases/latest/download/TapeUp.dmg"><b>Download for Mac</b></a>
-  &nbsp;·&nbsp; free and open source &nbsp;·&nbsp; macOS 15 or later, Apple silicon
+  &nbsp;·&nbsp; free, MIT license &nbsp;·&nbsp; macOS 15 or later, Apple silicon
 </p>
+
+```bash
+brew install kkyrian/tap/tapeup
+```
 
 <p align="center">
   <picture>
@@ -25,8 +29,22 @@
 <br>
 
 <picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/images/floating-dark.gif">
+  <img align="left" width="440" src=".github/images/floating.gif" alt="In a video call in another app, ⌥⌘R starts recording. Small controls float under the menu bar with the time, Pause and Stop. Pause holds the clock, play resumes, and Stop saves: the recording drops from the menu bar and names itself “Beta launch plan”.">
+</picture>
+
+### Record from any app
+
+Press **⌥⌘R** mid-call. Small controls float over your windows, so
+pausing or stopping is one click away, and the saved recording drops
+from the menu bar.
+
+<br clear="all">
+<br>
+
+<picture>
   <source media="(prefers-color-scheme: dark)" srcset=".github/images/who-was-there-dark.gif">
-  <img align="left" width="380" src=".github/images/who-was-there.gif" alt="A 31-minute call is stopped. On the saved recording, a tap on 4 sets how many were there, and typing “pr”, “jo” and “an” adds Priya Shah, José Ortiz and Ana from suggestions.">
+  <img align="right" width="380" src=".github/images/who-was-there.gif" alt="A 31-minute call is stopped. On the saved recording, a tap on 4 sets how many were there, and typing “pr”, “jo” and “an” adds Priya Shah, José Ortiz and Ana from suggestions.">
 </picture>
 
 ### Say who was there
@@ -41,7 +59,7 @@ It's optional, and it's what a transcript can't know on its own.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset=".github/images/speakers-dark.gif">
-  <img align="right" width="380" src=".github/images/speakers.gif" alt="On a saved recording, Label speakers finds four voices, each with how long it talked and a line it said. The first is named Priya Shah and the fourth José Ortiz from a menu.">
+  <img align="left" width="380" src=".github/images/speakers.gif" alt="On a saved recording, Label speakers finds four voices, each with how long it talked and a line it said. The first is named Priya Shah and the fourth José Ortiz from a menu.">
 </picture>
 
 ### Know who said what
@@ -68,7 +86,7 @@ That answer is Claude Code's own, unedited.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset=".github/images/people-dark.gif">
-  <img align="left" width="380" src=".github/images/people.gif" alt="From the ··· menu, People… opens the list of people: Sam, Priya Shah, José Ortiz, Ana and Mei, each with a note. Nora Quinn is added with the note “sales”.">
+  <img align="right" width="380" src=".github/images/people.gif" alt="From the ··· menu, People… opens the list of people: Sam, Priya Shah, José Ortiz, Ana and Mei, each with a note. Nora Quinn is added with the note “sales”.">
 </picture>
 
 ### Keep a list of who you meet
@@ -84,7 +102,7 @@ right.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset=".github/images/settings-dark.gif">
-  <img align="right" width="380" src=".github/images/settings.gif" alt="From the ··· menu, Settings… opens Settings. Under Your AI, Claude Code is picked instead of Off.">
+  <img align="left" width="380" src=".github/images/settings.gif" alt="From the ··· menu, Settings… opens Settings. Under Your AI, Claude Code is picked instead of Off.">
 </picture>
 
 ### Let your AI do the naming
@@ -100,7 +118,6 @@ recordings where your Mac has it.
 ## Also
 
 - **Any app.** Zoom, Meet in a browser, Teams, a video. No bot joins the call.
-- **From anywhere.** ⌥⌘R starts and stops; a small floating control pauses.
 - **Switch devices.** AirPods in or out mid-call, and it keeps recording.
 - **Nothing lost.** Audio is written as it records, so a crash keeps the meeting.
 - **Private.** Recording and transcription run on your Mac, in 52 languages.
@@ -123,10 +140,7 @@ each one means, and TapeUp has a command line they can use.
     └── meta.json     when, how long, who was there
 ```
 
-## Install
-
-[Download TapeUp](https://github.com/kkyrian/tapeup/releases/latest/download/TapeUp.dmg),
-or `brew install kkyrian/tap/tapeup`.
+## First launch
 
 TapeUp is free and isn't notarized by Apple, so macOS stops it once:
 

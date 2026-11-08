@@ -896,9 +896,10 @@ final class AppModel {
     /// the panel offscreen so its design can be checked without recording.
     func stage(
         phase: Phase, elapsed: TimeInterval = 0, microphone: String, output: String, levels: ([Float], [Float])? = nil,
-        notice: PeopleNotice? = nil, problem: String? = nil, testing: Bool = false
+        notice: PeopleNotice? = nil, problem: String? = nil, testing: Bool = false, paused: Bool = false
     ) {
         self.phase = phase
+        self.paused = paused
         self.testing = testing
         self.elapsed = elapsed
         microphoneDevice = microphone
