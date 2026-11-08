@@ -78,7 +78,7 @@ final class Transcription {
     // MARK: - Download
 
     private func fetchIfNeeded() {
-        guard downloadTask == nil else { return }
+        guard !staged, downloadTask == nil else { return }
         if ModelStore.isDownloaded(model) {
             download = .ready
             return fetchLighterIfUseful()
@@ -298,7 +298,10 @@ final class Transcription {
     }
 
     private func processQueue() {
-        guard !processing, let index = queue.firstIndex(where: { enabled || explicit.contains($0) }) else { return }
+        // Pictures and films show the queue; nothing downloads or runs.
+        guard !staged, !processing, let index = queue.firstIndex(where: { enabled || explicit.contains($0) }) else {
+            return
+        }
         guard let wanted = modelForNow() else {
             // Waiting for the model; a click asks for the download too.
             return fetchIfNeeded()
@@ -342,8 +345,12 @@ final class Transcription {
         return entry.transcript == .pending && enabled
     }
 
+    /// Set once staged for pictures: the queue then never runs.
+    private var staged = false
+
     /// Puts the row and the live lines in a given state for `TapeUp snapshot`.
     func stage(download: Download, enabled: Bool = true, live: Bool = false, latest: [String] = []) {
+        staged = true
         self.download = download
         self.enabled = enabled
         liveRunning = live
@@ -360,7 +367,7 @@ final class Transcription {
         case .ready where enabled:
             let waiting = queue.count + (processing ? 1 : 0)
             return waiting > 0 && !liveRunning
-                ? "\(model.name) · transcribing \(waiting) recording\(waiting == 1 ? "" : "s")" : model.name
+                ? "\(model.name) · \(waiting) to transcribe" : model.name
         case .retrying(let bytes) where wantsModel:
             return "No connection, retrying · \(Format.percent(bytes, of: model.downloadBytes))"
         default:
