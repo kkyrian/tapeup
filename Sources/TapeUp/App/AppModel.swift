@@ -50,7 +50,13 @@ final class AppModel {
     }
 
     /// The card on screen: the recording just saved, or one opened from Recent.
-    var card: Card?
+    var card: Card? {
+        // A voice playing stops with its card, the panel closing included; a rename keeps the stamp.
+        didSet {
+            let stamp = { (card: Card?) in card.map { RecordingLibrary.stamp(of: $0.entry.folder) } }
+            if stamp(card) != stamp(oldValue) { speakers.player.stop() }
+        }
+    }
     private(set) var copiedFlash = false
     private(set) var transcriptCopiedFlash = false
     /// Count copies, so only the latest one's timer ends its flash.

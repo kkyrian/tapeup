@@ -25,6 +25,8 @@ final class Speakers {
     /// The names a voice may be given: this recording's people, then the
     /// people list. With none, no names are suggested.
     var knownNames: (RecordingEntry) -> [String] = { $0.people.names }
+    /// Plays a voice to name it, from the card's speaker rows.
+    let player = VoicePlayer()
 
     /// Work in progress or failed, by recording stamp.
     private(set) var work: [String: Work] = [:]
