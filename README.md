@@ -4,6 +4,8 @@
 
 <h1 align="center">TapeUp</h1>
 
+<p align="center">TapeUp is a meeting recorder for Mac, built for you and your AI agent.</p>
+
 <p align="center">
   <b>Record any meeting on your Mac. Get a transcript you and your AI agent can use.</b><br>
   A click records both sides of the call: your voice and everything your Mac plays.<br>
