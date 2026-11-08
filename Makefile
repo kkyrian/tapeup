@@ -1,4 +1,4 @@
-.PHONY: verify-fast verify-full uitest uitest-agents bundle install test
+.PHONY: verify-fast verify-full uitest uitest-agents bundle install release test
 
 verify-fast:
 	python3 scripts/agent-workspace/install-hooks.py --check
@@ -32,6 +32,12 @@ install: bundle
 	rm -rf /Applications/TapeUp.app
 	ditto .build/TapeUp.app /Applications/TapeUp.app
 	open /Applications/TapeUp.app
+
+# Builds, signs and publishes a release from this Mac: make release VERSION=0.1.0
+# (scripts/release.sh --dry-run 0.1.0 tries it without publishing).
+release:
+	@test -n "$(VERSION)" || { echo "usage: make release VERSION=0.1.0"; exit 2; }
+	scripts/release.sh $(VERSION)
 
 test:
 	swift test
