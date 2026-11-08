@@ -13,7 +13,7 @@ enum ImportGallery {
     static func run(out: String) {
         let outURL = URL(fileURLWithPath: out)
         try? FileManager.default.createDirectory(at: outURL, withIntermediateDirectories: true)
-        let defaults = UserDefaults.standard
+        let defaults = Settings.store
         let saved = keys.map { ($0, defaults.object(forKey: $0)) }
         let base = FileManager.default.temporaryDirectory.appendingPathComponent("tapeup-gallery-\(UUID().uuidString)")
         let root = base.appendingPathComponent("recordings")

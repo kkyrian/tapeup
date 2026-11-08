@@ -12,12 +12,12 @@ enum Snapshot {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("tapeup-snapshot-\(UUID().uuidString)")
         // Setting the model's folder saves it as the user's; put theirs back
         // on the way out, which `exit` reaches and a `defer` would not.
-        let savedRoot = UserDefaults.standard.object(forKey: "recordingsRoot")
+        let savedRoot = Settings.store.object(forKey: "recordingsRoot")
         func restore() {
             if let savedRoot {
-                UserDefaults.standard.set(savedRoot, forKey: "recordingsRoot")
+                Settings.store.set(savedRoot, forKey: "recordingsRoot")
             } else {
-                UserDefaults.standard.removeObject(forKey: "recordingsRoot")
+                Settings.store.removeObject(forKey: "recordingsRoot")
             }
             try? FileManager.default.removeItem(at: root)
         }

@@ -41,7 +41,7 @@ enum UITest {
     static func run(out: String, record: Bool, agent: AgentKind? = nil) {
         let outURL = URL(fileURLWithPath: out)
         try? FileManager.default.createDirectory(at: outURL, withIntermediateDirectories: true)
-        let defaults = UserDefaults.standard
+        let defaults = Settings.store
         let saved = keys.map { ($0, defaults.object(forKey: $0)) }
         let base = FileManager.default.temporaryDirectory.appendingPathComponent("tapeup-uitest-\(UUID().uuidString)")
         let root = base.appendingPathComponent("recordings")
@@ -478,26 +478,28 @@ enum UITest {
             expect(
                 missing.status == 1 && missing.out.contains("not_found"), "an unknown recording is named in the error")
             let folder = command(["folder"])
-            expect(
-                folder.out.replacingOccurrences(of: "\\/", with: "/").contains(model.root.path),
-                "TapeUp folder shows this folder (\(folder.out))")
+            let seesThisFolder = folder.out.replacingOccurrences(of: "\\/", with: "/").contains(model.root.path)
+            expect(seesThisFolder, "TapeUp folder shows this folder (\(folder.out))")
             for words in [["lists"], ["--version"], ["title", stamp]] {
                 let wrong = command(words)
                 expect(
                     wrong.status == 2 && wrong.out.contains("usage"),
                     "TapeUp \(words.joined(separator: " ")) is a usage error, not a second app (\(wrong.out))")
             }
+            // A command that sees another folder would move the installed app's recordings.
             let home = model.root
             let away = home.deletingLastPathComponent().appendingPathComponent("moved-by-command")
-            let moved = command(["folder", away.path, "--move"])
-            expect(
-                moved.status == 0 && model.root.standardizedFileURL == away.standardizedFileURL
-                    && model.recent.contains { $0.title == "Budget review" },
-                "TapeUp folder --move moves the recordings through the app (\(moved.out))")
-            let back = command(["folder", home.path, "--move"])
-            expect(
-                back.status == 0 && model.root.standardizedFileURL == home.standardizedFileURL,
-                "and back (\(back.out))")
+            if seesThisFolder {
+                let moved = command(["folder", away.path, "--move"])
+                expect(
+                    moved.status == 0 && model.root.standardizedFileURL == away.standardizedFileURL
+                        && model.recent.contains { $0.title == "Budget review" },
+                    "TapeUp folder --move moves the recordings through the app (\(moved.out))")
+                let back = command(["folder", home.path, "--move"])
+                expect(
+                    back.status == 0 && model.root.standardizedFileURL == home.standardizedFileURL,
+                    "and back (\(back.out))")
+            }
         }
         DistributedNotificationCenter.default().removeObserver(link)
 

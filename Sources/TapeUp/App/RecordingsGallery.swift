@@ -11,7 +11,7 @@ enum RecordingsGallery {
     static func run(out: String) -> Never {
         let outURL = URL(fileURLWithPath: out)
         try? FileManager.default.createDirectory(at: outURL, withIntermediateDirectories: true)
-        let savedRoot = UserDefaults.standard.object(forKey: "recordingsRoot")
+        let savedRoot = Settings.store.object(forKey: "recordingsRoot")
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(
             "tapeup-recordings-\(UUID().uuidString)")
         seed(root)
@@ -66,9 +66,9 @@ enum RecordingsGallery {
         model.closeAllRecordings()
 
         if let savedRoot {
-            UserDefaults.standard.set(savedRoot, forKey: "recordingsRoot")
+            Settings.store.set(savedRoot, forKey: "recordingsRoot")
         } else {
-            UserDefaults.standard.removeObject(forKey: "recordingsRoot")
+            Settings.store.removeObject(forKey: "recordingsRoot")
         }
         try? FileManager.default.removeItem(at: root)
         print(outURL.path)

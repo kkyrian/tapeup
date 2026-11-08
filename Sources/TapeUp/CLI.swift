@@ -162,7 +162,7 @@ enum CLI {
                 fail("usage", "TapeUp agent off takes no --model or --effort.", suggestion: "Run them separately.")
             }
             if rest == ["off"] {
-                UserDefaults.standard.removeObject(forKey: "agent")
+                Settings.store.removeObject(forKey: "agent")
             } else if let word = rest.first, rest.count == 1, AgentKind(rawValue: word) != nil || word == "on" {
                 fail(
                     "needs_user", "Only the user turns the agent on.",
@@ -181,9 +181,9 @@ enum CLI {
             for (name, value) in changes {
                 let key = "agent\(name)-\(kind.rawValue)"
                 if value == "default" {
-                    UserDefaults.standard.removeObject(forKey: key)
+                    Settings.store.removeObject(forKey: key)
                 } else {
-                    UserDefaults.standard.set(value, forKey: key)
+                    Settings.store.set(value, forKey: key)
                 }
             }
             let model = Agents.setting("Model", for: kind) ?? (kind == .claude ? "sonnet" : "its own default")
@@ -209,7 +209,7 @@ enum CLI {
     // MARK: Where things are
 
     private static var root: URL {
-        UserDefaults.standard.string(forKey: "recordingsRoot").map { URL(fileURLWithPath: $0) }
+        Settings.store.string(forKey: "recordingsRoot").map { URL(fileURLWithPath: $0) }
             ?? RecordingLibrary.defaultRoot
     }
 
@@ -360,7 +360,7 @@ enum CLI {
             } else {
                 try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
             }
-            UserDefaults.standard.set(destination.path, forKey: "recordingsRoot")
+            Settings.store.set(destination.path, forKey: "recordingsRoot")
             if !skipped.isEmpty {
                 fail(
                     "partly_moved",

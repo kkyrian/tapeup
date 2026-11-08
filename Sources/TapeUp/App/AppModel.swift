@@ -112,20 +112,20 @@ final class AppModel {
 
     /// Which sources the next recording takes. Kept across launches; at least
     /// one stays on.
-    private(set) var microphoneOn = UserDefaults.standard.object(forKey: "recordMicrophone") as? Bool ?? true
-    private(set) var computerOn = UserDefaults.standard.object(forKey: "recordComputer") as? Bool ?? true
+    private(set) var microphoneOn = Settings.store.object(forKey: "recordMicrophone") as? Bool ?? true
+    private(set) var computerOn = Settings.store.object(forKey: "recordComputer") as? Bool ?? true
 
     func toggleMicrophone() {
         guard phase == .idle, !(microphoneOn && !computerOn) else { return }
         microphoneOn.toggle()
-        UserDefaults.standard.set(microphoneOn, forKey: "recordMicrophone")
+        Settings.store.set(microphoneOn, forKey: "recordMicrophone")
         restartMonitor()
     }
 
     func toggleComputer() {
         guard phase == .idle, !(computerOn && !microphoneOn) else { return }
         computerOn.toggle()
-        UserDefaults.standard.set(computerOn, forKey: "recordComputer")
+        Settings.store.set(computerOn, forKey: "recordComputer")
         restartMonitor()
     }
 
@@ -152,7 +152,7 @@ final class AppModel {
 
     var root: URL {
         didSet {
-            UserDefaults.standard.set(root.path, forKey: "recordingsRoot")
+            Settings.store.set(root.path, forKey: "recordingsRoot")
             library = RecordingLibrary(root: root)
             transcription.library = library
             speakers.library = library
@@ -197,7 +197,7 @@ final class AppModel {
     var shortcutLabel: String? = HotKey.recordShortcutLabel
 
     init() {
-        let saved = UserDefaults.standard.string(forKey: "recordingsRoot").map { URL(fileURLWithPath: $0) }
+        let saved = Settings.store.string(forKey: "recordingsRoot").map { URL(fileURLWithPath: $0) }
         root = saved ?? RecordingLibrary.defaultRoot
         let library = RecordingLibrary(root: saved ?? RecordingLibrary.defaultRoot)
         self.library = library
@@ -381,8 +381,8 @@ final class AppModel {
     }
 
     /// Whether the small recording controls float over other windows while recording.
-    var showsFloatingControls = UserDefaults.standard.object(forKey: "floatingControls") as? Bool ?? true {
-        didSet { UserDefaults.standard.set(showsFloatingControls, forKey: "floatingControls") }
+    var showsFloatingControls = Settings.store.object(forKey: "floatingControls") as? Bool ?? true {
+        didSet { Settings.store.set(showsFloatingControls, forKey: "floatingControls") }
     }
 
     // MARK: - Levels

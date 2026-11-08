@@ -39,8 +39,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         model.agents.refreshIfOn()
 
         // A menu-bar app that shows nothing on first launch looks broken.
-        if !UserDefaults.standard.bool(forKey: "hasLaunched") {
-            UserDefaults.standard.set(true, forKey: "hasLaunched")
+        if !Settings.store.bool(forKey: "hasLaunched") {
+            Settings.store.set(true, forKey: "hasLaunched")
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.panel.show() }
         }
     }

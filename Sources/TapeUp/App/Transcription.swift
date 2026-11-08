@@ -17,7 +17,7 @@ final class Transcription {
     }
 
     /// Whether new recordings are transcribed. Off means audio only.
-    private(set) var enabled = UserDefaults.standard.object(forKey: "transcribe") as? Bool ?? true
+    private(set) var enabled = Settings.store.object(forKey: "transcribe") as? Bool ?? true
     /// The model this Mac's memory allows; downloaded first.
     let model = SpeechModel.forThisMac()
     private(set) var download: Download
@@ -85,7 +85,7 @@ final class Transcription {
 
     func toggle() {
         enabled.toggle()
-        UserDefaults.standard.set(enabled, forKey: "transcribe")
+        Settings.store.set(enabled, forKey: "transcribe")
         if enabled {
             fetchIfNeeded()
             processQueue()

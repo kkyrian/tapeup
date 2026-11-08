@@ -65,6 +65,8 @@ enum Film {
     /// One take: a fresh made-up library, the stage on screen, the movie.
     private static func film(_ journey: Journey, dark: Bool, to file: URL) async throws {
         let root = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("TapeUp")
+        // The take clears its library: only ever the one in its own home.
+        guard NSHomeDirectory().contains("tapeup-film-home-") else { throw CocoaError(.fileWriteNoPermission) }
         try? FileManager.default.removeItem(at: root)
         let take = Take(root: root, dark: dark, size: journey.size)
         defer { take.window.orderOut(nil) }

@@ -65,13 +65,13 @@ final class Agents {
     var testingModel: String?
 
     nonisolated static var chosen: AgentKind? {
-        UserDefaults.standard.string(forKey: "agent").flatMap(AgentKind.init)
+        Settings.store.string(forKey: "agent").flatMap(AgentKind.init)
     }
 
     /// The model and effort `TapeUp agent` set for an agent; nil keeps
     /// TapeUp's choice (Sonnet at low effort, or Codex's own model at low).
     nonisolated static func setting(_ name: String, for kind: AgentKind) -> String? {
-        UserDefaults.standard.string(forKey: "agent\(name)-\(kind.rawValue)")
+        Settings.store.string(forKey: "agent\(name)-\(kind.rawValue)")
     }
 
     private(set) var states: [AgentKind: AgentState] = [:]
@@ -94,7 +94,7 @@ final class Agents {
             version += 1
             return
         }
-        UserDefaults.standard.set(kind?.rawValue, forKey: "agent")
+        Settings.store.set(kind?.rawValue, forKey: "agent")
         version += 1
         Run.stopAll()
     }

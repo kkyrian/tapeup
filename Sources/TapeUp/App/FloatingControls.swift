@@ -42,7 +42,7 @@ final class FloatingControls {
             [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
-                UserDefaults.standard.set(NSStringFromPoint(self.panel.frame.origin), forKey: Self.originKey)
+                Settings.store.set(NSStringFromPoint(self.panel.frame.origin), forKey: Self.originKey)
             }
         }
     }
@@ -94,7 +94,7 @@ final class FloatingControls {
     /// just under the menu bar, where the eye already goes.
     private func origin() -> NSPoint {
         let size = panel.frame.size
-        if let text = UserDefaults.standard.string(forKey: Self.originKey) {
+        if let text = Settings.store.string(forKey: Self.originKey) {
             let saved = NSPointFromString(text)
             let frame = NSRect(origin: saved, size: size)
             if NSScreen.screens.contains(where: { $0.visibleFrame.contains(frame) }) { return saved }

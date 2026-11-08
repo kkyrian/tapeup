@@ -22,6 +22,13 @@ let command = arguments.count > 1 ? arguments[1] : ""
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
 
+// Pictures, films and the UI test never touch the installed app's settings.
+if ["snapshot", "shots", "film", "recordings-gallery", "import-gallery", "uitest"].contains(command) {
+    MainActor.assumeIsolated { Settings.stage() }
+} else {
+    MainActor.assumeIsolated { Settings.join() }
+}
+
 switch command {
 case "snapshot":
     MainActor.assumeIsolated { Snapshot.run(out: Launcher.value(after: "--out", in: arguments) ?? "tmp/snapshots") }
