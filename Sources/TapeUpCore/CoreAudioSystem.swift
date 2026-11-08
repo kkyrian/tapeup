@@ -100,6 +100,11 @@ enum CoreAudioSystem {
         ]
         if headphones.contains(where: name.contains) { return true }
         switch value(device, kAudioDevicePropertyTransportType, default: UInt32(0)) {
+        case kAudioDeviceTransportTypeBluetooth, kAudioDeviceTransportTypeBluetoothLE:
+            // Renamed AirPods ("Sam's") carry no telling name. Apple's
+            // Bluetooth audio is earbuds and headphones; its model UID is
+            // "<product> <vendor>" in hex, and Apple's vendor ID is 0x4C.
+            return isAppleBluetooth(modelUID: string(device, kAudioDevicePropertyModelUID))
         case kAudioDeviceTransportTypeBuiltIn:
             let source = value(
                 device, kAudioDevicePropertyDataSource, kAudioObjectPropertyScopeOutput, default: UInt32(0))
@@ -107,6 +112,10 @@ enum CoreAudioSystem {
         default:
             return false
         }
+    }
+
+    static func isAppleBluetooth(modelUID: String?) -> Bool {
+        modelUID?.lowercased().split(separator: " ").last == "4c"
     }
 
     static func builtInInput() -> AudioDeviceID? {
