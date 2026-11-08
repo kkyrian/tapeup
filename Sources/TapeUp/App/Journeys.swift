@@ -7,6 +7,9 @@ import TapeUpCore
 /// layout change.
 enum Spot {
     static let record = CGPoint(x: 111, y: 150)
+    /// The Microphone and Transcript switches.
+    static let microphone = CGPoint(x: 284, y: 71)
+    static let transcript = CGPoint(x: 284, y: 107)
     static let more = CGPoint(x: 292, y: 197)
     /// The first recording under Today.
     static let firstRow = CGPoint(x: 122, y: 231)
@@ -35,14 +38,26 @@ struct Journey {
 
     static var said: [String] { Shots.said.map(\.1) }
 
-    /// Open, record, watch the words come, stop: saved, then titled.
+    /// Open, turn on the microphone and the transcript, record, watch the
+    /// words come, stop: saved, then titled. Computer audio stays on, since
+    /// one source always is.
     static let record = Journey(
         name: "record", size: CGSize(width: 420, height: 470),
-        setUp: { $0.hideNewest() },
+        setUp: { take in
+            take.hideNewest()
+            if take.model.microphoneOn { take.model.toggleMicrophone() }
+            take.model.transcription.stage(download: .ready, enabled: false)
+        },
         script: { take in
             await take.pause(0.15)
             await take.openPanel()
             await take.pause(0.6)
+            await take.move(toPanel: Spot.microphone, 0.6)
+            await take.click(take.model.toggleMicrophone)
+            await take.pause(0.45)
+            await take.move(toPanel: Spot.transcript, 0.4)
+            await take.click { take.model.transcription.stage(download: .ready) }
+            await take.pause(0.7)
             await take.move(toPanel: Spot.record, 0.6)
             await take.click {
                 take.startRecording(from: 0) { elapsed in

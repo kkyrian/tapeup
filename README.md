@@ -22,7 +22,7 @@ brew install kkyrian/tap/tapeup
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset=".github/images/record-dark.gif">
-    <img src=".github/images/record.gif" width="420" alt="Clicking the cassette in the menu bar opens TapeUp. Record starts the clock, and the call's words appear in the Transcript row. Stop saves the recording, and it names itself “Beta launch plan”.">
+    <img src=".github/images/record.gif" width="420" alt="Clicking the cassette in the menu bar opens TapeUp. The Microphone and Transcript switches are turned on, and Record starts the clock, and the call's words appear in the Transcript row. Stop saves the recording, and it names itself “Beta launch plan”.">
   </picture>
 </p>
 
