@@ -72,7 +72,7 @@ enum ImportGallery {
     /// Made-up recordings: conversations read by the Mac's own voices,
     /// dated so they land among the sample library's recordings, plus one
     /// copy of the same file.
-    private static func makeFiles(in folder: URL) -> [URL] {
+    static func makeFiles(in folder: URL) -> [URL] {
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let now = Date()
         let (one, two, three) = ("Samantha", "Daniel", "Flo (English (US))")

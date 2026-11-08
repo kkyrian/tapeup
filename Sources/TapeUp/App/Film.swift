@@ -166,6 +166,14 @@ final class Director {
     var keys: String?
     /// The floating controls, centered under the menu bar.
     var pill = false
+    /// The Import window, open on the stage, and its height as laid out.
+    var importing: Imports?
+    var importHeight: CGFloat = 0
+    /// A Finder window of files to drag, which of them are selected, and
+    /// the names being dragged under the pointer.
+    var finder: [String]?
+    var selected = false
+    var dragging: [String]?
 
     struct DrawnMenu {
         var items: [String]
@@ -186,6 +194,8 @@ final class Take {
     let root: URL
     var lanes = Shots.Lanes()
     private var ticker: Timer?
+    /// Files on the made-up desktop, for the import journey.
+    var files: [URL] = []
     /// The newest recording, moved aside while it is being "recorded".
     private var hidden: (folder: URL, aside: URL)?
 
@@ -203,6 +213,23 @@ final class Take {
         let origin = Self.pillOrigin(size)
         return CGPoint(x: origin.x + FloatingControlsView.width - 15, y: origin.y + 15)
     }
+    /// Where the Finder window and the Import window sit on the stage.
+    static let finderOrigin = CGPoint(x: 30, y: 120)
+    static func importOrigin(_ size: CGSize) -> CGPoint {
+        CGPoint(x: size.width - Stage.inset - ImportView.width - 22, y: Stage.inset + 26 + 34)
+    }
+    /// A point in the Import window, from its top-left corner.
+    func inImport(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+        let origin = Self.importOrigin(size)
+        return CGPoint(x: origin.x + x, y: origin.y + y)
+    }
+    /// The Import window's bottom button: Import, then Done.
+    var importButton: CGPoint { inImport(ImportView.width / 2, director.importHeight - 32) }
+    /// A row in the Finder window.
+    func finderRow(_ index: Int) -> CGPoint {
+        CGPoint(x: Self.finderOrigin.x + 80, y: Self.finderOrigin.y + 52 + CGFloat(index) * 24)
+    }
+
     /// The menu-bar item's centre.
     var item: CGPoint { CGPoint(x: size.width - Stage.inset - 174, y: Stage.inset + 13) }
 
@@ -310,7 +337,8 @@ final class Take {
     /// The ··· menu at the top of Recent.
     func pickFromMore(_ item: String, then action: () -> Void) async {
         await pick(
-            item, from: at(Spot.more), items: ["People…", "Settings…", "-", "Quit TapeUp ⌘Q"], then: action)
+            item, from: at(Spot.more), items: ["Import…", "People…", "Settings…", "-", "Quit TapeUp ⌘Q"],
+            then: action)
     }
 
     /// Types one character at a time into the field with this placeholder,
@@ -475,6 +503,17 @@ struct Stage: View {
                     .padding(.top, 26 + 6)
                     .transition(.opacity)
                 }
+                if let files = director.finder {
+                    FinderWindow(files: files, selected: director.selected, dark: dark)
+                        .offset(x: Take.finderOrigin.x - Self.inset, y: Take.finderOrigin.y - Self.inset)
+                }
+                if let imports = director.importing {
+                    ImportWindowDrawn(imports: imports, dark: dark) { director.importHeight = $0 }
+                        .offset(
+                            x: Take.importOrigin(size).x - Self.inset, y: Take.importOrigin(size).y - Self.inset
+                        )
+                        .transition(.opacity)
+                }
                 Shots.MenuBar(dark: dark, status: status, wide: false, pressed: director.itemPressed)
                     .frame(width: size.width - Self.inset * 2, height: 26)
                 if director.panelOpen {
@@ -508,6 +547,10 @@ struct Stage: View {
                     DrawnMenuView(menu: menu, dark: dark)
                         .offset(x: menu.origin.x - Self.inset, y: menu.origin.y - Self.inset)
                         .transition(.opacity.animation(.easeOut(duration: 0.1)))
+                }
+                if let names = director.dragging {
+                    DragGhost(names: names, dark: dark)
+                        .offset(x: director.cursor.x - Self.inset - 14, y: director.cursor.y - Self.inset - 10)
                 }
                 pointer.offset(x: director.cursor.x - Self.inset, y: director.cursor.y - Self.inset)
             }
@@ -560,6 +603,113 @@ struct Stage: View {
                 .scaleEffect(director.pressing ? 0.9 : 1, anchor: .topLeading)
         }
         .frame(width: 1, height: 1, alignment: .topLeading)
+    }
+}
+
+/// The real Import window's content in a drawn window frame: a title bar
+/// with only Close, as the app's own.
+private struct ImportWindowDrawn: View {
+    let imports: Imports
+    let dark: Bool
+    let measured: (CGFloat) -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ZStack {
+                Text("Import").font(.system(size: 13, weight: .semibold)).foregroundStyle(.secondary)
+                HStack {
+                    Circle().fill(Color(red: 1, green: 0.37, blue: 0.34)).frame(width: 12, height: 12)
+                    Spacer()
+                }
+                .padding(.leading, 9)
+            }
+            .frame(height: 28)
+            ImportView(imports: imports, choose: {})
+        }
+        .fixedSize()
+        .background(Color(nsColor: .windowBackgroundColor))
+        .clipShape(.rect(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(dark ? Color.white.opacity(0.14) : Color.black.opacity(0.08), lineWidth: 0.5)
+        )
+        .shadow(color: .black.opacity(dark ? 0.45 : 0.14), radius: 18, y: 10)
+        .onGeometryChange(for: CGFloat.self) {
+            $0.size.height
+        } action: {
+            measured($0)
+        }
+    }
+}
+
+/// A Finder window of old recordings, drawn.
+private struct FinderWindow: View {
+    let files: [String]
+    let selected: Bool
+    let dark: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 7) {
+                ForEach(0..<3, id: \.self) { _ in
+                    Circle().fill(Color.primary.opacity(0.16)).frame(width: 11, height: 11)
+                }
+                Text("Old recordings").font(.system(size: 12, weight: .semibold)).padding(.leading, 10)
+            }
+            .padding(.horizontal, 11)
+            .frame(height: 36)
+            ForEach(Array(files.enumerated()), id: \.offset) { _, name in
+                HStack(spacing: 7) {
+                    Image(systemName: "waveform").font(.system(size: 11)).frame(width: 16)
+                    Text(name).font(.system(size: 12)).lineLimit(1)
+                    Spacer(minLength: 0)
+                }
+                .foregroundStyle(selected ? Color.white : Color.primary)
+                .padding(.horizontal, 8)
+                .frame(height: 24)
+                .background(selected ? Color.accentColor : .clear, in: .rect(cornerRadius: 5))
+                .padding(.horizontal, 6)
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(width: 230, height: 190, alignment: .topLeading)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .clipShape(.rect(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(dark ? Color.white.opacity(0.14) : Color.black.opacity(0.08), lineWidth: 0.5)
+        )
+        .shadow(color: .black.opacity(dark ? 0.35 : 0.1), radius: 12, y: 6)
+    }
+}
+
+/// Files being dragged: their icons stacked, with the count.
+private struct DragGhost: View {
+    let names: [String]
+    let dark: Bool
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            ForEach(Array(names.prefix(3).enumerated()), id: \.offset) { index, _ in
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .fill(Color(nsColor: .windowBackgroundColor))
+                    .overlay(Image(systemName: "waveform").font(.system(size: 14)).foregroundStyle(.secondary))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 5, style: .continuous)
+                            .strokeBorder(Color.primary.opacity(0.15), lineWidth: 0.5)
+                    )
+                    .frame(width: 30, height: 36)
+                    .offset(x: CGFloat(index) * 4, y: CGFloat(index) * 3)
+            }
+            Text("\(names.count)")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(minWidth: 18, minHeight: 18)
+                .background(Color.red, in: .capsule)
+                .offset(x: 14, y: -8)
+        }
+        .opacity(0.9)
+        .shadow(color: .black.opacity(0.2), radius: 4, y: 2)
     }
 }
 

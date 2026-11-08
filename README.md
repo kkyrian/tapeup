@@ -113,6 +113,18 @@ It stays off until you pick one. Without it, Apple Intelligence titles
 recordings where your Mac has it.
 
 <br clear="all">
+<br>
+
+### Bring in old recordings
+
+Open **Import…** from the ··· menu and drop in files or whole folders,
+or drop them on the menu-bar icon. Each comes in under its own name and
+date, and is transcribed on your Mac. The originals stay where they are.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/images/import-dark.gif">
+  <img width="100%" src=".github/images/import.gif" alt="From the ··· menu, Import… opens the Import window. Four recordings are dragged in from a Finder window and listed with their dates, lengths and sizes. Import 4 recordings copies them in, Done closes the window, and the recordings appear in TapeUp's list under the days they were made.">
+</picture>
 
 ## Also
 

@@ -29,7 +29,9 @@ struct Journey {
     var setUp: @MainActor (Take) -> Void = { _ in }
     let script: @MainActor (Take) async -> Void
 
-    static let all: [Journey] = [record, floating, whoWasThere, handoff, people, settings, speakers, probe]
+    static let all: [Journey] = [
+        record, floating, whoWasThere, handoff, people, settings, speakers, importing, probe,
+    ]
 
     static var said: [String] { Shots.said.map(\.1) }
 
@@ -255,6 +257,57 @@ struct Journey {
             }
             await take.move(to: CGPoint(x: 250, y: 540), 0.8)
             await take.pause(2.2)
+        })
+
+    /// ··· → Import…, drag old recordings in from Finder, import them, and
+    /// find them among the others in Recent.
+    static let importing = Journey(
+        name: "import", size: CGSize(width: 720, height: 640),
+        setUp: { take in
+            let folder = take.root.deletingLastPathComponent().appendingPathComponent("Old recordings")
+            // Four spoken files, the copy of one left out.
+            take.files = Array(ImportGallery.makeFiles(in: folder).prefix(4))
+            take.director.finder = take.files.map(\.lastPathComponent)
+            take.director.cursor = CGPoint(x: 360, y: 420)
+        },
+        script: { take in
+            let imports = Imports(model: take.model)
+            imports.close = { withAnimation(.easeOut(duration: 0.15)) { take.director.importing = nil } }
+            await take.pause(0.15)
+            await take.openPanel()
+            await take.pause(0.5)
+            await take.pickFromMore("Import…") {
+                withAnimation(.easeOut(duration: 0.15)) {
+                    take.director.panelOpen = false
+                    take.director.itemPressed = false
+                    take.director.importing = imports
+                }
+            }
+            await take.pause(0.7)
+            await take.move(to: take.finderRow(0), 0.8)
+            await take.click { take.director.selected = true }
+            await take.pause(0.3)
+            withAnimation(.easeOut(duration: 0.08)) { take.director.pressing = true }
+            take.director.dragging = take.director.finder
+            await take.move(to: take.inImport(ImportView.width / 2, 150), 1.0)
+            take.director.dragging = nil
+            imports.add(take.files)
+            withAnimation(.easeOut(duration: 0.12)) {
+                take.director.pressing = false
+                take.director.selected = false
+            }
+            while imports.items.count < take.files.count || imports.reading { await take.pause(0.1) }
+            await take.pause(1.4)
+            await take.move(to: take.importButton, 0.8)
+            await take.click(imports.start)
+            while imports.importing { await take.pause(0.1) }
+            await take.pause(1.2)
+            await take.move(to: take.importButton, 0.3)
+            await take.click(imports.close)
+            await take.pause(0.4)
+            await take.openPanel()
+            await take.move(to: CGPoint(x: 360, y: 560), 0.8)
+            await take.pause(2.4)
         })
 
     /// Not for the README: holds each page for a second and prints when,
