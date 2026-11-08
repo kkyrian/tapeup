@@ -2,12 +2,10 @@ import AVFoundation
 import AppKit
 import SwiftUI
 import TapeUpCore
-import TapeUpSpeech
 
-/// `TapeUp import-gallery --out <dir>`: pictures of every import design,
-/// light and dark, with made-up recordings dropped into a made-up library,
-/// so the designs can be compared side by side. The last design imports
-/// for real and is pictured as the files go through.
+/// `TapeUp import-gallery --out <dir>`: pictures of the import window,
+/// light and dark, with made-up recordings dropped into a made-up library
+/// and imported for real: empty, files listed, importing, done.
 @MainActor
 enum ImportGallery {
     private static let keys = ["recordingsRoot", "transcribe"]
@@ -49,36 +47,19 @@ enum ImportGallery {
             while busy() && Date() < deadline { settle(0.1) }
         }
 
-        for (index, look) in Imports.Look.allCases.enumerated() where look != .live {
-            window.window.close()
-            window.show()
-            imports.look = look
-            shot("\(index + 1)-\(look.rawValue)-empty")
-            window.show(adding: files)
-            waitWhile {
-                imports.items.count < files.count || imports.reading
-                    || imports.items.contains { $0.peaks.isEmpty && $0.candidate != nil }
-            }
-            if let second = imports.items.first(where: { $0.name.hasPrefix("Design review") }) {
-                imports.setVoices(3, for: second)
-            }
-            shot("\(index + 1)-\(look.rawValue)-files")
-        }
-
-        // Starts on drop: dropped for real, pictured on the way through.
-        window.window.close()
         window.show()
-        imports.look = .live
-        imports.labelSpeakers = SpeakerFinder.isDownloaded()
-        shot("4-live-empty")
+        shot("empty")
         window.show(adding: files)
+        waitWhile { imports.items.count < files.count || imports.reading }
+        if let second = imports.items.first(where: { $0.name.hasPrefix("Design review") }) {
+            imports.setVoices(3, for: second)
+        }
+        shot("files")
+        imports.start()
         waitWhile { !imports.items.contains { $0.state == .copied } }
-        shot("4-live-copying")
-        waitWhile(120) { imports.items.contains { $0.stamp.flatMap(model.importedEntry)?.transcript == .pending } }
-        settle(3)
-        shot("4-live-later")
-        imports.stop()
-        waitWhile { imports.importing }
+        shot("importing")
+        waitWhile(120) { imports.importing }
+        shot("done")
         window.window.close()
 
         for (key, value) in saved {

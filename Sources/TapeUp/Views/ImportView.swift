@@ -17,27 +17,11 @@ final class Imports {
         case failed(String)
     }
 
-    /// The designs being compared; the one picked stays, the others go.
-    enum Look: String, CaseIterable, Identifiable {
-        case listening, sentence, landing, live
-        var id: String { rawValue }
-        var title: String {
-            switch self {
-            case .listening: "Listening"
-            case .sentence: "Sentence"
-            case .landing: "Where they land"
-            case .live: "Starts on drop"
-            }
-        }
-    }
-
     struct Item: Identifiable {
         let url: URL
         var id: URL { url }
         var state: State = .reading
         var candidate: RecordingImport.Candidate?
-        /// The file's loudness in slices, for its waveform; empty until read.
-        var peaks: [Float] = []
         /// How much of it is copied, 0 to 1.
         var copied: Double = 0
         /// The voice count for speaker labels; nil is Auto (the estimate).
@@ -50,9 +34,6 @@ final class Imports {
 
     let model: AppModel
     private(set) var items: [Item] = []
-    var look: Look = .listening {
-        didSet { if look == .live, !ready.isEmpty { start() } }
-    }
     var transcribe = true
     var labelSpeakers = true
     var close: () -> Void = {}
@@ -122,11 +103,6 @@ final class Imports {
             $0.candidate = candidate
             $0.state = state
         }
-        // Dropping is the go-ahead in the live design.
-        if look == .live, state == .ready { start() }
-        guard let candidate else { return }
-        let peaks = await RecordingImport.peaks(of: url, duration: candidate.duration, count: 72)
-        set(url) { $0.peaks = peaks }
     }
 
     /// Leaves a file out; one already copied goes to the Trash, so this is
@@ -143,7 +119,6 @@ final class Imports {
             let twin = items.firstIndex(where: { $0.state == .duplicate && $0.candidate?.fingerprint == fingerprint })
         {
             items[twin].state = .ready
-            if look == .live { start() }
         }
     }
 
@@ -209,310 +184,351 @@ extension Imports.State {
     }
 }
 
-/// The import window: the design picked below, and a strip to switch
-/// designs while they are compared.
 struct ImportView: View {
-    static let width: CGFloat = 440
+    static let width: CGFloat = 460
+    private static let margin: CGFloat = 20
+    private static let rowHeight: CGFloat = 44
+    /// Icons sit in this column; every title in the window starts after it.
+    fileprivate static let iconColumn: CGFloat = Style.textEdge - Style.inset
 
     @Bindable var imports: Imports
     let choose: () -> Void
-    /// How many files are over the window right now, or nil.
-    @State private var hovering: Int?
+    @State private var targeted = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            Group {
-                switch imports.look {
-                case .listening: ListeningLook(imports: imports, hovering: hovering, choose: choose)
-                case .sentence: SentenceLook(imports: imports, hovering: hovering, choose: choose)
-                case .landing: LandingLook(imports: imports, hovering: hovering, choose: choose)
-                case .live: LiveLook(imports: imports, hovering: hovering, choose: choose)
-                }
-            }
-            LookPicker(look: $imports.look)
+        VStack(alignment: .leading, spacing: 0) {
+            dropArea
+            if !imports.items.isEmpty { list.padding(.top, 4) }
+            Divider().padding(.vertical, 14)
+            options
+            footer.padding(.top, 16)
         }
+        .padding(.horizontal, Self.margin)
+        .padding(.top, 8)
+        .padding(.bottom, Self.margin)
         .frame(width: Self.width)
-        .background(hovering != nil ? Color.accentColor.opacity(0.05) : .clear)
-        .onDrop(of: [.fileURL], delegate: FileDrop(hovering: $hovering, add: imports.add))
-        .animation(.snappy(duration: 0.22), value: imports.items.map(\.id))
-        .animation(.easeOut(duration: 0.18), value: hovering)
-        .animation(.snappy(duration: 0.25), value: imports.look)
+        .dropDestination(for: URL.self) { urls, _ in
+            imports.add(urls)
+            return !urls.isEmpty
+        } isTargeted: {
+            targeted = $0
+        }
+        .animation(.snappy(duration: 0.2), value: imports.items.map(\.id))
+        .animation(.easeOut(duration: 0.15), value: targeted)
     }
-}
 
-/// While the designs are compared: which one is showing.
-private struct LookPicker: View {
-    @Binding var look: Imports.Look
+    // MARK: Drop area
 
-    var body: some View {
-        HStack(spacing: 2) {
-            Text("Design").font(.system(size: 10.5, weight: .semibold)).foregroundStyle(.tertiary).padding(.trailing, 4)
-            ForEach(Array(Imports.Look.allCases.enumerated()), id: \.element) { index, option in
-                Segment(title: "\(index + 1) \(option.title)", selected: look == option) { look = option }
+    @ViewBuilder private var dropArea: some View {
+        if imports.items.isEmpty {
+            VStack(spacing: 6) {
+                Image(systemName: "square.and.arrow.down")
+                    .font(.system(size: 24, weight: .light))
+                    .foregroundStyle(targeted ? Color.accentColor : Color.secondary)
+                    .padding(.bottom, 4)
+                Text("Drop recordings or folders here")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(targeted ? Color.accentColor : Color.primary)
+                LinkButton("Choose Files…", action: choose)
+                    .hoverHelp("Audio files, videos, or folders of them")
             }
+            .frame(maxWidth: .infinity)
+            .frame(height: 140)
+            .background(well)
+        } else {
+            AddMoreRow(targeted: targeted, action: choose)
+                .background(well.opacity(targeted ? 1 : 0))
         }
-        .frame(maxWidth: .infinity)
-        .frame(height: 30)
-        .background(Color.primary.opacity(0.04))
     }
-}
 
-// MARK: - Shared pieces
-
-/// Counts the files coming in while they are over the window, so it can say
-/// what letting go will do before it happens.
-struct FileDrop: DropDelegate {
-    @Binding var hovering: Int?
-    let add: ([URL]) -> Void
-
-    func validateDrop(info: DropInfo) -> Bool { info.hasItemsConforming(to: [.fileURL]) }
-    func dropEntered(info: DropInfo) { hovering = info.itemProviders(for: [.fileURL]).count }
-    func dropExited(info: DropInfo) { hovering = nil }
-    func dropUpdated(info: DropInfo) -> DropProposal? { DropProposal(operation: .copy) }
-
-    func performDrop(info: DropInfo) -> Bool {
-        hovering = nil
-        let providers = info.itemProviders(for: [.fileURL])
-        guard !providers.isEmpty else { return false }
-        Task { @MainActor in
-            var urls: [URL] = []
-            for provider in providers {
-                if let data = try? await provider.loadItem(forTypeIdentifier: "public.file-url") as? Data,
-                    let url = URL(dataRepresentation: data, relativeTo: nil)
-                {
-                    urls.append(url)
-                }
-            }
-            add(urls)
-        }
-        return true
+    private var well: some View {
+        let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
+        return shape.fill(targeted ? Color.accentColor.opacity(0.07) : .clear)
+            .overlay(
+                shape.strokeBorder(
+                    targeted ? Color.accentColor : Color.primary.opacity(0.14),
+                    style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
+            )
     }
-}
 
-/// The empty window: a still waveform that comes alive under files.
-struct Well: View {
-    let hovering: Int?
-    let choose: () -> Void
-    var title = "Drop recordings here"
-    var height: CGFloat = 220
+    // MARK: List
 
-    var body: some View {
-        VStack(spacing: 0) {
-            ListeningLine(active: hovering != nil).frame(width: 180, height: 48)
-            Text(hovering.map { $0 == 1 ? "Let go to add it" : "Let go to add \($0)" } ?? title)
-                .font(.system(size: 15, weight: .semibold))
-                .contentTransition(.opacity)
-                .padding(.top, 18)
-            Text("Audio, video, or whole folders. Your files stay where they are.")
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-                .padding(.top, 4)
-            LinkButton("Choose Files…", action: choose)
-                .padding(.top, 10)
-                .hoverHelp("Pick files or folders")
-                .opacity(hovering == nil ? 1 : 0)
-        }
-        .frame(maxWidth: .infinity)
-        .frame(height: height)
-    }
-}
-
-/// Under a list: the same waveform, small, for more files.
-struct DropMore: View {
-    let hovering: Int?
-    let choose: () -> Void
-    var text = "Drop more, or"
-
-    var body: some View {
-        HStack(spacing: 8) {
-            ListeningLine(active: hovering != nil, count: 9).frame(width: 36, height: 14)
-            Text(hovering.map { "Let go to add \($0)" } ?? text)
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-            if hovering == nil {
-                LinkButton("Choose Files…", action: choose).padding(.leading, -6)
-            }
-            Spacer()
-        }
-        .padding(.horizontal, 16)
-        .frame(height: 40)
-    }
-}
-
-/// Bars like each file's waveform: a faint, still shape at rest, moving in
-/// the accent while files are over the window.
-struct ListeningLine: View {
-    let active: Bool
-    var count = 31
-
-    var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !active)) { context in
-            let time = context.date.timeIntervalSinceReferenceDate
-            Canvas { canvas, size in
-                let step = size.width / CGFloat(count)
-                let width = max(1.5, step * 0.5)
-                for index in 0..<count {
-                    let x = Double(index) / Double(count - 1)
-                    let envelope = 0.35 + 0.65 * sin(x * .pi)
-                    // A still, speech-like shape; while listening it moves.
-                    let still = 0.25 + 0.2 * sin(Double(index) * 1.7) * cos(Double(index) * 0.6)
-                    let moving =
-                        0.5 + 0.5 * sin(time * 7 + Double(index) * 0.9) * cos(time * 3.1 + Double(index) * 0.4)
-                    let level = envelope * (active ? 0.2 + 0.8 * moving : still)
-                    let height = max(2, CGFloat(level) * size.height)
-                    let rect = CGRect(
-                        x: CGFloat(index) * step + (step - width) / 2, y: (size.height - height) / 2, width: width,
-                        height: height)
-                    canvas.fill(
-                        Path(roundedRect: rect, cornerRadius: width / 2),
-                        with: .color(active ? Color.accentColor : Color.primary.opacity(0.18)))
+    private var list: some View {
+        ScrollView {
+            LazyVStack(spacing: 0) {
+                ForEach(imports.items) { item in
+                    ImportRow(
+                        item: item, twin: twin(of: item), showVoices: imports.labeling,
+                        removable: !imports.importing && item.state != .copied,
+                        remove: { imports.remove(item) }, setVoices: { imports.setVoices($0, for: item) })
                 }
             }
         }
-        .accessibilityHidden(true)
+        .scrollIndicators(.automatic)
+        .frame(height: min(CGFloat(imports.items.count), 5.5) * Self.rowHeight)
+    }
+
+    /// For a file skipped as a copy: the listed file it copies, if any.
+    private func twin(of item: Imports.Item) -> String? {
+        guard item.state == .duplicate, let fingerprint = item.candidate?.fingerprint else { return nil }
+        return imports.items.first {
+            $0.id != item.id && $0.state != .duplicate && $0.candidate?.fingerprint == fingerprint
+        }?.name
+    }
+
+    // MARK: Options
+
+    private var options: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Toggle(isOn: $imports.transcribe) {
+                option("text.quote", "Transcribe", "On this Mac")
+            }
+            Toggle(isOn: $imports.labelSpeakers) {
+                option("person.2", "Label speakers", imports.transcribe ? "Who spoke when" : "Needs Transcribe")
+            }
+            .disabled(!imports.transcribe)
+        }
+        .toggleStyle(OptionToggle())
+        // Locked while copying, showing the choices it copies with.
+        .allowsHitTesting(!imports.importing)
+        .opacity(imports.importing ? 0.5 : 1)
+    }
+
+    private func option(_ symbol: String, _ title: String, _ detail: String) -> some View {
+        HStack(spacing: 0) {
+            Image(systemName: symbol)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.secondary)
+                .frame(width: Self.iconColumn, alignment: .leading)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title).font(.system(size: 13, weight: .medium))
+                Text(detail).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+            }
+        }
+    }
+
+    // MARK: Footer
+
+    @ViewBuilder private var footer: some View {
+        let count = imports.ready.count
+        if imports.importing {
+            let done = imports.items.count { $0.state == .copied || $0.state.isFailure }
+            let total = done + imports.items.count { $0.state == .ready || $0.state == .copying }
+            HStack(spacing: 12) {
+                ProgressView(value: Double(done), total: Double(max(total, 1)))
+                Text("Copying \(min(done + 1, total)) of \(total)")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                    .fixedSize()
+            }
+            .frame(height: 32)
+        } else if count > 0 {
+            FlatButton(kind: .primary, action: imports.start) {
+                Text("Import \(count) recording\(count == 1 ? "" : "s")")
+                    + Text("  ·  " + ByteCountFormatter.string(fromByteCount: imports.readyBytes, countStyle: .file))
+                    .foregroundStyle(.white.opacity(0.75))
+            }
+        } else if imports.copiedCount > 0 {
+            FlatButton(kind: .primary, action: imports.close) { Text("Done") }
+        } else {
+            Text(imports.reading ? "Reading…" : "Import")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.tertiary)
+                .frame(maxWidth: .infinity)
+                .frame(height: 32)
+                .background(Style.fill, in: .rect(cornerRadius: Style.corner, style: .continuous))
+        }
     }
 }
 
-/// A file's loudness as thin bars; the part already copied is drawn in the
-/// accent. Before it is read, a flat line.
-struct Waveform: View {
-    let peaks: [Float]
-    let filled: Double
-    let muted: Bool
+/// Above the list: Choose Files… for more, which can also be dropped
+/// anywhere on the window.
+private struct AddMoreRow: View {
+    let targeted: Bool
+    let action: () -> Void
+    @State private var hovering = false
 
     var body: some View {
-        Canvas { context, size in
-            let base = Color.primary.opacity(muted ? 0.12 : 0.28)
-            guard !peaks.isEmpty else {
-                let line = CGRect(x: 0, y: size.height / 2 - 0.5, width: size.width, height: 1)
-                context.fill(Path(line), with: .color(base))
-                return
+        Button(action: action) {
+            HStack(spacing: 0) {
+                Image(systemName: "plus")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Color.accentColor)
+                    .frame(width: ImportView.iconColumn, alignment: .leading)
+                Text(targeted ? "Drop to add" : "Drop more here, or ")
+                    .foregroundStyle(targeted ? Color.accentColor : Color.secondary)
+                    + Text(targeted ? "" : "Choose Files…").fontWeight(.medium).foregroundStyle(Color.accentColor)
+                Spacer(minLength: 0)
             }
-            let step = size.width / CGFloat(peaks.count)
-            let width = max(1, step * 0.55)
-            for (index, peak) in peaks.enumerated() {
-                let height = max(1.5, CGFloat(peak) * size.height)
-                let x = CGFloat(index) * step
-                let rect = CGRect(x: x, y: (size.height - height) / 2, width: width, height: height)
-                let done = (x + width / 2) / size.width <= filled
-                context.fill(
-                    Path(roundedRect: rect, cornerRadius: width / 2), with: .color(done ? Color.accentColor : base))
-            }
+            .font(.system(size: 12))
+            .frame(height: 32)
+            .padding(.horizontal, 6)
+            .background(
+                hovering && !targeted ? Style.fill : .clear,
+                in: .rect(cornerRadius: Style.corner, style: .continuous)
+            )
+            .contentShape(.rect)
         }
-        .accessibilityHidden(true)
+        .buttonStyle(Pressable())
+        .onHover { hovering = $0 }
+        .hoverHelp("Audio files, videos, or folders of them")
+        .padding(.horizontal, -6)
     }
 }
 
-extension Imports.Item {
-    /// How far the waveform is drawn in the accent: the copy so far.
-    var fill: Double {
-        switch state {
-        case .copying: copied
-        case .copied: 1
-        default: 0
+/// One file: how it stands in the icon column (remove there on hover), its
+/// title and details, and its voice count.
+private struct ImportRow: View {
+    let item: Imports.Item
+    let twin: String?
+    let showVoices: Bool
+    let removable: Bool
+    let remove: () -> Void
+    let setVoices: (Int?) -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Group {
+                if hovering && removable {
+                    IconButton(symbol: "xmark", help: "Leave this one out", size: 20, action: remove)
+                        .padding(.leading, -3)
+                } else {
+                    mark
+                }
+            }
+            .frame(width: ImportView.iconColumn, height: 20, alignment: .leading)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.name)
+                    .font(.system(size: 13))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .foregroundStyle(item.state.muted ? .secondary : .primary)
+                Text(status)
+                    .font(.system(size: 11).monospacedDigit())
+                    .foregroundStyle(item.state.muted ? .tertiary : .secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            Spacer(minLength: 12)
+            if showVoices, item.state == .ready || item.state == .copying || item.state == .copied {
+                VoiceCount(voices: item.voices, set: setVoices).disabled(item.state != .ready)
+            }
         }
+        .frame(height: 44)
+        .contentShape(.rect)
+        .onHover { hovering = $0 }
     }
 
-    /// Length and size, or how the file stands.
-    var detail: String {
-        switch state {
-        case .reading: return "Reading…"
-        case .duplicate: return "Already in TapeUp"
-        case .unusable(let reason), .failed(let reason): return reason
+    /// The file's kind, or how its copy stands.
+    @ViewBuilder private var mark: some View {
+        switch item.state {
+        case .copying:
+            ZStack {
+                Circle().stroke(Color.primary.opacity(0.12), lineWidth: 2)
+                Circle().trim(from: 0, to: max(item.copied, 0.04))
+                    .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+            }
+            .frame(width: 13, height: 13)
+            .padding(.leading, 1)
+            .animation(.linear(duration: 0.2), value: item.copied)
+        case .copied:
+            Image(systemName: "checkmark").font(.system(size: 12, weight: .semibold)).foregroundStyle(.green)
+        case .failed:
+            Image(systemName: "exclamationmark.circle.fill").font(.system(size: 13)).foregroundStyle(.orange)
         default:
-            guard let candidate else { return "" }
-            return Format.length(candidate.duration) + " · "
-                + ByteCountFormatter.string(fromByteCount: candidate.bytes, countStyle: .file)
+            Image(systemName: item.candidate?.isMovie == true ? "film" : "waveform")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(item.state.muted ? .tertiary : .secondary)
         }
     }
 
-    var removeHelp: String { state == .copied ? "Undo: move it to the Trash" : "Leave this one out" }
+    private var status: String {
+        switch item.state {
+        case .reading: "Reading…"
+        case .duplicate: twin.map { "Copy of “\($0)”" } ?? "Already in TapeUp"
+        case .unusable(let reason), .failed(let reason): reason
+        case .ready, .copying, .copied: details
+        }
+    }
+
+    private var details: String {
+        guard let candidate = item.candidate else { return "" }
+        return [
+            Format.when(candidate.started), Format.length(candidate.duration),
+            ByteCountFormatter.string(fromByteCount: candidate.bytes, countStyle: .file),
+        ]
+        .joined(separator: " · ")
+    }
 }
 
-/// How many voices to find: "Auto" until clicked, then Auto, 2, 3, 4 and a
-/// typed number of five or more, folding back once one is picked.
-struct VoiceCount: View {
+/// How many voices to find: Auto (the estimate), 2, 3, 4, or a number of
+/// five or more typed in place of 5+. Drawn as a native segmented control,
+/// the choice a raised knob, so a column of them stays quiet.
+private struct VoiceCount: View {
     let voices: Int?
     let set: (Int?) -> Void
-    @State private var open = false
     @State private var typing = false
     @State private var text = ""
-    @State private var hovering = false
     @FocusState private var focused: Bool
 
     var body: some View {
-        Group {
-            if open {
-                HStack(spacing: 1) {
-                    Segment(title: "Auto", selected: voices == nil) { pick(nil) }
-                    ForEach(2...4, id: \.self) { number in
-                        Segment(title: "\(number)", selected: voices == number) { pick(number) }
-                    }
-                    if typing {
-                        TextField("5+", text: $text)
-                            .textFieldStyle(.plain)
-                            .font(.system(size: 11, weight: .medium).monospacedDigit())
-                            .multilineTextAlignment(.center)
-                            .frame(width: 28, height: 18)
-                            .background(Color.accentColor.opacity(0.12), in: .capsule)
-                            .focused($focused)
-                            .onSubmit(commit)
-                            .onChange(of: focused) { _, now in if !now { commit() } }
-                            .onAppear { focused = true }
-                    } else {
-                        let large = (voices ?? 0) >= 5
-                        Segment(title: large ? "\(voices!)" : "5+", selected: large) {
-                            text = large ? "\(voices!)" : ""
-                            typing = true
-                        }
-                    }
-                }
-                .padding(2)
-                .background(Style.fill, in: .capsule)
-                .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .trailing)))
+        HStack(spacing: 0) {
+            segment("Auto", width: 38, selected: voices == nil, help: "Find how many voices there are") { set(nil) }
+            ForEach(2...4, id: \.self) { number in
+                segment("\(number)", selected: voices == number, help: "\(number) voices") { set(number) }
+            }
+            if typing {
+                TextField("5+", text: $text)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 11, weight: .medium).monospacedDigit())
+                    .multilineTextAlignment(.center)
+                    .frame(width: Segment.width, height: Segment.height)
+                    .background(Knob())
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 5, style: .continuous).strokeBorder(Color.accentColor)
+                    )
+                    .focused($focused)
+                    .onSubmit(commit)
+                    .onChange(of: focused) { _, now in if !now { commit() } }
+                    .onAppear { focused = true }
             } else {
-                Button {
-                    open = true
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "person.wave.2").font(.system(size: 9, weight: .semibold))
-                        Text(voices.map { "\($0) voices" } ?? "Auto")
-                            .font(.system(size: 11, weight: .medium))
-                            .monospacedDigit()
-                    }
-                    .foregroundStyle(voices == nil ? Color.secondary : Color.accentColor)
-                    .padding(.horizontal, 7)
-                    .frame(height: 20)
-                    .background(hovering ? Style.fillHover : Style.fill, in: .capsule)
-                    .contentShape(.capsule)
+                let large = (voices ?? 0) >= 5
+                segment(large ? "\(voices!)" : "5+", selected: large, help: "Five or more voices") {
+                    text = large ? "\(voices!)" : ""
+                    typing = true
                 }
-                .buttonStyle(Pressable())
-                .onHover { hovering = $0 }
-                .hoverHelp("How many voices to find")
-                .transition(.opacity)
             }
         }
-        .animation(.snappy(duration: 0.2), value: open)
-        .fixedSize()
-    }
-
-    private func pick(_ number: Int?) {
-        set(number)
-        open = false
+        .padding(2)
+        .background(Style.fill, in: .rect(cornerRadius: 7, style: .continuous))
     }
 
     private func commit() {
         guard typing else { return }
         typing = false
         if let number = Int(text.trimmingCharacters(in: .whitespaces)), number >= 1 { set(number) }
-        open = false
+    }
+
+    private func segment(
+        _ title: String, width: CGFloat = Segment.width, selected: Bool, help: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Segment(title: title, width: width, selected: selected, action: action).hoverHelp(help)
     }
 }
 
-struct Segment: View {
+private struct Segment: View {
+    static let width: CGFloat = 26
+    static let height: CGFloat = 20
+
     let title: String
+    let width: CGFloat
     let selected: Bool
     let action: () -> Void
+    @Environment(\.isEnabled) private var enabled
     @State private var hovering = false
 
     var body: some View {
@@ -520,161 +536,66 @@ struct Segment: View {
             Text(title)
                 .font(.system(size: 11, weight: .medium))
                 .monospacedDigit()
-                .lineLimit(1)
-                .padding(.horizontal, 6)
-                .frame(minWidth: 22, minHeight: 18)
-                .foregroundStyle(selected ? Color.white : Color.primary)
-                .background(selected ? Color.accentColor : hovering ? Style.fillHover : .clear, in: .capsule)
-                .contentShape(.capsule)
+                .frame(width: width, height: Self.height)
+                .foregroundStyle(selected ? .primary : enabled ? .secondary : .tertiary)
+                .background {
+                    if selected {
+                        Knob()
+                    } else if hovering && enabled {
+                        RoundedRectangle(cornerRadius: 5, style: .continuous).fill(Style.fill)
+                    }
+                }
+                .contentShape(.rect)
         }
         .buttonStyle(Pressable())
-        .focusEffectDisabled()
         .onHover { hovering = $0 }
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
 
-/// What happens to each file once it is in, as a chain: transcribe and
-/// title, then label speakers. Turning the first off breaks the link, and
-/// the second goes with it.
-struct Chain: View {
-    @Bindable var imports: Imports
+/// The chosen segment: raised like the switch's knob.
+private struct Knob: View {
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        HStack(spacing: 0) {
-            ChainNode(
-                title: "Transcribe",
-                detail: imports.transcribe
-                    ? imports.model.titleWriter.map { "titled by \($0)" } ?? "named after each file"
-                    : "named after each file",
-                on: imports.transcribe, enabled: true
-            ) { imports.transcribe.toggle() }
-            ChainLink(on: imports.transcribe)
-            ChainNode(
-                title: "Label speakers", detail: "on this Mac", on: imports.labeling, enabled: imports.transcribe
-            ) { imports.labelSpeakers.toggle() }
-            Spacer(minLength: 0)
-        }
-        .disabled(imports.importing && imports.look != .live)
-        .animation(.snappy(duration: 0.22), value: imports.transcribe)
-        .animation(.snappy(duration: 0.22), value: imports.labelSpeakers)
+        RoundedRectangle(cornerRadius: 5, style: .continuous)
+            .fill(scheme == .dark ? Color.white.opacity(0.2) : Color.white)
+            .shadow(color: .black.opacity(scheme == .dark ? 0.25 : 0.12), radius: 0.5, y: 0.5)
     }
 }
 
-struct ChainNode: View {
-    let title: String
-    let detail: String
-    let on: Bool
-    let enabled: Bool
-    let toggle: () -> Void
-    @State private var hovering = false
+/// A toggle drawn as the panel's switch, the whole row clicking.
+private struct OptionToggle: ToggleStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        OptionRow(configuration: configuration)
+    }
 
-    var body: some View {
-        Button(action: toggle) {
-            HStack(spacing: 7) {
-                ZStack {
-                    Circle().strokeBorder(on ? Color.accentColor : Color.secondary.opacity(0.6), lineWidth: 1.5)
-                    if on {
-                        Circle().fill(Color.accentColor)
-                        Image(systemName: "checkmark").font(.system(size: 8, weight: .heavy)).foregroundStyle(.white)
-                    }
+    private struct OptionRow: View {
+        let configuration: ToggleStyleConfiguration
+        @Environment(\.isEnabled) private var enabled
+        @State private var hovering = false
+
+        var body: some View {
+            Button {
+                configuration.isOn.toggle()
+            } label: {
+                HStack(spacing: 0) {
+                    configuration.label
+                    Spacer(minLength: 8)
+                    MiniSwitch(on: configuration.isOn && enabled)
                 }
-                .frame(width: 16, height: 16)
-                VStack(alignment: .leading, spacing: 0) {
-                    Text(title).font(.system(size: 12, weight: .semibold))
-                    Text(detail)
-                        .font(.system(size: 10.5))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .contentTransition(.opacity)
-                }
+                .frame(height: 36)
+                .padding(.horizontal, 6)
+                .background(
+                    hovering && enabled ? Style.fill : .clear,
+                    in: .rect(cornerRadius: Style.corner, style: .continuous)
+                )
+                .contentShape(.rect)
             }
-            .padding(.leading, 8)
-            .padding(.trailing, 10)
-            .frame(height: 40)
-            .background(
-                hovering && enabled ? Style.fillHover : Style.fill, in: .rect(cornerRadius: 9, style: .continuous)
-            )
-            .contentShape(.rect)
-        }
-        .buttonStyle(Pressable())
-        .focusEffectDisabled()
-        .disabled(!enabled)
-        .opacity(enabled ? 1 : 0.45)
-        .onHover { hovering = $0 }
-        .accessibilityValue(on ? "On" : "Off")
-    }
-}
-
-/// The link between two steps: whole while both run, broken when not.
-struct ChainLink: View {
-    let on: Bool
-    var width: CGFloat = 22
-
-    var body: some View {
-        Canvas { context, size in
-            var path = Path()
-            path.move(to: CGPoint(x: 0, y: size.height / 2))
-            path.addLine(to: CGPoint(x: size.width, y: size.height / 2))
-            context.stroke(
-                path, with: .color(on ? Color.accentColor.opacity(0.7) : Color.secondary.opacity(0.35)),
-                style: StrokeStyle(lineWidth: 1.5, lineCap: .round, dash: on ? [] : [2, 4]))
-        }
-        .frame(width: width, height: 40)
-    }
-}
-
-/// The main button, as the import stands: Import with the count and size,
-/// the copy's progress, or Done.
-struct ImportButton: View {
-    let imports: Imports
-    var verb: (Int) -> String = { "Import \($0) recording\($0 == 1 ? "" : "s")" }
-
-    var body: some View {
-        let count = imports.ready.count
-        if imports.importing {
-            let done = imports.items.count { $0.state == .copied || $0.state.isFailure }
-            let total = done + imports.items.count { $0.state == .ready || $0.state == .copying }
-            Text("Copying \(min(done + 1, total)) of \(total)")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
-                .frame(maxWidth: .infinity)
-                .frame(height: 32)
-        } else if count > 0 {
-            FlatButton(kind: .primary, action: imports.start) {
-                Text(
-                    verb(count) + " · "
-                        + ByteCountFormatter.string(fromByteCount: imports.readyBytes, countStyle: .file))
-            }
-        } else if imports.copiedCount > 0 {
-            FlatButton(kind: .plain, action: imports.close) { Text("Done") }
-        } else {
-            FlatButton(kind: .plain, action: {}) { Text(imports.reading ? "Reading…" : "Nothing to import") }
-                .disabled(true)
-                .opacity(0.6)
+            .buttonStyle(Pressable())
+            .opacity(enabled ? 1 : 0.5)
+            .onHover { hovering = $0 }
+            .padding(.horizontal, -6)
         }
     }
-}
-
-/// Groups items by the day they were recorded, newest first, as the panel does.
-func importDays(_ items: [Imports.Item]) -> [(day: String, items: [Imports.Item])] {
-    let sorted = items.enumerated().sorted { first, second in
-        switch (first.element.candidate?.started, second.element.candidate?.started) {
-        case (let one?, let two?): one > two
-        case (nil, nil): first.offset < second.offset
-        case (nil, _): false
-        case (_, nil): true
-        }
-    }
-    var groups: [(day: String, items: [Imports.Item])] = []
-    for (_, item) in sorted {
-        let day = item.candidate.map { Format.day($0.started) } ?? "Reading"
-        if groups.last?.day == day {
-            groups[groups.count - 1].items.append(item)
-        } else {
-            groups.append((day, [item]))
-        }
-    }
-    return groups
 }
