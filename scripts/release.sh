@@ -101,11 +101,17 @@ rm -rf "$out"
 mkdir -p "$out"
 saved="$(mktemp -d)"
 committed=0
+published=0
 cp VERSION "$saved/VERSION"
 [[ -f "$appcast" ]] && cp "$appcast" "$saved/appcast.xml"
 # Until the release commit exists, a failure or a dry run leaves the tree as
 # it was.
 restore() {
+  local status=$?
+  if ((committed && !published && status != 0)); then
+    echo "The release commit and tag $tag are made here. To finish: git push origin main $tag," >&2
+    echo "then gh release create $tag $dmg $out/appcast.xml --repo $repo --title \"TapeUp $version\" --notes-file $out/notes.md --verify-tag --latest" >&2
+  fi
   if ((!committed)); then
     cp "$saved/VERSION" VERSION
     if [[ -f "$saved/appcast.xml" ]]; then cp "$saved/appcast.xml" "$appcast"; else rm -f "$appcast"; fi
@@ -234,6 +240,7 @@ else
   step "Publishing the GitHub release"
   gh release create "$tag" "$dmg" "$out/appcast.xml" --repo "$repo" --title "TapeUp $version" \
     --notes-file "$out/notes.md" --verify-tag --latest
+  published=1
 fi
 
 # --- Homebrew --------------------------------------------------------------

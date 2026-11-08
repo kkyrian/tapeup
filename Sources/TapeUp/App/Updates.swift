@@ -17,6 +17,9 @@ final class Updates: NSObject {
     private var installQuietly: (() -> Void)?
     /// An update the user chose to install, waiting for the recording to end.
     private var relaunch: (() -> Void)?
+    /// The quiet install just started, and when: a recording begun in the
+    /// moment before Sparkle asks the app to quit sends it back to waiting.
+    private var started: (install: () -> Void, at: Date)?
     private var timer: Timer?
 
     init(recording: @escaping () -> Bool, busy: @escaping () -> Bool) {
@@ -40,6 +43,17 @@ final class Updates: NSObject {
         controller.checkForUpdates(nil)
     }
 
+    /// Asked as the app is about to quit. True when a quiet install began
+    /// moments ago and a recording has started since: the quit is cancelled
+    /// and the install waits again (Sparkle allows its handler a second call).
+    func holdsQuitForRecording() -> Bool {
+        guard let started, Date.now.timeIntervalSince(started.at) < 30, recording() else { return false }
+        self.started = nil
+        installQuietly = started.install
+        waitUntilFree()
+        return true
+    }
+
     /// Runs whatever waits for the app to be free, once it is.
     private func waitUntilFree() {
         guard timer == nil else { return }
@@ -56,6 +70,7 @@ final class Updates: NSObject {
         }
         if !recording(), !busy(), let installQuietly {
             self.installQuietly = nil
+            started = (installQuietly, .now)
             installQuietly()
         }
         if relaunch == nil, installQuietly == nil {

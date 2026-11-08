@@ -69,6 +69,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if updates?.holdsQuitForRecording() == true { return .terminateCancel }
         guard model.phase != .idle else { return .terminateNow }
         if model.isRecording {
             model.stop { NSApp.reply(toApplicationShouldTerminate: true) }
