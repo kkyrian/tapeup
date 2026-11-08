@@ -61,7 +61,9 @@ struct PeopleView: View {
                         Text("No list on the clipboard. Copy the assistant's whole answer, then paste again.")
                     }
                 } else {
-                    Text("Copy a request for your AI assistant. It writes everyone you record with into this list.")
+                    Text(
+                        "Paste this request into your AI assistant, and it fills in the people you meet, so you don't type their names."
+                    )
                 }
             }
             .font(.system(size: 11))
