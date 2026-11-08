@@ -65,7 +65,8 @@ struct RecentView: View {
     }
 }
 
-/// Where to go: Import, People and Settings, also on right-click of the menu-bar icon.
+/// Where to go: Import, People and Settings, then updates and Quit; also on
+/// right-click of the menu-bar icon.
 struct MoreMenu: View {
     @Bindable var model: AppModel
 
@@ -75,6 +76,8 @@ struct MoreMenu: View {
             Button("People…", action: model.openPeople)
             Button(model.agents.settingsTitle, action: model.openSettings)
             Divider()
+            Button("Check for Updates…") { model.checkForUpdates?() }
+                .disabled(model.checkForUpdates == nil)
             Button("Quit TapeUp") { NSApp.terminate(nil) }
                 .keyboardShortcut("q")
         }

@@ -347,7 +347,8 @@ final class Take {
     /// The ··· menu at the top of Recent.
     func pickFromMore(_ item: String, then action: () -> Void) async {
         await pick(
-            item, from: at(Spot.more), items: ["Import…", "People…", "Settings…", "-", "Quit TapeUp ⌘Q"],
+            item, from: at(Spot.more),
+            items: ["Import…", "People…", "Settings…", "-", "Check for Updates…", "Quit TapeUp ⌘Q"],
             then: action)
     }
 
