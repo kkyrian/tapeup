@@ -35,7 +35,8 @@ sleep 10; switch output "$laptop_out"; switch input "$laptop_in"
 sleep 10; switch output "$airpods"; switch input "$airpods"
 sleep 40
 wait
-while pgrep -x TapeUp >/dev/null; do sleep 1; done
+# The installed app may be running too; wait for this recording only.
+while pgrep -f "TapeUp.app/Contents/MacOS/TapeUp record --out $out" >/dev/null; do sleep 1; done
 
 dir="$(ls -d "$out"/[0-9][0-9][0-9][0-9]/*/ | tail -1)"
 echo; echo "Recording: $dir"
