@@ -38,6 +38,24 @@ final class Updates: NSObject {
         !(Bundle.main.object(forInfoDictionaryKey: "SUPublicEDKey") as? String ?? "").isEmpty
     }
 
+    /// The Automatic updates switch: off, Sparkle neither checks nor
+    /// downloads on its own; Check for Updates… still works.
+    var automatic: Bool {
+        get { controller.updater.automaticallyChecksForUpdates && controller.updater.automaticallyDownloadsUpdates }
+        set {
+            controller.updater.automaticallyChecksForUpdates = newValue
+            controller.updater.automaticallyDownloadsUpdates = newValue
+        }
+    }
+
+    /// The release page for a version, from the feed's address.
+    static func releasePage(for version: String) -> URL? {
+        guard let feed = Bundle.main.object(forInfoDictionaryKey: "SUFeedURL") as? String,
+            let range = feed.range(of: "/releases/")
+        else { return nil }
+        return URL(string: feed[..<range.lowerBound] + "/releases/tag/v" + version)
+    }
+
     /// Check for Updates…: Sparkle's own window, with what's new.
     func check() {
         NSApp.activate()

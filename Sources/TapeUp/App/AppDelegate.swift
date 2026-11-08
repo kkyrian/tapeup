@@ -44,6 +44,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.panel.close()
                 self?.updates.check()
             }
+            model.automaticUpdates = updates.automatic
+            model.setAutomaticUpdates = { [weak self] in self?.updates.automatic = $0 }
+        }
+        // After an update the panel says so once, with what's new.
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        if let version {
+            let last = Settings.store.string(forKey: "lastVersion")
+            if let last, last != version { model.updatedTo = version }
+            Settings.store.set(version, forKey: "lastVersion")
         }
         hotKey = HotKey.record { [weak self] in self?.shortcutPressed() }
         commands = CommandLink.listen(model)

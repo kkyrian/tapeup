@@ -45,6 +45,11 @@ struct PanelView: View {
         } else {
             VStack(spacing: 0) {
                 RecorderView(model: model)
+                if let version = model.updatedTo {
+                    UpdatedBanner(version: version, dismiss: { model.updatedTo = nil })
+                        .padding(.horizontal, Style.inset)
+                        .padding(.bottom, Style.inset)
+                }
                 if let problem = model.problem {
                     ProblemBanner(text: problem, dismiss: model.dismissProblem)
                         .padding(.horizontal, Style.inset)
@@ -53,6 +58,28 @@ struct PanelView: View {
                 Divider().padding(.horizontal, Style.inset)
                 RecentView(model: model)
             }
+        }
+    }
+}
+
+/// One line after an update: the version, its release notes, a dismiss.
+struct UpdatedBanner: View {
+    let version: String
+    let dismiss: () -> Void
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Image(systemName: "arrow.down.circle")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .frame(width: Style.textEdge - Style.inset, alignment: .leading)
+            Text("Updated to \(version)").font(.system(size: 12))
+            Spacer(minLength: 4)
+            if let page = Updates.releasePage(for: version) {
+                LinkButton("What's new") { NSWorkspace.shared.open(page) }
+                    .hoverHelp("Open the release notes")
+            }
+            IconButton(symbol: "xmark", help: "Dismiss", size: 18, action: dismiss)
         }
     }
 }

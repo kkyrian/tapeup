@@ -186,6 +186,14 @@ enum UITest {
         check("people-back")
         model.openSettings()
         check("settings")
+        if Updates.isSetUp {
+            let automatic = model.automaticUpdates
+            expect(click("Automatic updates", in: panel), "Settings has an Automatic updates switch")
+            settle(0.2)
+            expect(
+                model.automaticUpdates != automatic, "the switch turns automatic updates \(automatic ? "off" : "on")")
+            model.automaticUpdates = automatic
+        }
         model.closeSettings()
         check("settings-back")
         expect(abs(panel.window.frame.height - idleHeight) <= 1, "back from Settings at the same height")

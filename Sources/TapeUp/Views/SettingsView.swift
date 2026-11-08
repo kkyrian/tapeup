@@ -49,6 +49,14 @@ struct SettingsView: View {
                 symbol: "power", title: "Open at login", subtitle: "In the menu bar when you log in",
                 on: launchAtLogin, action: { model.launchAtLogin.toggle() }
             ) { MiniSwitch(on: launchAtLogin) }
+            if Updates.isSetUp {
+                SettingRow(
+                    symbol: "arrow.down.circle", title: "Automatic updates",
+                    subtitle: "Installs when idle, never while recording",
+                    on: model.automaticUpdates, action: { model.automaticUpdates.toggle() }
+                ) { MiniSwitch(on: model.automaticUpdates) }
+                .clickTarget("Automatic updates")
+            }
         }
         .padding(Style.inset)
         .task(id: agents.waiting) { await agents.followTerminal() }

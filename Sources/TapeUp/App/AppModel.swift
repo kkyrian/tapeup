@@ -88,6 +88,13 @@ final class AppModel {
     var showPanel: () -> Void = {}
     /// Check for Updates…; nil in a build that cannot update (no release key).
     var checkForUpdates: (() -> Void)?
+    /// The Automatic updates switch: a daily check, installed when idle.
+    var automaticUpdates = true {
+        didSet { setAutomaticUpdates?(automaticUpdates) }
+    }
+    var setAutomaticUpdates: ((Bool) -> Void)?
+    /// The version an update just brought, for the one line that says so.
+    var updatedTo: String?
 
     struct Card: Equatable {
         var entry: RecordingEntry

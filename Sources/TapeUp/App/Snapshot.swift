@@ -119,6 +119,14 @@ enum Snapshot {
                 phase: .idle, microphone: devices.microphone, output: devices.output,
                 problem: "Could not start recording: the microphone is in use by another app.")
         }
+        shoot("11-updated") {
+            model.stage(phase: .idle, microphone: devices.microphone, output: devices.output)
+            model.updatedTo = "0.1.1"
+        }
+        model.updatedTo = nil
+        shoot("12-settings") { model.openSettings() }
+        shoot("12-settings-updates-off") { model.automaticUpdates = false }
+        model.closeSettings()
         print(outURL.path)
         restore()
         exit(0)
