@@ -2,6 +2,14 @@ import AppKit
 import Foundation
 
 enum Format {
+    /// "3 min left", "1.5 hr left": an estimate, never under a minute.
+    static func left(_ seconds: TimeInterval) -> String {
+        let minutes = max(1, Int((seconds / 60).rounded()))
+        if minutes < 60 { return "\(minutes) min left" }
+        let hours = Double(minutes) / 60
+        return "\(hours.formatted(.number.precision(.fractionLength(0...1)))) hr left"
+    }
+
     /// 4:05, 42:10, 1:12:40.
     static func duration(_ seconds: TimeInterval) -> String {
         let total = max(0, Int(seconds))

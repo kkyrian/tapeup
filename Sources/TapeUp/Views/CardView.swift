@@ -209,7 +209,9 @@ struct TranscriptButton: View {
         let working = model.transcription.isWorking(on: entry)
         FlatButton(kind: .plain, action: act) {
             HStack(spacing: 6) {
-                if working {
+                if let progress = model.transcription.progress(of: entry) {
+                    ProgressRing(fraction: progress.fraction, size: 12).frame(width: 14, height: 14)
+                } else if working {
                     ProgressView().controlSize(.small).scaleEffect(0.75).frame(width: 14, height: 14)
                 } else if let symbol {
                     Image(systemName: symbol)
@@ -231,6 +233,9 @@ struct TranscriptButton: View {
     }
 
     private var title: String {
+        if let progress = model.transcription.progress(of: entry) {
+            return "Transcribing \(Int((progress.fraction * 100).rounded()))%"
+        }
         if model.transcription.isWorking(on: entry) { return "Transcribing" }
         switch entry.transcript {
         case .done: return model.transcriptCopiedFlash ? "Copied" : "Copy transcript"
@@ -248,6 +253,9 @@ struct TranscriptButton: View {
     }
 
     private func help(working: Bool) -> String {
+        if let left = model.transcription.progress(of: entry)?.remaining() {
+            return "Transcribing on this Mac, " + Format.left(left)
+        }
         if working {
             return model.transcription.download == .ready
                 ? "Transcribing on this Mac" : "Waiting for \(model.transcription.model.name) to download"

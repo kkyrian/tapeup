@@ -23,7 +23,7 @@ enum ImportGallery {
         let model = AppModel()
         // Never the user's own agent: titles come from Apple's model here.
         model.agents.stage(states: [:], chosen: nil)
-        let files = makeFiles(in: base.appendingPathComponent("Old recordings"))
+        let files = makeFiles(in: base.appendingPathComponent("Old recordings"), long: true)
         let window = ImportWindow(model: model)
         let imports = window.imports
 
@@ -49,16 +49,37 @@ enum ImportGallery {
 
         window.show()
         shot("empty")
+        imports.targeted = true
+        shot("empty-drop")
+        imports.targeted = false
         window.show(adding: files)
         waitWhile { imports.items.count < files.count || imports.reading }
         if let second = imports.items.first(where: { $0.name.hasPrefix("Design review") }) {
             imports.setVoices(3, for: second)
         }
         shot("files")
+        imports.targeted = true
+        shot("files-drop")
+        imports.targeted = false
         imports.start()
         waitWhile { !imports.items.contains { $0.state == .copied } }
         shot("importing")
         waitWhile(120) { imports.importing }
+        // Partway through the long one, with a pace to estimate from.
+        waitWhile(240) {
+            !imports.items.contains {
+                imports.progress(of: $0).map { $0.fraction < 0.9 && $0.remaining() != nil } ?? false
+            }
+        }
+        shot("transcribing")
+        waitWhile(600) {
+            imports.items.contains { item in
+                switch imports.stage(of: item) {
+                case .waitingToTranscribe, .transcribing, .findingSpeakers: true
+                default: false
+                }
+            }
+        }
         shot("done")
         window.window.close()
 
@@ -72,7 +93,7 @@ enum ImportGallery {
     /// Made-up recordings: conversations read by the Mac's own voices,
     /// dated so they land among the sample library's recordings, plus one
     /// copy of the same file.
-    static func makeFiles(in folder: URL) -> [URL] {
+    static func makeFiles(in folder: URL, long: Bool = false) -> [URL] {
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let now = Date()
         let (one, two, three) = ("Samantha", "Daniel", "Flo (English (US))")
@@ -109,7 +130,9 @@ enum ImportGallery {
             ),
         ]
         var urls: [URL] = []
-        for (name, offset, lines) in specs {
+        for (index, (name, offset, spoken)) in specs.enumerated() {
+            // A longer first interview, so its transcript is seen part done.
+            let lines = long && index == 0 ? Array(repeating: spoken, count: 12).flatMap { $0 } : spoken
             let url = folder.appendingPathComponent(name)
             write(lines, to: url, scratch: folder)
             let date = now.addingTimeInterval(offset)

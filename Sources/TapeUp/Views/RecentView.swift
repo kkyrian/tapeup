@@ -86,7 +86,12 @@ struct RecentRow: View {
             // the title never narrows as the pointer passes.
             ZStack(alignment: .trailing) {
                 Group {
-                    if model.transcription.isWorking(on: entry) {
+                    if let progress = model.transcription.progress(of: entry) {
+                        ProgressRing(fraction: progress.fraction, size: 12).frame(width: 16, height: 16)
+                            .hoverHelp(
+                                "Transcribing, \(Int((progress.fraction * 100).rounded()))%"
+                                    + (progress.remaining().map { ", " + Format.left($0) } ?? ""))
+                    } else if model.transcription.isWorking(on: entry) {
                         ProgressView().controlSize(.small).scaleEffect(0.7).frame(width: 16, height: 16)
                             .hoverHelp("Transcribing")
                     } else {

@@ -41,6 +41,7 @@ enum UITest {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         item.button?.title = "UITest"
         let panel = PanelController(model: model, anchor: item.button!)
+        model.showPanel = { panel.show(takingFocus: false) }
         let floating = FloatingControls(model: model) {
             model.stop()
             if !panel.isVisible { panel.show(takingFocus: false) }
@@ -440,7 +441,7 @@ enum UITest {
         check("undone")
         expect(model.recent.contains { $0.folder == victim.folder }, "undo put it back")
 
-        importRecordings(model: model, base: base, out: outURL, expect: expect, settle: settle)
+        importRecordings(model: model, panel: panel, base: base, out: outURL, expect: expect, settle: settle)
 
         panel.close()
         settle(0.3)
@@ -611,22 +612,27 @@ enum UITest {
     /// Import: a mono phone memo, the same file again, and a text file are
     /// dropped; only the memo comes in, as 48 kHz stereo named after itself,
     /// and dropping it once more marks it already in TapeUp.
+    /// A sine tone, mono at 44.1 kHz: a file that imports, and differs by pitch.
+    private static func writeTone(hertz: Double, seconds: Int, to url: URL) {
+        guard let format = AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 1),
+            let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(44_100 * seconds)),
+            let file = try? AVAudioFile(forWriting: url, settings: format.settings)
+        else { return }
+        buffer.frameLength = buffer.frameCapacity
+        for index in 0..<Int(buffer.frameLength) {
+            buffer.floatChannelData?[0][index] = 0.3 * Float(sin(Double(index) * 2 * .pi * hertz / 44_100))
+        }
+        try? file.write(from: buffer)
+    }
+
     private static func importRecordings(
-        model: AppModel, base: URL, out: URL, expect: (Bool, String) -> Void, settle: (Double) -> Void
+        model: AppModel, panel: PanelController, base: URL, out: URL, expect: (Bool, String) -> Void,
+        settle: (Double) -> Void
     ) {
         let files = base.appendingPathComponent("to-import")
         try? FileManager.default.createDirectory(at: files, withIntermediateDirectories: true)
         let memo = files.appendingPathComponent("Interview with Mei.wav")
-        if let format = AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 1),
-            let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 44_100 * 3),
-            let file = try? AVAudioFile(forWriting: memo, settings: format.settings)
-        {
-            buffer.frameLength = 44_100 * 3
-            for index in 0..<Int(buffer.frameLength) {
-                buffer.floatChannelData?[0][index] = 0.3 * sin(Float(index) * 2 * .pi * 330 / 44_100)
-            }
-            try? file.write(from: buffer)
-        }
+        writeTone(hertz: 330, seconds: 3, to: memo)
         let twin = files.appendingPathComponent("Interview with Mei copy.wav")
         try? FileManager.default.copyItem(at: memo, to: twin)
         try? "notes".write(to: files.appendingPathComponent("notes.txt"), atomically: true, encoding: .utf8)
@@ -680,9 +686,20 @@ enum UITest {
         }
         expect(FileManager.default.fileExists(atPath: memo.path), "the original is left where it was")
         if let copied = imports.items.first(where: { $0.state == .copied }) {
-            expect(imports.progress(of: copied) == nil, "with no transcript asked for, the row keeps its details")
+            expect(imports.stage(of: copied) == .imported, "with no transcript asked for, the row says imported")
+            imports.rename(copied, to: "Mei, first talk")
+            expect(
+                copied.stamp.flatMap(model.importedEntry)?.title == "Mei, first talk",
+                "a row can be renamed after import")
+            // One click with the panel closed: it opens on the recording,
+            // not on the list.
+            panel.close()
+            settle(0.3)
             imports.open(copied)
-            expect(model.card?.entry.title == "Mei, first interview", "the row opens its recording")
+            settle(0.3)
+            expect(
+                panel.isVisible && model.card?.entry.title == "Mei, first talk",
+                "one click opens the panel on that recording")
             model.closeCard()
         }
         shot("import-done.png")
@@ -691,9 +708,35 @@ enum UITest {
         waitWhile { imports.items.isEmpty || imports.reading }
         expect(imports.items.first?.state == .duplicate, "importing it again is marked already in TapeUp")
         shot("import-again.png")
+
+        // More while one comes in, and more after: each joins or starts its own import.
+        let tones = [440, 550, 660].map { hertz in
+            let url = files.appendingPathComponent("Talk at \(hertz).wav")
+            writeTone(hertz: Double(hertz), seconds: 2, to: url)
+            return url
+        }
+        imports.transcribe = false
+        imports.add([tones[0]])
+        waitWhile { imports.reading }
+        imports.start()
+        imports.add([tones[1]])
+        waitWhile { imports.importing }
+        expect(imports.copiedCount == 2, "a file added during an import joins it (\(imports.copiedCount) in)")
+        imports.add([tones[2]])
+        waitWhile { imports.reading }
+        expect(imports.ready.count == 1, "a file added after an import waits for Import again")
+        imports.start()
+        expect(imports.earlier.count == 2, "the new import counts only its own files")
+        waitWhile { imports.importing }
+        expect(imports.copiedCount == 3, "the second import brings it in")
+        shot("import-more.png")
         window.window.close()
         // Gone again, without going through the user's Trash.
-        if let entry { try? FileManager.default.removeItem(at: entry.folder) }
+        let stamps =
+            imports.items.compactMap(\.stamp) + [entry.map { RecordingLibrary.stamp(of: $0.folder) }].compactMap { $0 }
+        for stamp in Set(stamps) {
+            if let folder = model.importedEntry(stamp)?.folder { try? FileManager.default.removeItem(at: folder) }
+        }
         model.reload()
     }
 

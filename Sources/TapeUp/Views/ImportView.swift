@@ -40,6 +40,8 @@ final class Imports {
     private(set) var items: [Item] = []
     var transcribe = true
     var labelSpeakers = true
+    /// Files are being dragged over the window.
+    var targeted = false
     var close: () -> Void = {}
 
     /// Fingerprints already in the library, read once per window.
@@ -47,12 +49,15 @@ final class Imports {
     private var reader: Task<Void, Never>?
     private var worker: Task<Void, Never>?
     private var stopping = false
+    /// Files finished in an import before this one, left out of its count.
+    private(set) var earlier: Set<Item.ID> = []
 
     init(model: AppModel) { self.model = model }
 
     func reset() {
         reader?.cancel()
         reader = nil
+        adding = []
         items = []
         known = nil
         transcribe = true
@@ -62,7 +67,9 @@ final class Imports {
     var importing: Bool { worker != nil }
     var ready: [Item] { items.filter { $0.state == .ready } }
     var readyBytes: Int64 { ready.reduce(0) { $0 + ($1.candidate?.bytes ?? 0) } }
-    var reading: Bool { items.contains { $0.state == .reading } }
+    /// Files dropped and not yet listed, or listed and not yet read.
+    var reading: Bool { !adding.isEmpty || items.contains { $0.state == .reading } }
+    private var adding: Set<UUID> = []
     var copiedCount: Int { items.count { $0.state == .copied } }
     var labeling: Bool { transcribe && labelSpeakers }
 
@@ -70,7 +77,10 @@ final class Imports {
     func add(_ urls: [URL]) {
         guard !urls.isEmpty else { return }
         let previous = reader
+        let id = UUID()
+        adding.insert(id)
         reader = Task { [weak self] in
+            defer { Task { @MainActor in self?.adding.remove(id) } }
             await previous?.value
             let files = await Task.detached(priority: .userInitiated) { RecordingImport.files(in: urls) }.value
             guard let self, !Task.isCancelled else { return }
@@ -126,22 +136,43 @@ final class Imports {
         }
     }
 
+    /// Where a recording that came in has got to.
+    enum Stage: Equatable {
+        /// In the library; nothing more was asked for.
+        case imported
+        case waitingToTranscribe
+        case transcribing
+        case findingSpeakers
+        case transcriptFailed
+        /// Everything asked for is done.
+        case ready(speakers: Bool)
+    }
+
     /// How a recording that came in stands now: its transcript, then its
-    /// speakers; nil when neither was asked for.
-    func progress(of item: Item) -> String? {
+    /// speakers. Nil before it is copied in.
+    func stage(of item: Item) -> Stage? {
         guard item.state == .copied, let stamp = item.stamp, let entry = model.importedEntry(stamp) else { return nil }
         switch entry.transcript {
         case .pending:
-            return model.transcription.current == stamp ? "Transcribing…" : "Waiting to transcribe"
+            return model.transcription.current == stamp ? .transcribing : .waitingToTranscribe
         case .failed:
-            return "Transcript failed"
+            return .transcriptFailed
         case .done:
-            if let work = model.speakers.work(on: entry), work != .failed { return "Finding speakers…" }
-            return "Transcript ready"
+            if let work = model.speakers.work(on: entry), work != .failed { return .findingSpeakers }
+            return .ready(speakers: model.speakers.result(for: entry) != nil)
         case .none:
-            return nil
+            return .imported
         }
     }
+
+    /// How far its transcript has come, while it is the one being made.
+    func progress(of item: Item) -> Transcription.Progress? {
+        guard let stamp = item.stamp, model.transcription.current == stamp else { return nil }
+        return model.transcription.progress
+    }
+
+    /// The recording a copied file became.
+    func entry(of item: Item) -> RecordingEntry? { item.stamp.flatMap(model.importedEntry) }
 
     /// Shows a recording that came in, in the panel.
     func open(_ item: Item) {
@@ -149,10 +180,12 @@ final class Imports {
         model.showImported(stamp)
     }
 
-    /// Names the recording before it comes in; blank goes back to the file's name.
+    /// Names the recording, before, while or after it comes in; blank goes
+    /// back to the file's name.
     func rename(_ item: Item, to text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         set(item.url) { $0.title = trimmed.isEmpty || trimmed == item.name ? nil : trimmed }
+        if let stamp = item.stamp { model.renameImported(stamp, to: trimmed.isEmpty ? item.name : trimmed) }
     }
 
     func setVoices(_ voices: Int?, for item: Item) {
@@ -168,8 +201,17 @@ final class Imports {
     func start() {
         guard worker == nil else { return }
         stopping = false
+        earlier = Set(items.filter { $0.state == .copied || $0.state.isFailure }.map(\.id))
         worker = Task {
-            while !stopping, let item = items.first(where: { $0.state == .ready }), let candidate = item.candidate {
+            while !stopping {
+                // Files added meanwhile join this import, once read.
+                guard let item = items.first(where: { $0.state == .ready }), let candidate = item.candidate else {
+                    if reading {
+                        try? await Task.sleep(for: .milliseconds(100))
+                        continue
+                    }
+                    break
+                }
                 let url = item.url
                 set(url) { $0.state = .copying }
                 do {
@@ -184,6 +226,10 @@ final class Imports {
                         $0.state = .copied
                         $0.copied = 1
                         $0.stamp = stamp
+                    }
+                    // Renamed while it was copying.
+                    if let now = items.first(where: { $0.url == url }), now.title != item.title {
+                        model.renameImported(stamp, to: now.shownName)
                     }
                 } catch {
                     let reason = (error as? RecordingImport.Failure)?.description ?? error.localizedDescription
@@ -226,7 +272,7 @@ struct ImportView: View {
 
     @Bindable var imports: Imports
     let choose: () -> Void
-    @State private var targeted = false
+    private var targeted: Bool { imports.targeted }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -244,7 +290,7 @@ struct ImportView: View {
             imports.add(urls)
             return !urls.isEmpty
         } isTargeted: {
-            targeted = $0
+            imports.targeted = $0
         }
         .animation(.snappy(duration: 0.2), value: imports.items.map(\.id))
         .animation(.easeOut(duration: 0.15), value: targeted)
@@ -261,7 +307,6 @@ struct ImportView: View {
                     .padding(.bottom, 4)
                 Text("Drop recordings or folders here")
                     .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(targeted ? Color.accentColor : Color.primary)
                 LinkButton("Choose Files…", action: choose)
                     .hoverHelp("Audio files, videos, or folders of them")
             }
@@ -270,7 +315,6 @@ struct ImportView: View {
             .background(well)
         } else {
             AddMoreRow(targeted: targeted, action: choose)
-                .background(well.opacity(targeted ? 1 : 0))
         }
     }
 
@@ -287,19 +331,29 @@ struct ImportView: View {
     // MARK: List
 
     private var list: some View {
-        ScrollView {
-            LazyVStack(spacing: 0) {
-                ForEach(imports.items) { item in
-                    ImportRow(
-                        item: item, twin: twin(of: item), showVoices: imports.labeling,
-                        removable: !imports.importing && item.state != .copied,
-                        progress: imports.progress(of: item),
-                        remove: { imports.remove(item) }, setVoices: { imports.setVoices($0, for: item) },
-                        rename: { imports.rename(item, to: $0) },
-                        open: item.state == .copied ? { imports.open(item) } : nil)
+        ScrollViewReader { scroller in
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(imports.items) { item in
+                        ImportRow(
+                            item: item, twin: twin(of: item), showVoices: imports.labeling,
+                            removable: item.state != .copied && item.state != .copying,
+                            queued: imports.importing && item.state == .ready, stage: imports.stage(of: item),
+                            progress: imports.progress(of: item),
+                            entry: imports.entry(of: item), imports: imports
+                        )
+                        .id(item.id)
+                    }
                 }
             }
+            // Files added below the fold come into view.
+            .onChange(of: imports.items.count) { before, now in
+                guard now > before, let added = imports.items.last else { return }
+                withAnimation(.snappy(duration: 0.25)) { scroller.scrollTo(added.id, anchor: .bottom) }
+            }
         }
+        // Room for the rows' hover fill, which reaches 6 points past the text.
+        .padding(.horizontal, -6)
         .scrollIndicators(.automatic)
         .frame(height: min(CGFloat(imports.items.count), 5.5) * Self.rowHeight)
     }
@@ -357,8 +411,9 @@ struct ImportView: View {
     @ViewBuilder private var footer: some View {
         let count = imports.ready.count
         if imports.importing {
-            let done = imports.items.count { $0.state == .copied || $0.state.isFailure }
-            let total = done + imports.items.count { $0.state == .ready || $0.state == .copying }
+            let current = imports.items.filter { !imports.earlier.contains($0.id) }
+            let done = current.count { $0.state == .copied || $0.state.isFailure }
+            let total = done + current.count { $0.state == .ready || $0.state == .copying || $0.state == .reading }
             HStack(spacing: 12) {
                 ProgressView(value: Double(done), total: Double(max(total, 1)))
                 Text("Copying \(min(done + 1, total)) of \(total)")
@@ -409,10 +464,7 @@ private struct AddMoreRow: View {
             .font(.system(size: 12))
             .frame(height: 32)
             .padding(.horizontal, 6)
-            .background(
-                hovering && !targeted ? Style.fill : .clear,
-                in: .rect(cornerRadius: Style.corner, style: .continuous)
-            )
+            .background { background }
             .contentShape(.rect)
         }
         .buttonStyle(Pressable())
@@ -420,45 +472,56 @@ private struct AddMoreRow: View {
         .hoverHelp("Audio files, videos, or folders of them")
         .padding(.horizontal, -6)
     }
+
+    /// The hover fill, or while files are dragged over the window an accent
+    /// fill on the same frame, so nothing in the row moves.
+    @ViewBuilder private var background: some View {
+        let shape = RoundedRectangle(cornerRadius: Style.corner, style: .continuous)
+        if targeted {
+            shape.fill(Color.accentColor.opacity(0.08))
+        } else if hovering {
+            shape.fill(Style.fill)
+        }
+    }
 }
 
 /// One file: how it stands in the icon column (remove there on hover), its
-/// title and details, and its voice count.
+/// One file: what it is and how it stands. Before import its voice count;
+/// once in, what can be done with the recording, and a click opens it.
 private struct ImportRow: View {
     let item: Imports.Item
     let twin: String?
     let showVoices: Bool
     let removable: Bool
-    /// How the recording it became stands, once copied.
-    let progress: String?
-    let remove: () -> Void
-    let setVoices: (Int?) -> Void
-    let rename: (String) -> Void
-    /// Opens the recording it became, once copied.
-    let open: (() -> Void)?
+    /// Waiting its turn in an import under way.
+    let queued: Bool
+    let stage: Imports.Stage?
+    /// While its transcript is being made: how far, and the latest line.
+    let progress: Transcription.Progress?
+    let entry: RecordingEntry?
+    let imports: Imports
     @State private var hovering = false
+    @State private var copiedPath = false
+    @State private var copiedText = false
 
     var body: some View {
         HStack(spacing: 0) {
-            // Once copied, the file's side of the row opens its recording.
+            // Once in, the file's side of the row opens its recording.
             HStack(spacing: 0) {
                 leading
                 Spacer(minLength: 12)
             }
             .contentShape(.rect)
-            .onTapGesture { open?() }
-            .hoverHelp(ifAny: open == nil ? nil : "Open in TapeUp")
-            if showVoices, item.state == .ready || item.state == .copying || item.state == .copied {
-                VoiceCount(voices: item.voices, set: setVoices).disabled(item.state != .ready)
-            }
+            .onTapGesture { if item.state == .copied { imports.open(item) } }
+            .hoverHelp(ifAny: item.state == .copied ? "Open in TapeUp" : nil)
+            trailing
         }
         .frame(height: 44)
         .padding(.horizontal, 6)
         .background(
-            hovering && open != nil ? Style.fillHover : .clear,
+            hovering && item.state == .copied ? Style.fill : .clear,
             in: .rect(cornerRadius: Style.corner, style: .continuous)
         )
-        .padding(.horizontal, -6)
         .contentShape(.rect)
         .onHover { hovering = $0 }
     }
@@ -466,7 +529,7 @@ private struct ImportRow: View {
     @ViewBuilder private var leading: some View {
         Group {
             if hovering && removable {
-                IconButton(symbol: "xmark", help: "Leave this one out", size: 20, action: remove)
+                IconButton(symbol: "xmark", help: "Leave this one out", size: 20) { imports.remove(item) }
                     .padding(.leading, -3)
             } else {
                 mark
@@ -474,44 +537,107 @@ private struct ImportRow: View {
         }
         .frame(width: ImportView.iconColumn, height: 20, alignment: .leading)
         VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 4) {
-                NameField(
-                    name: item.shownName, editable: item.state == .ready, muted: item.state.muted,
-                    rename: rename)
-                if open != nil {
-                    Image(systemName: "arrow.up.forward")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .opacity(hovering ? 1 : 0)
-                }
-            }
+            NameField(
+                name: item.shownName, editable: [.ready, .copying, .copied].contains(item.state),
+                muted: item.state.muted, pencilOnly: item.state == .copied, rowHovering: hovering,
+                rename: { imports.rename(item, to: $0) })
             Text(status)
                 .font(.system(size: 11).monospacedDigit())
-                .foregroundStyle(item.state.muted ? .tertiary : .secondary)
+                .foregroundStyle(statusColor)
                 .lineLimit(1)
-                .truncationMode(.tail)
-                .contentTransition(.numericText())
+                // A quote keeps its newest words.
+                .truncationMode(progress?.line != nil && stage == .transcribing ? .head : .tail)
+                .contentTransition(item.state == .copying ? .numericText() : .opacity)
                 .animation(.snappy(duration: 0.2), value: status)
         }
     }
 
-    /// The file's kind, or how its copy stands.
-    @ViewBuilder private var mark: some View {
-        switch item.state {
-        case .copying:
-            ZStack {
-                Circle().stroke(Color.primary.opacity(0.12), lineWidth: 2)
-                Circle().trim(from: 0, to: max(item.copied, 0.04))
-                    .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 2, lineCap: .round))
-                    .rotationEffect(.degrees(-90))
+    /// Before import, the voice count; once in, the recording's own actions.
+    @ViewBuilder private var trailing: some View {
+        if item.state == .copied, let entry {
+            // One slot, as in Recent: how far at rest, the actions on hover,
+            // so nothing moves as the pointer passes.
+            ZStack(alignment: .trailing) {
+                if let progress {
+                    Text(progressText(progress))
+                        .font(.system(size: 11).monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .contentTransition(.numericText())
+                        .animation(.snappy(duration: 0.2), value: progress.fraction)
+                        .opacity(hovering ? 0 : 1)
+                }
+                actions(entry)
             }
-            .frame(width: 13, height: 13)
-            .padding(.leading, 1)
-            .animation(.linear(duration: 0.2), value: item.copied)
-        case .copied:
-            Image(systemName: "checkmark").font(.system(size: 12, weight: .semibold)).foregroundStyle(.green)
-        case .failed:
+            .animation(.easeOut(duration: 0.12), value: hovering)
+        } else if showVoices, item.state == .ready || item.state == .copying {
+            VoiceCount(voices: item.voices, set: { imports.setVoices($0, for: item) })
+                .disabled(item.state != .ready)
+                .transition(.opacity)
+        }
+    }
+
+    private func progressText(_ progress: Transcription.Progress) -> String {
+        let percent = "\(Int((progress.fraction * 100).rounded()))%"
+        guard progress.fraction < 1 else { return "Finishing…" }
+        return progress.remaining().map { percent + " · " + Format.left($0) } ?? percent
+    }
+
+    private func actions(_ entry: RecordingEntry) -> some View {
+        HStack(spacing: 2) {
+            IconButton(symbol: "arrow.up.forward.app", help: "Open in TapeUp", weight: .regular) {
+                imports.open(item)
+            }
+            IconButton(
+                symbol: copiedText ? "checkmark" : "doc.on.doc",
+                help: entry.transcript == .done ? (copiedText ? "Copied" : "Copy transcript") : "No transcript yet",
+                weight: .regular
+            ) {
+                imports.model.copyTranscript(entry)
+                flash($copiedText)
+            }
+            .disabled(entry.transcript != .done)
+            .opacity(entry.transcript == .done ? 1 : 0.35)
+            IconButton(
+                symbol: copiedPath ? "checkmark" : "link", help: copiedPath ? "Copied" : "Copy path",
+                weight: .regular
+            ) {
+                imports.model.copy(entry)
+                flash($copiedPath)
+            }
+            IconButton(symbol: "folder", help: "Show in Finder", weight: .regular) { imports.model.reveal(entry) }
+            IconButton(symbol: "trash", help: "Move to Trash", weight: .regular) { imports.remove(item) }
+                .padding(.leading, 8)
+        }
+        .padding(.trailing, -6)
+        .contentShape(.rect)
+        .onTapGesture { imports.open(item) }
+        .opacity(hovering || copiedText || copiedPath ? 1 : 0)
+    }
+
+    private func flash(_ flag: Binding<Bool>) {
+        flag.wrappedValue = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { flag.wrappedValue = false }
+    }
+
+    /// One mark per stage, so a check means everything asked for is done.
+    @ViewBuilder private var mark: some View {
+        switch (item.state, stage) {
+        case (.reading, _):
+            Spinner(tint: .secondary)
+        case (.copying, _):
+            ProgressRing(fraction: item.copied).padding(.leading, 1)
+        case (.ready, _) where queued:
+            Image(systemName: "clock").font(.system(size: 13)).foregroundStyle(.tertiary)
+        case (.copied, .transcribing) where progress != nil:
+            ProgressRing(fraction: progress?.fraction ?? 0).padding(.leading, 1)
+        case (.copied, .waitingToTranscribe):
+            Image(systemName: "clock").font(.system(size: 13)).foregroundStyle(.tertiary)
+        case (.copied, .transcribing), (.copied, .findingSpeakers):
+            Spinner(tint: .accentColor)
+        case (.copied, .transcriptFailed), (.failed, _):
             Image(systemName: "exclamationmark.circle.fill").font(.system(size: 13)).foregroundStyle(.orange)
+        case (.copied, _):
+            Image(systemName: "checkmark.circle.fill").font(.system(size: 13)).foregroundStyle(.secondary)
         default:
             Image(systemName: item.candidate?.isMovie == true ? "film" : "waveform")
                 .font(.system(size: 13, weight: .medium))
@@ -521,12 +647,27 @@ private struct ImportRow: View {
 
     private var status: String {
         switch item.state {
-        case .reading: "Reading…"
-        case .duplicate: twin.map { "Copy of “\($0)”" } ?? "Already in TapeUp"
-        case .unusable(let reason), .failed(let reason): reason
-        case .copied: progress ?? details
-        case .ready, .copying: details
+        case .reading: return "Reading…"
+        case .duplicate: return twin.map { "Copy of “\($0)”" } ?? "Already in TapeUp"
+        case .unusable(let reason), .failed(let reason): return reason
+        case .ready: return queued ? "Waiting to import · " + details : details
+        case .copying: return "Copying… \(Int((item.copied * 100).rounded()))%"
+        case .copied:
+            switch stage {
+            case .waitingToTranscribe: return "Waiting to transcribe"
+            case .transcribing: return progress?.line.map { "“\($0)”" } ?? "Transcribing…"
+            case .findingSpeakers: return "Finding speakers…"
+            case .transcriptFailed: return "Transcript failed"
+            case .ready(let speakers): return speakers ? "Transcript and speakers ready" : "Transcript ready"
+            case .imported, nil: return "Imported · " + details
+            }
         }
+    }
+
+    /// Grey text throughout: the mark carries the color, and only for a check
+    /// or a problem.
+    private var statusColor: Color {
+        item.state.muted ? Color.secondary.opacity(0.6) : .secondary
     }
 
     private var details: String {
@@ -539,12 +680,35 @@ private struct ImportRow: View {
     }
 }
 
-/// The recording's name, renamed in place before import: click it, type,
+/// An arc going round: work under way with no fraction to show.
+private struct Spinner: View {
+    let tint: Color
+    @State private var turning = false
+
+    var body: some View {
+        Circle()
+            .trim(from: 0, to: 0.7)
+            .stroke(tint, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+            .frame(width: 13, height: 13)
+            .rotationEffect(.degrees(turning ? 360 : 0))
+            .padding(.leading, 1)
+            .onAppear {
+                withAnimation(.linear(duration: 0.9).repeatForever(autoreverses: false)) { turning = true }
+            }
+            .accessibilityHidden(true)
+    }
+}
+
+/// The recording's name, renamed in place at any stage: click it, type,
 /// then Return or a click elsewhere keeps it and Escape puts it back.
 private struct NameField: View {
     let name: String
     let editable: Bool
     let muted: Bool
+    /// Once imported a click on the name opens the recording, like the rest
+    /// of the row; renaming is the pencil beside it, shown on row hover.
+    var pencilOnly = false
+    var rowHovering = false
     let rename: (String) -> Void
 
     @State private var editing = false
@@ -566,6 +730,17 @@ private struct NameField: View {
                     .padding(.horizontal, 5)
                     .frame(height: 20)
                     .background(Style.fill, in: .rect(cornerRadius: 5, style: .continuous))
+            } else if editable && pencilOnly {
+                HStack(spacing: 2) {
+                    Text(name)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .padding(.horizontal, 5)
+                    IconButton(symbol: "pencil", help: "Rename", size: 18, weight: .regular, action: begin)
+                        .opacity(rowHovering ? 1 : 0)
+                        .animation(.easeOut(duration: 0.12), value: rowHovering)
+                }
+                .frame(height: 20)
             } else if editable {
                 Button(action: begin) { label }
                     .buttonStyle(.plain)
@@ -590,7 +765,7 @@ private struct NameField: View {
         HStack(spacing: 5) {
             Text(name)
                 .lineLimit(1)
-                .truncationMode(.middle)
+                .truncationMode(.tail)
                 .foregroundStyle(muted ? .secondary : .primary)
             if editable {
                 Image(systemName: "pencil")
@@ -601,7 +776,7 @@ private struct NameField: View {
         }
         .padding(.horizontal, 5)
         .frame(height: 20)
-        .background(hovering ? Style.fillHover : .clear, in: .rect(cornerRadius: 5, style: .continuous))
+        .background(hovering ? Style.fill : .clear, in: .rect(cornerRadius: 5, style: .continuous))
         .contentShape(.rect)
     }
 

@@ -766,9 +766,22 @@ final class AppModel {
     /// transcript is transcribed next.
     func showImported(_ stamp: String) {
         guard let entry = importedEntry(stamp) else { return }
+        // The panel first: showing it closes a card left from before.
+        showPanel()
         open(entry)
         transcription.prioritize(entry)
-        showPanel()
+    }
+
+    /// Renames an imported recording from the import window; the open card
+    /// follows.
+    func renameImported(_ stamp: String, to title: String) {
+        guard let entry = importedEntry(stamp) else { return }
+        do {
+            try RecordingLibrary.save(title: title, in: entry.folder)
+            refreshCard(stamp)
+        } catch {
+            problem = "Could not save the title: \(error.localizedDescription)"
+        }
     }
 
     /// The recording an import made, wherever a title has moved it.

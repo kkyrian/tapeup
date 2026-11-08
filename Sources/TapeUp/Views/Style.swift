@@ -55,13 +55,14 @@ struct IconButton: View {
     var active = false
     /// On, shown by an accent glyph on a fill rather than a solid block.
     var tinted = false
+    var weight: Font.Weight = .semibold
     let action: () -> Void
     @State private var hovering = false
 
     var body: some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.system(size: size * 0.46, weight: .semibold))
+                .font(.system(size: size * 0.46, weight: weight))
                 .frame(width: size, height: size)
                 .foregroundStyle(active ? Color.white : tinted ? Color.accentColor : Color.secondary)
                 .background(
@@ -311,5 +312,23 @@ struct OneRowLayout: Layout {
             subview.place(at: CGPoint(x: x, y: bounds.midY - size.height / 2), proposal: ProposedViewSize(size))
             x += size.width + spacing
         }
+    }
+}
+
+/// Work with a known fraction done: an accent arc filling a faint ring.
+struct ProgressRing: View {
+    let fraction: Double
+    var size: CGFloat = 13
+
+    var body: some View {
+        ZStack {
+            Circle().stroke(Color.primary.opacity(0.12), lineWidth: 2)
+            Circle().trim(from: 0, to: max(fraction, 0.04))
+                .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+        }
+        .frame(width: size, height: size)
+        .animation(.linear(duration: 0.3), value: fraction)
+        .accessibilityLabel("\(Int((fraction * 100).rounded())) percent")
     }
 }

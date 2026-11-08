@@ -43,6 +43,26 @@ final class Transcription {
     private var processing = false
     /// The recording whose file is being transcribed now.
     private(set) var current: String?
+    /// How far the recording running now has come, once it has started.
+    private(set) var progress: Progress?
+
+    struct Progress: Equatable {
+        var fraction: Double
+        /// The latest line heard, for a glimpse of what is coming.
+        var line: String?
+        /// Where the estimate starts: after the model has loaded.
+        var first: (fraction: Double, at: Date)
+
+        static func == (a: Self, b: Self) -> Bool { a.fraction == b.fraction && a.line == b.line }
+
+        /// Seconds left at the pace so far, once there is a pace to go by.
+        func remaining(now: Date = .now) -> TimeInterval? {
+            let done = fraction - first.fraction
+            let elapsed = now.timeIntervalSince(first.at)
+            guard done > 0.02, elapsed > 2 else { return nil }
+            return elapsed / done * (1 - fraction)
+        }
+    }
     private var live: (stamp: String, feed: LiveFeed)?
     /// Live transcripts still finishing after their recording stopped.
     private var finishing = 0
@@ -299,6 +319,17 @@ final class Transcription {
         processQueue()
     }
 
+    private func advance(_ stamp: String, fraction: Double, line: String?) {
+        guard current == stamp else { return }
+        if var now = progress {
+            now.fraction = fraction
+            now.line = line ?? now.line
+            progress = now
+        } else {
+            progress = Progress(fraction: fraction, line: line, first: (fraction, .now))
+        }
+    }
+
     private func processQueue() {
         // Pictures and films show the queue; nothing downloads or runs.
         guard !staged, !processing, let index = queue.firstIndex(where: { enabled || explicit.contains($0) }) else {
@@ -321,7 +352,10 @@ final class Transcription {
                     throw error
                 }
                 guard let folder = library.folder(withStamp: stamp) else { throw CocoaError(.fileNoSuchFile) }
-                let outcome = try await FolderTranscriber.transcribe(folder: folder, engine: engine, names: names)
+                let outcome = try await FolderTranscriber.transcribe(folder: folder, engine: engine, names: names) {
+                    fraction, line in
+                    Task { @MainActor [weak self] in self?.advance(stamp, fraction: fraction, line: line) }
+                }
                 // Looked up again: the card may have renamed it meanwhile.
                 guard let folder = library.folder(withStamp: stamp) else { throw CocoaError(.fileNoSuchFile) }
                 try TranscriptDocument.save(
@@ -335,6 +369,7 @@ final class Transcription {
             working.remove(stamp)
             processing = false
             current = nil
+            progress = nil
             finished(stamp)
             processQueue()
             scheduleUnload()
@@ -351,6 +386,11 @@ final class Transcription {
 
     /// True while a recording is transcribing or will be on its own; one
     /// left waiting while transcripts are off offers Transcribe instead.
+    /// How far this recording's transcript has come, while it is being made.
+    func progress(of entry: RecordingEntry) -> Progress? {
+        current == RecordingLibrary.stamp(of: entry.folder) ? progress : nil
+    }
+
     func isWorking(on entry: RecordingEntry) -> Bool {
         let stamp = RecordingLibrary.stamp(of: entry.folder)
         if working.contains(stamp) { return enabled || explicit.contains(stamp) || !queue.contains(stamp) }

@@ -188,7 +188,11 @@ public final class TranscriptSession: @unchecked Sendable {
 
     /// Transcribes a finished recording, a slice at a time so a live
     /// recording sharing the queue is never held up for long.
-    public func transcribe(file: URL, headphones: Bool) async throws -> Outcome {
+    /// `progress` gets how far through the file it is, 0 to 1, and the
+    /// latest line heard, after each slice.
+    public func transcribe(
+        file: URL, headphones: Bool, progress: (@Sendable (Double, String?) -> Void)? = nil
+    ) async throws -> Outcome {
         let source = try AVAudioFile(forReading: file)
         guard Int(source.processingFormat.sampleRate) == TranscriptPipeline.fileRate,
             source.processingFormat.channelCount == 2,
@@ -203,6 +207,7 @@ public final class TranscriptSession: @unchecked Sendable {
                             return continuation.resume(returning: false)
                         }
                         pipeline.feed(left: left, right: right, headphones: headphones)
+                        progress?(reader.fraction, pipeline.lines.last?.text)
                         continuation.resume(returning: true)
                     } catch {
                         continuation.resume(throwing: error)
@@ -224,6 +229,8 @@ private final class FileSlices: @unchecked Sendable {
         self.source = source
         self.buffer = buffer
     }
+
+    var fraction: Double { source.length > 0 ? Double(source.framePosition) / Double(source.length) : 1 }
 
     func next() throws -> ([Float], [Float])? {
         guard source.framePosition < source.length else { return nil }
@@ -286,7 +293,8 @@ public enum FolderTranscriber {
     /// The lines heard, without saving them: the folder may be renamed while
     /// this runs, so the caller looks it up again to save.
     public static func transcribe(
-        folder: URL, engine: SpeechEngine, names: String?
+        folder: URL, engine: SpeechEngine, names: String?,
+        progress: (@Sendable (Double, String?) -> Void)? = nil
     ) async throws -> TranscriptSession.Outcome {
         guard let meta = MetaFile.read(folder) else { throw CocoaError(.fileNoSuchFile) }
         let sources = meta["sources"] as? [String] ?? ["microphone", "computer audio"]
@@ -294,7 +302,8 @@ public enum FolderTranscriber {
         try RecordingLibrary.markTranscript("transcribing", model: engine.model.name, in: folder)
         let session = try await engine.session(
             names: names, microphone: sources.contains("microphone"), computer: sources.contains("computer audio"))
-        return try await session.transcribe(file: audio, headphones: meta["output_headphones"] as? Bool == true)
+        return try await session.transcribe(
+            file: audio, headphones: meta["output_headphones"] as? Bool == true, progress: progress)
     }
 }
 
