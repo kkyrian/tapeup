@@ -75,7 +75,8 @@ public struct RecordingLibrary: Sendable {
     }
 
     /// A new folder in its year's folder, named for the minute it starts,
-    /// suffixed when that name is taken: `2026/2026-11-06-1430`.
+    /// suffixed when another folder already starts with that stamp, titled
+    /// or not: `2026/2026-11-06-1430`, then `2026/2026-11-06-1430-2`.
     public func newFolder(at date: Date = Date()) throws -> URL {
         try prepareRoot()
         let formatter = DateFormatter()
@@ -84,10 +85,14 @@ public struct RecordingLibrary: Sendable {
         let name = formatter.string(from: date)
         let year = root.appendingPathComponent(String(name.prefix(4)), isDirectory: true)
         try FileManager.default.createDirectory(at: year, withIntermediateDirectories: true)
+        // A titled folder holds its stamp under a longer name.
+        let taken = Set(((try? FileManager.default.contentsOfDirectory(atPath: year.path)) ?? []).map(Self.stamp(of:)))
         // Creating is the check: another recorder may take a name between a
         // look and a create.
         for suffix in 1...999 {
-            let folder = year.appendingPathComponent(suffix == 1 ? name : "\(name)-\(suffix)", isDirectory: true)
+            let stamp = suffix == 1 ? name : "\(name)-\(suffix)"
+            guard !taken.contains(stamp) else { continue }
+            let folder = year.appendingPathComponent(stamp, isDirectory: true)
             do {
                 try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
                 return folder
