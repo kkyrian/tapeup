@@ -74,66 +74,84 @@ enum Shots {
             }
         }
 
-        // What a recording leaves for the user to add: how many, who.
         model.root = full
         model.transcription.stage(download: .ready)
         model.stage(phase: .idle, microphone: devices.microphone, output: devices.output)
-        var named = latest
-        named.title = "Beta launch plan"
-        named.transcript = .done
-        named.people = .init(count: 4, names: ["Priya Shah", "José Ortiz", "Ana"])
-        model.card = .init(entry: named, finishing: false, justRecorded: true)
-        picture("context", scene: .panelOnly, status: .idle)
         model.card = nil
         model.openPeople()
         picture("people", scene: .panelOnly, status: .idle)
         model.closePeople()
 
-        // The animation, ten frames a second, light only.
-        var frame = 0
-        func shoot(_ count: Int, status: StatusLook, change: (Int) -> Void = { _ in }) {
-            for index in 0..<count {
-                change(index)
-                guard let panel = panelImage(model: model, dark: false) else { continue }
+        // The animation, ten frames a second, in each look: open the panel,
+        // record (cut from the first seconds to the last), stop, and copy.
+        // Points in the panel where the pointer clicks.
+        let record = CGPoint(x: 112, y: 152)
+        let copyPath = CGPoint(x: 74, y: 82)
+        let rest = CGPoint(x: 200, y: 300)
+        func along(_ from: CGPoint, _ to: CGPoint, _ t: Double) -> CGPoint {
+            let eased = 1 - pow(1 - min(max(t, 0), 1), 3)
+            return CGPoint(x: from.x + (to.x - from.x) * eased, y: from.y + (to.y - from.y) * eased)
+        }
+        model.root = past
+        model.card = nil
+        model.transcription.stage(download: .ready, live: true, latest: [said[0].1, said[1].1])
+        model.stage(
+            phase: .recording(started: Date()), elapsed: 0, microphone: devices.microphone, output: devices.output,
+            levels: lanes.levels)
+        let tallest = panelImage(model: model, dark: false)?.size.height ?? 480
+        let height = (26 + 8 + tallest + 30).rounded()
+        for dark in [false, true] {
+            var frame = 0
+            func shoot(_ status: StatusLook, cursor: CGPoint?, clicking: Bool = false) {
+                guard let panel = panelImage(model: model, dark: dark) else { return }
                 write(
-                    Scene(panel: panel, dark: false, status: status, kind: .animation),
-                    to: frames.appendingPathComponent(String(format: "%03d.png", frame)))
+                    Scene(
+                        panel: panel, dark: dark, status: status, kind: .animation, height: height, cursor: cursor,
+                        clicking: clicking),
+                    to: frames.appendingPathComponent(String(format: "%@-%03d.png", dark ? "dark" : "light", frame)))
                 frame += 1
             }
+            model.card = nil
+            model.root = past
+            model.transcription.stage(download: .ready)
+            model.stage(phase: .idle, microphone: devices.microphone, output: devices.output)
+            for index in 0..<14 {
+                shoot(.idle, cursor: along(rest, record, Double(index) / 9), clicking: index == 11 || index == 12)
+            }
+            let words = said.prefix(3).map(\.1).joined(separator: " ").split(separator: " ")
+            var shown = 0
+            for index in 0..<56 {
+                if index % 2 == 0, shown < words.count { shown += 1 }
+                let text = words.prefix(shown).joined(separator: " ")
+                // The first two seconds, then the last few of the call.
+                let elapsed = index < 20 ? Double(index) / 10 : 116 + Double(index - 20) / 10
+                let latest = index < 20 ? lastTwoSentences(text) : [said[12].1, said[13].1]
+                model.transcription.stage(download: .ready, live: true, latest: latest)
+                lanes.advance()
+                model.stage(
+                    phase: .recording(started: Date()), elapsed: elapsed, microphone: devices.microphone,
+                    output: devices.output, levels: lanes.levels)
+                let pointer =
+                    index < 46 ? along(record, rest, Double(index) / 8) : along(rest, record, Double(index - 46) / 6)
+                shoot(.recording(Format.duration(elapsed)), cursor: pointer, clicking: index >= 53)
+            }
+            model.transcription.stage(download: .ready)
+            model.root = full
+            model.stage(phase: .idle, microphone: devices.microphone, output: devices.output)
+            var saved = latest
+            saved.title = nil
+            saved.transcript = .pending
+            model.card = .init(entry: saved, finishing: true, justRecorded: true)
+            for index in 0..<5 { shoot(.idle, cursor: along(record, copyPath, Double(index) / 14)) }
+            model.card = .init(entry: saved, finishing: false, justRecorded: true)
+            for index in 5..<15 { shoot(.idle, cursor: along(record, copyPath, Double(index) / 14)) }
+            saved.transcript = .done
+            saved.title = "Beta launch plan"
+            model.card = .init(entry: saved, finishing: false, justRecorded: true)
+            for index in 0..<16 { shoot(.idle, cursor: copyPath, clicking: index >= 14) }
+            model.card = .init(entry: saved, finishing: false, copied: true, justRecorded: true)
+            for _ in 0..<24 { shoot(.idle, cursor: copyPath) }
         }
-        model.card = nil
-        model.root = past
-        model.stage(phase: .idle, microphone: devices.microphone, output: devices.output)
-        shoot(14, status: .idle)
-        let words = said.prefix(3).map(\.1).joined(separator: " ").split(separator: " ")
-        var shown = 0
-        for index in 0..<56 {
-            if index % 2 == 0, shown < words.count { shown += 1 }
-            let text = words.prefix(shown).joined(separator: " ")
-            let elapsed = Double(index) / 10
-            model.transcription.stage(download: .ready, live: true, latest: lastTwoSentences(text))
-            lanes.advance()
-            model.stage(
-                phase: .recording(started: Date()), elapsed: elapsed, microphone: devices.microphone,
-                output: devices.output, levels: lanes.levels)
-            shoot(1, status: .recording(Format.duration(elapsed)))
-        }
-        model.transcription.stage(download: .ready)
-        model.root = full
-        model.stage(phase: .idle, microphone: devices.microphone, output: devices.output)
-        var saved = latest
-        saved.title = nil
-        saved.transcript = .pending
-        model.card = .init(entry: saved, finishing: true, justRecorded: true)
-        shoot(5, status: .idle)
-        model.card = .init(entry: saved, finishing: false, justRecorded: true)
-        shoot(10, status: .idle)
-        saved.transcript = .done
-        saved.title = "Beta launch plan"
-        model.card = .init(entry: saved, finishing: false, justRecorded: true)
-        shoot(18, status: .idle)
-        model.card = .init(entry: saved, finishing: false, copied: true, justRecorded: true)
-        shoot(22, status: .idle)
 
         if let handoff = try? String(contentsOfFile: "scripts/shots/handoff.md", encoding: .utf8) {
             write(Terminal(text: handoff), to: outURL.appendingPathComponent("handoff.png"))
@@ -227,52 +245,69 @@ enum Shots {
     }
 
     enum SceneKind {
-        /// A desktop with the menu bar across it, for the top of the page.
-        case wide
-        /// The panel alone on a soft backdrop.
+        /// The panel alone, on a transparent ground.
         case panelOnly
-        /// Narrower than the hero, one height for every frame.
+        /// Under the menu bar on a desktop, one height for every frame.
         case animation
     }
 
     /// The panel where it lives: under its menu-bar item, on a desktop.
+    /// Alone, it sits on nothing, so the page around it shows through.
     private struct Scene: View {
         let panel: NSImage
         let dark: Bool
         let status: StatusLook
         let kind: SceneKind
+        var height: CGFloat = 0
+        /// Where the pointer is, in the panel's own points, and whether it clicks.
+        var cursor: CGPoint?
+        var clicking = false
 
-        private var width: CGFloat {
-            switch kind {
-            case .wide: 880
-            case .panelOnly: PanelView.width + 64
-            case .animation: PanelView.width + 64
-            }
-        }
-
-        private var height: CGFloat {
-            switch kind {
-            case .wide: 640
-            case .panelOnly: panel.size.height + 64
-            case .animation: 620
-            }
-        }
+        private var width: CGFloat { PanelView.width + (kind == .panelOnly ? 64 : 72) }
+        private var panelOrigin: CGPoint { CGPoint(x: width - PanelView.width - 30, y: 26 + 8) }
 
         var body: some View {
-            ZStack(alignment: .topLeading) {
-                Wallpaper(dark: dark)
+            Group {
                 if kind == .panelOnly {
-                    panelView.position(x: width / 2, y: height / 2)
+                    panelView.padding(32)
                 } else {
-                    MenuBar(dark: dark, status: status, wide: kind == .wide)
-                        .frame(width: width, height: 26)
-                    panelView
-                        .position(x: width - PanelView.width / 2 - 24, y: 26 + 8 + panel.size.height / 2)
+                    ZStack(alignment: .topLeading) {
+                        Palette.page(dark)
+                        ZStack(alignment: .topLeading) {
+                            Palette.desktop(dark)
+                            MenuBar(dark: dark, status: status, wide: false).frame(width: width, height: 26)
+                            panelView
+                                .position(
+                                    x: panelOrigin.x + panel.size.width / 2, y: panelOrigin.y + panel.size.height / 2)
+                            if let cursor {
+                                pointer.position(x: panelOrigin.x + cursor.x, y: panelOrigin.y + cursor.y)
+                            }
+                        }
+                        .clipShape(.rect(cornerRadius: 12, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .strokeBorder(Palette.hairline(dark), lineWidth: 0.5))
+                    }
+                    .frame(width: width, height: height)
                 }
             }
-            .frame(width: width, height: height)
-            .clipped()
             .environment(\.colorScheme, dark ? .dark : .light)
+        }
+
+        private var pointer: some View {
+            ZStack(alignment: .topLeading) {
+                if clicking {
+                    Circle()
+                        .fill(Color.black.opacity(dark ? 0.0 : 0.10))
+                        .overlay(Circle().strokeBorder(Color.white.opacity(dark ? 0.5 : 0.0), lineWidth: 1))
+                        .frame(width: 26, height: 26)
+                        .offset(x: -13, y: -13)
+                }
+                Arrow().fill(Color.black).overlay(Arrow().stroke(Color.white, lineWidth: 1.2))
+                    .frame(width: 13, height: 20)
+                    .shadow(color: .black.opacity(0.25), radius: 1.5, y: 1)
+            }
+            .frame(width: 1, height: 1, alignment: .topLeading)
         }
 
         private var panelView: some View {
@@ -284,32 +319,44 @@ enum Shots {
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
                         .strokeBorder(dark ? Color.white.opacity(0.14) : Color.black.opacity(0.08), lineWidth: 0.5)
                 )
-                .shadow(color: .black.opacity(dark ? 0.5 : 0.18), radius: 28, y: 14)
-                .shadow(color: .black.opacity(dark ? 0.3 : 0.08), radius: 3, y: 1)
+                .shadow(color: .black.opacity(dark ? 0.45 : 0.10), radius: 16, y: 8)
+                .shadow(color: .black.opacity(dark ? 0.3 : 0.06), radius: 2, y: 1)
         }
     }
 
-    private struct Wallpaper: View {
-        let dark: Bool
-        var body: some View {
-            ZStack {
-                LinearGradient(
-                    colors: dark
-                        ? [Color(red: 0.10, green: 0.11, blue: 0.20), Color(red: 0.20, green: 0.12, blue: 0.24)]
-                        : [Color(red: 0.86, green: 0.90, blue: 0.98), Color(red: 0.98, green: 0.90, blue: 0.88)],
-                    startPoint: .topLeading, endPoint: .bottomTrailing)
-                RadialGradient(
-                    colors: [
-                        (dark ? Color(red: 0.25, green: 0.30, blue: 0.60) : Color(red: 0.72, green: 0.82, blue: 1.0))
-                            .opacity(0.7), .clear,
-                    ], center: .init(x: 0.15, y: 0.85), startRadius: 0, endRadius: 520)
-                RadialGradient(
-                    colors: [
-                        (dark ? Color(red: 0.55, green: 0.25, blue: 0.35) : Color(red: 1.0, green: 0.80, blue: 0.70))
-                            .opacity(0.6), .clear,
-                    ], center: .init(x: 0.9, y: 0.2), startRadius: 0, endRadius: 480)
+    /// The system pointer's shape, tip at the top left.
+    private struct Arrow: Shape {
+        func path(in rect: CGRect) -> Path {
+            let w = rect.width / 13
+            let h = rect.height / 20
+            var path = Path()
+            let points: [(CGFloat, CGFloat)] = [
+                (0, 0), (0, 16.5), (4, 12.6), (6.8, 19), (9.3, 18), (6.6, 11.8), (12, 11.8),
+            ]
+            path.move(to: CGPoint(x: rect.minX + points[0].0 * w, y: rect.minY + points[0].1 * h))
+            for point in points.dropFirst() {
+                path.addLine(to: CGPoint(x: rect.minX + point.0 * w, y: rect.minY + point.1 * h))
             }
+            path.closeSubpath()
+            return path
         }
+    }
+
+    /// Flat surfaces only, from the product's own materials: the page
+    /// GitHub shows the picture on, and a quiet desktop under the menu bar.
+    enum Palette {
+        static func page(_ dark: Bool) -> Color {
+            dark ? Color(red: 0.051, green: 0.067, blue: 0.090) : .white
+        }
+        static func desktop(_ dark: Bool) -> Color {
+            dark ? Color(red: 0.145, green: 0.145, blue: 0.155) : Color(red: 0.925, green: 0.925, blue: 0.93)
+        }
+        static func menuBar(_ dark: Bool) -> Color {
+            dark ? Color(red: 0.10, green: 0.10, blue: 0.11) : Color(red: 0.975, green: 0.975, blue: 0.98)
+        }
+        static func hairline(_ dark: Bool) -> Color { dark ? Color.white.opacity(0.10) : Color.black.opacity(0.10) }
+        /// The app icon's graphite.
+        static let graphite = Color(red: 0.086, green: 0.086, blue: 0.094)
     }
 
     private struct MenuBar: View {
@@ -317,9 +364,18 @@ enum Shots {
         let status: StatusLook
         let wide: Bool
 
+        /// Two minutes after the sample call began, in this Mac's own format.
+        private var clock: String {
+            let formatter = DateFormatter()
+            formatter.setLocalizedDateFormatFromTemplate("EEE jmm")
+            let start = Calendar.current.date(bySettingHour: 14, minute: 2, second: 0, of: Date()) ?? Date()
+            return formatter.string(from: start)
+        }
+
         var body: some View {
             ZStack(alignment: .topLeading) {
-                Rectangle().fill(dark ? Color.black.opacity(0.35) : Color.white.opacity(0.5))
+                Rectangle().fill(Palette.menuBar(dark))
+                    .overlay(alignment: .bottom) { Rectangle().fill(Palette.hairline(dark)).frame(height: 0.5) }
                 if wide {
                     HStack(spacing: 18) {
                         Image(systemName: "apple.logo").font(.system(size: 14))
@@ -337,7 +393,7 @@ enum Shots {
                         Image(systemName: "magnifyingglass")
                         Image(systemName: "switch.2")
                     }
-                    Text("Thu 2:30 PM")
+                    Text(clock)
                 }
                 .padding(.trailing, 14)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
@@ -362,7 +418,7 @@ enum Shots {
             .frame(height: 22)
             .background(
                 RoundedRectangle(cornerRadius: 5, style: .continuous)
-                    .fill(dark ? Color.white.opacity(0.2) : Color.black.opacity(0.1)))
+                    .fill(dark ? Color.white.opacity(0.16) : Color.black.opacity(0.08)))
         }
     }
 
@@ -417,8 +473,8 @@ enum Shots {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5)
             )
+            .shadow(color: .black.opacity(0.18), radius: 16, y: 8)
             .padding(32)
-            .background(Wallpaper(dark: true))
             .environment(\.colorScheme, .dark)
         }
 
@@ -496,7 +552,7 @@ enum Shots {
 
         var body: some View {
             ZStack(alignment: .topLeading) {
-                Wallpaper(dark: true)
+                Palette.graphite
                 HStack(alignment: .center, spacing: 0) {
                     VStack(alignment: .leading, spacing: 22) {
                         HStack(spacing: 18) {
@@ -567,7 +623,6 @@ enum Shots {
             (-1, 30, 2710, "Design review", .init(count: 3, names: ["Priya Shah", "Mei"])),
             (-2, -120, 3305, "Weekly team sync", .init(count: 9)),
             (-3, 60, 1812, "Customer interview", .init(count: 2)),
-            (-6, 0, 2266, "1:1 with Priya", .init(count: 2, names: ["Priya Shah"])),
         ]
         var newest: URL?
         // The launch call's lines, and its length to match them.
