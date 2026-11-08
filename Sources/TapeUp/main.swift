@@ -6,6 +6,7 @@ import TapeUpCore
 //   TapeUp record --out <dir> [--seconds N]
 //   TapeUp permissions [--out <file>]
 //   TapeUp snapshot [--out <dir>]   renders every panel state to PNGs for design review
+//   TapeUp shots [--out <dir>] [--demo <dir>]   the README's pictures; --demo only makes the sample library
 //   TapeUp uitest [--out <dir>] [--record] [--agent claude|codex]   drives the real panel through
 //     every flow and checks it; --agent also calls that agent for real
 //   TapeUp time-transcribe <recording folder> [--model large|small] [--live]   timed run; --live
@@ -22,6 +23,12 @@ app.setActivationPolicy(.accessory)
 switch command {
 case "snapshot":
     MainActor.assumeIsolated { Snapshot.run(out: Launcher.value(after: "--out", in: arguments) ?? "tmp/snapshots") }
+case "shots":
+    MainActor.assumeIsolated {
+        Shots.run(
+            out: Launcher.value(after: "--out", in: arguments) ?? "tmp/shots",
+            demo: Launcher.value(after: "--demo", in: arguments))
+    }
 case "uitest":
     MainActor.assumeIsolated {
         UITest.run(
