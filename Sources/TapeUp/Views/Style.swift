@@ -56,23 +56,30 @@ struct IconButton: View {
     /// On, shown by an accent glyph on a fill rather than a solid block.
     var tinted = false
     var weight: Font.Weight = .semibold
+    /// On, shown calmly: the primary glyph on a fill.
+    var quiet = false
     let action: () -> Void
     @State private var hovering = false
+    @Environment(\.isEnabled) private var enabled
 
     var body: some View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: size * 0.46, weight: weight))
                 .frame(width: size, height: size)
-                .foregroundStyle(active ? Color.white : tinted ? Color.accentColor : Color.secondary)
+                .foregroundStyle(
+                    active ? Color.white : tinted ? Color.accentColor : quiet ? Color.primary : Color.secondary
+                )
                 .background(
                     active
-                        ? Color.accentColor : tinted || hovering ? (hovering ? Style.fillHover : Style.fill) : .clear,
+                        ? Color.accentColor
+                        : tinted || quiet || hovering ? (hovering ? Style.fillHover : Style.fill) : .clear,
                     in: .rect(cornerRadius: size * 0.28, style: .continuous)
                 )
                 .contentShape(.rect)
         }
         .buttonStyle(Pressable())
+        .opacity(enabled ? 1 : 0.35)
         .onHover { hovering = $0 }
         .hoverHelp(help)
         .accessibilityLabel(help)

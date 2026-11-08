@@ -111,7 +111,7 @@ private struct VoiceRow: View {
                         symbol: playing ? "stop.fill" : "play.fill",
                         help: model.phase != .idle
                             ? "Play once the recording stops" : playing ? "Stop" : "Play this voice",
-                        size: 22, tinted: playing
+                        size: 22, quiet: playing
                     ) {
                         player.toggle(voice.id, in: entry, result: result)
                     }

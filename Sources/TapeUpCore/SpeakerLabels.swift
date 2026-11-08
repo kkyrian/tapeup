@@ -130,6 +130,12 @@ public struct Voice: Sendable, Equatable, Identifiable, Codable {
     public var id: Int
     public var seconds: Double
     public var quote: String
+
+    public init(id: Int, seconds: Double, quote: String) {
+        self.id = id
+        self.seconds = seconds
+        self.quote = quote
+    }
 }
 
 /// Puts voices on transcript lines that already exist and writes the

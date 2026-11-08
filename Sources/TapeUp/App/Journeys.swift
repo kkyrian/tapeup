@@ -316,14 +316,63 @@ struct Journey {
             await take.move(to: take.importButton, 0.8)
             await take.click(imports.start)
             while imports.importing { await take.pause(0.1) }
-            await take.pause(1.2)
-            await take.move(to: take.importButton, 0.3)
+            await take.move(to: CGPoint(x: 610, y: 560), 0.6)
+            await transcribe(imports, in: take)
+            await take.pause(1.6)
+            await take.move(to: take.importButton, 0.6)
             await take.click(imports.close)
             await take.pause(0.4)
             await take.openPanel()
             await take.move(to: CGPoint(x: 360, y: 560), 0.8)
             await take.pause(2.4)
         })
+
+    /// The film's transcripts, one file at a time as the app makes them: the
+    /// ring fills, the quote follows the lines spoken, the estimate counts
+    /// down, speakers are found, and the check comes. The first is shown at
+    /// length; the rest go quicker.
+    @MainActor
+    private static func transcribe(_ imports: Imports, in take: Take) async {
+        let model = take.model
+        for (index, item) in imports.items.filter({ $0.state == .copied }).enumerated() {
+            guard let stamp = item.stamp else { continue }
+            let spoken = ImportGallery.spoken.first { $0.name == item.url.lastPathComponent }?.lines.map(\.text) ?? []
+            let (seconds, pace): (Double, Double) = index == 0 ? (3.4, 100) : (1.0, 20)
+            let steps = Int(seconds / 0.2)
+            for step in 1...steps {
+                let fraction = Double(step) / Double(steps)
+                let heard = spoken.isEmpty ? nil : spoken[min(Int(fraction * Double(spoken.count)), spoken.count - 1)]
+                // As if this much had taken `pace` seconds a file.
+                let first = (0.0, Date.now.addingTimeInterval(-fraction * pace))
+                withAnimation(.easeOut(duration: 0.2)) {
+                    model.transcription.stage(
+                        current: stamp, progress: .init(fraction: fraction * 0.98, line: heard, first: first))
+                }
+                await take.pause(0.2)
+            }
+            guard let folder = model.importedEntry(stamp)?.folder else { continue }
+            let lines = spoken.enumerated().map {
+                TranscriptLine(start: Double($0.offset) * 4, end: Double($0.offset) * 4 + 3.5, text: $0.element)
+            }
+            try? TranscriptDocument.save(
+                lines: lines, failures: 0, pieces: lines.count, model: model.transcription.model, in: folder)
+            withAnimation(.easeOut(duration: 0.2)) {
+                model.transcription.stage(current: nil, progress: nil)
+                model.speakers.stage(stamp, work: .listening)
+                model.reload()
+            }
+            await take.pause(index == 0 ? 0.8 : 0.4)
+            let voices = Set(
+                ImportGallery.spoken.first { $0.name == item.url.lastPathComponent }?.lines.map(\.voice) ?? [])
+            let result = SpeakerResult(
+                count: voices.count, estimated: true,
+                voices: (1...max(voices.count, 1)).map { Voice(id: $0, seconds: 4, quote: spoken.first ?? "") },
+                assigned: lines.map { _ in 1 })
+            try? SpeakerLabels.save(result, lines: lines, in: folder)
+            withAnimation(.easeOut(duration: 0.2)) { model.speakers.stage(stamp, work: nil) }
+            await take.pause(0.25)
+        }
+    }
 
     /// Not for the README: holds each page for a second and prints when,
     /// so `Spot` can be measured from the movie.

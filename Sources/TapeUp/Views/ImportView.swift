@@ -596,7 +596,6 @@ private struct ImportRow: View {
                 flash($copiedText)
             }
             .disabled(entry.transcript != .done)
-            .opacity(entry.transcript == .done ? 1 : 0.35)
             IconButton(
                 symbol: copiedPath ? "checkmark" : "link", help: copiedPath ? "Copied" : "Copy path",
                 weight: .regular

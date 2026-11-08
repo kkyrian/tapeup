@@ -409,6 +409,12 @@ final class Transcription {
         self.latest = latest.enumerated().map { TranscriptLine(start: Double($0.offset), end: 0, text: $0.element) }
     }
 
+    /// Films: shows `stamp` being transcribed this far, or nothing.
+    func stage(current stamp: String?, progress: Progress?) {
+        current = stamp
+        self.progress = progress
+    }
+
     // MARK: - What the panel says
 
     /// The Transcript row's second line.

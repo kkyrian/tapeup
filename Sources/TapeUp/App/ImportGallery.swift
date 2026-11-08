@@ -90,14 +90,10 @@ enum ImportGallery {
         exit(0)
     }
 
-    /// Made-up recordings: conversations read by the Mac's own voices,
-    /// dated so they land among the sample library's recordings, plus one
-    /// copy of the same file.
-    static func makeFiles(in folder: URL, long: Bool = false) -> [URL] {
-        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let now = Date()
+    /// The made-up recordings: file name, when, and each line with its voice.
+    static var spoken: [(name: String, offset: TimeInterval, lines: [(voice: String, text: String)])] {
         let (one, two, three) = ("Samantha", "Daniel", "Flo (English (US))")
-        let specs: [(String, TimeInterval, [(String, String)])] = [
+        return [
             (
                 "Interview with Mei.wav", -3 * 3600,
                 [
@@ -129,6 +125,15 @@ enum ImportGallery {
                 ]
             ),
         ]
+    }
+
+    /// Made-up recordings: conversations read by the Mac's own voices,
+    /// dated so they land among the sample library's recordings, plus one
+    /// copy of the same file.
+    static func makeFiles(in folder: URL, long: Bool = false) -> [URL] {
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let now = Date()
+        let specs = spoken
         var urls: [URL] = []
         for (index, (name, offset, spoken)) in specs.enumerated() {
             // A longer first interview, so its transcript is seen part done.

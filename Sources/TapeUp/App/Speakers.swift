@@ -46,6 +46,12 @@ final class Speakers {
 
     func work(on entry: RecordingEntry) -> Work? { work[RecordingLibrary.stamp(of: entry.folder)] }
 
+    /// Films: shows work on a recording, or none, and redraws results.
+    func stage(_ stamp: String, work now: Work?) {
+        work[stamp] = now
+        version += 1
+    }
+
     /// True when labels exist or are being made, so a new count should relabel.
     func started(_ entry: RecordingEntry) -> Bool {
         let stamp = RecordingLibrary.stamp(of: entry.folder)
