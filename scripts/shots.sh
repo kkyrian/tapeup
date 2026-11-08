@@ -30,7 +30,8 @@ for movie in tmp/film/*.mov; do
   [ "$base" = "$name-dark" ] && gif="$images/$name-dark.gif"
   # The terminal journey is wide; it shows at full width, a little smaller.
   width=$([ "$name" = handoff ] && echo 1388 || echo 840)
-  ffmpeg -loglevel error -y -i "$movie" -vf \
+  # The first moments are the window settling; the journey starts after.
+  ffmpeg -loglevel error -y -ss 0.3 -i "$movie" -vf \
     "fps=25,scale=$width:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=160:stats_mode=diff[p];[b][p]paletteuse=dither=none:diff_mode=rectangle" \
     -loop 0 "$gif"
 done

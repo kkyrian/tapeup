@@ -38,7 +38,7 @@ struct Journey {
         name: "record", size: CGSize(width: 420, height: 470),
         setUp: { $0.hideNewest() },
         script: { take in
-            await take.pause(0.5)
+            await take.pause(0.15)
             await take.openPanel()
             await take.pause(0.6)
             await take.move(toPanel: Spot.record, 0.6)
@@ -68,7 +68,7 @@ struct Journey {
             take.startRecording(from: 1912) { _ in [said[12], said[13]] }
         },
         script: { take in
-            await take.pause(0.6)
+            await take.pause(0.15)
             await take.openPanel()
             await take.pause(0.6)
             await take.move(toPanel: Spot.record, 0.6)
@@ -110,7 +110,7 @@ struct Journey {
             let answer = (Shots.handoff ?? "").components(separatedBy: "\n")
             // The pasted lines, as Copy path writes them with this Mac's home.
             let pasted = answer.prefix(3).map { $0.dropFirst(2).description }.joined(separator: "\n")
-            await take.pause(0.5)
+            await take.pause(0.15)
             await take.openPanel()
             await take.pause(0.5)
             await take.move(toPanel: Spot.firstRow, 0.6)
@@ -160,7 +160,7 @@ struct Journey {
 
     /// ··· → People…, then add someone.
     static let people = Journey(name: "people", size: CGSize(width: 420, height: 480)) { take in
-        await take.pause(0.5)
+        await take.pause(0.15)
         await take.openPanel()
         await take.pause(0.5)
         await take.pickFromMore("People…") { take.model.openPeople() }
@@ -179,7 +179,7 @@ struct Journey {
 
     /// ··· → Settings…, then turn on Claude Code.
     static let settings = Journey(name: "settings", size: CGSize(width: 420, height: 480)) { take in
-        await take.pause(0.5)
+        await take.pause(0.15)
         await take.openPanel()
         await take.pause(0.5)
         await take.pickFromMore("Settings…") { take.model.openSettings() }
@@ -201,7 +201,7 @@ struct Journey {
             take.model.reload()
         },
         script: { take in
-            await take.pause(0.5)
+            await take.pause(0.15)
             await take.openPanel()
             await take.pause(0.5)
             await take.move(toPanel: Spot.firstRow, 0.6)

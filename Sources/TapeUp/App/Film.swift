@@ -151,7 +151,7 @@ private final class Recording: NSObject, SCRecordingOutputDelegate {
 /// a drawn menu and a terminal.
 @MainActor @Observable
 final class Director {
-    var cursor = CGPoint(x: 330, y: 300)
+    var cursor = CGPoint(x: 330, y: 220)
     var pressing = false
     var itemPressed = false
     var panelOpen = false
@@ -252,7 +252,7 @@ final class Take {
 
     /// Clicks the menu-bar item: it darkens, and the panel opens.
     func openPanel() async {
-        await move(to: item, 0.8)
+        await move(to: item, 0.65)
         withAnimation(.easeOut(duration: 0.06)) {
             director.pressing = true
             director.itemPressed = true
