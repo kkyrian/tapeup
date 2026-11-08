@@ -728,10 +728,9 @@ final class AppModel {
     private func transcriptFinished(_ stamp: String) {
         refreshCard(stamp)
         if let folder = library.folder(withStamp: stamp), let entry = RecordingLibrary.entry(at: folder) {
-            // The user's agent only for the recording on the card, or one
-            // imported with "Transcribe and add titles", which asked for it.
+            // The user's agent only for the recording on the card.
             let atCard = card.map { RecordingLibrary.stamp(of: $0.entry.folder) == stamp } ?? false
-            titles.suggest(for: entry, agent: atCard || RecordingImport.isImported(folder))
+            titles.suggest(for: entry, agent: atCard)
             if entry.transcript == .done, RecordingImport.wantsSpeakerLabels(folder), !speakers.started(entry) {
                 // Names for the voices come from the user, after import.
                 speakers.label(entry, count: entry.people.count, askAgent: false)
@@ -744,10 +743,6 @@ final class AppModel {
     /// Opens the import window, with any files dropped on the menu-bar icon.
     var openImport: ([URL]) -> Void = { _ in }
 
-    /// Who titles imported recordings: the agent from Settings, else Apple
-    /// Intelligence; nil when neither can, and files keep their names.
-    var titleWriter: String? { agents.chosen?.name ?? (Titles.available ? "Apple Intelligence" : nil) }
-
     var importLibrary: RecordingLibrary { library }
 
     /// Copies one file in and starts its transcript when asked; returns the
@@ -758,8 +753,7 @@ final class AppModel {
         progress: @escaping @Sendable (Double) -> Void = { _ in }
     ) async throws -> String {
         let plan = RecordingImport.Plan(
-            transcribe: transcribe, labelSpeakers: labelSpeakers, titleFromName: titleWriter == nil,
-            people: .init(count: voices))
+            transcribe: transcribe, labelSpeakers: labelSpeakers, people: .init(count: voices))
         let folder = try await RecordingImport.copy(candidate, into: library, plan: plan, progress: progress)
         reload()
         if transcribe, let entry = RecordingLibrary.entry(at: folder) { transcription.make(entry) }

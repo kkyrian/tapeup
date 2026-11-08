@@ -51,10 +51,6 @@ struct RecordingImportTests {
         #expect(folder.lastPathComponent.hasSuffix(" Team call"))
         #expect(reported.values.last == 1)
         #expect(reported.values == reported.values.sorted())
-        let peaks = await RecordingImport.peaks(of: source, duration: candidate.duration, count: 40)
-        #expect(peaks.count == 40)
-        #expect(peaks.max() == 1)
-        #expect(peaks.min() ?? 0 > 0.9)
         let audio = try energy(folder.appendingPathComponent("audio.m4a"))
         #expect(audio.rate == 48_000)
         #expect(audio.channels == 2)
@@ -75,22 +71,37 @@ struct RecordingImportTests {
         #expect(try RecordingImport.fingerprint(of: source) == before)
     }
 
-    @Test func transcribingLeavesTheTitleToComeAndMarksItWaiting() async throws {
+    @Test func transcribingKeepsTheFileNameAndMarksItWaiting() async throws {
         defer { try? FileManager.default.removeItem(at: base) }
         let library = RecordingLibrary(root: base.appendingPathComponent("TapeUp"))
         let candidate = try await RecordingImport.inspect(try tone("memo.m4a.wav", seconds: 1))
         let folder = try await RecordingImport.copy(
             candidate, into: library, plan: .init(transcribe: true, labelSpeakers: true, people: .init(count: 3)))
         let entry = try #require(RecordingLibrary.entry(at: folder))
-        #expect(entry.title == nil)
+        #expect(entry.title == "memo.m4a")
         #expect(entry.transcript == .pending)
         #expect(entry.people == .init(count: 3))
         #expect(RecordingImport.wantsSpeakerLabels(folder))
-        // With nothing to write titles, the file's name is the title.
-        let named = try await RecordingImport.copy(
-            candidate, into: library, plan: .init(transcribe: true, titleFromName: true))
-        #expect(RecordingLibrary.entry(at: named)?.title == "memo.m4a")
-        #expect(!RecordingImport.wantsSpeakerLabels(named))
+    }
+
+    @Test func twoFilesOfTheSameNameAndMinuteGetTheirOwnFolders() async throws {
+        defer { try? FileManager.default.removeItem(at: base) }
+        let library = RecordingLibrary(root: base.appendingPathComponent("TapeUp"))
+        let made = Date(timeIntervalSince1970: 1_700_000_000)
+        var folders: [URL] = []
+        for (index, path) in ["a/Team call.wav", "b/Team call.wav"].enumerated() {
+            let source = try tone(path, seconds: 0.3 + Double(index) * 0.2)
+            try FileManager.default.setAttributes(
+                [.creationDate: made, .modificationDate: made], ofItemAtPath: source.path)
+            let candidate = try await RecordingImport.inspect(source)
+            folders.append(try await RecordingImport.copy(candidate, into: library, plan: .init(transcribe: false)))
+        }
+        let names = folders.map(\.lastPathComponent)
+        let stamps = folders.map { RecordingLibrary.stamp(of: $0) }
+        #expect(Set(stamps).count == 2)
+        #expect(names[1] == stamps[0] + "-2 Team call")
+        #expect(folders.map { RecordingLibrary.entry(at: $0)?.title } == ["Team call", "Team call"])
+        #expect(library.folder(withStamp: stamps[1]) == folders[1])
     }
 
     @Test func startsWhenTheFileWasMade() async throws {

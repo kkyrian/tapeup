@@ -90,51 +90,6 @@ public enum RecordingImport {
             fingerprint: fingerprint, isMovie: !video.isEmpty)
     }
 
-    /// The file's loudness in `count` slices, 0 to 1, for drawing its
-    /// waveform: read at a low rate, so a long file takes a moment, not a copy.
-    public static func peaks(of url: URL, duration: Double, count: Int = 96) async -> [Float] {
-        let rate = 8_000.0
-        guard duration > 0, count > 0 else { return [] }
-        let asset = AVURLAsset(url: url)
-        guard let tracks = try? await asset.loadTracks(withMediaType: .audio), !tracks.isEmpty,
-            let reader = try? AVAssetReader(asset: asset)
-        else { return [] }
-        let output = AVAssetReaderAudioMixOutput(
-            audioTracks: tracks,
-            audioSettings: [
-                AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: rate, AVNumberOfChannelsKey: 1,
-                AVLinearPCMBitDepthKey: 32, AVLinearPCMIsFloatKey: true, AVLinearPCMIsNonInterleaved: false,
-                AVLinearPCMIsBigEndianKey: false,
-            ])
-        guard reader.canAdd(output) else { return [] }
-        reader.add(output)
-        return await Task.detached(priority: .utility) {
-            guard reader.startReading() else { return [Float]() }
-            let perSlice = max(1, Int(duration * rate) / count)
-            var slices = [Float](repeating: 0, count: count)
-            var frame = 0
-            while let buffer = output.copyNextSampleBuffer(), let block = CMSampleBufferGetDataBuffer(buffer) {
-                var length = 0
-                var pointer: UnsafeMutablePointer<CChar>?
-                guard
-                    CMBlockBufferGetDataPointer(
-                        block, atOffset: 0, lengthAtOffsetOut: nil, totalLengthOut: &length,
-                        dataPointerOut: &pointer) == noErr, let pointer
-                else { continue }
-                pointer.withMemoryRebound(to: Float.self, capacity: length / 4) { samples in
-                    for index in 0..<(length / 4) {
-                        let slice = min(count - 1, frame / perSlice)
-                        slices[slice] = max(slices[slice], abs(samples[index]))
-                        frame += 1
-                    }
-                }
-            }
-            // Relative to the loudest moment, with quiet speech still visible.
-            let loudest = slices.max() ?? 0
-            return loudest > 0 ? slices.map { ($0 / loudest).squareRoot() } : slices
-        }.value
-    }
-
     static func fingerprint(of url: URL) throws -> String {
         let handle = try FileHandle(forReadingFrom: url)
         defer { try? handle.close() }
@@ -158,18 +113,14 @@ public enum RecordingImport {
         /// Label speakers once the transcript is done; kept in `meta.json`
         /// so a quit before then does not lose it.
         public var labelSpeakers: Bool
-        /// Name the recording after the file, when nothing will title it.
-        public var titleFromName: Bool
         /// Saved as who was there: the voice count, when one was picked.
         public var people: RecordingEntry.People
 
         public init(
-            transcribe: Bool, labelSpeakers: Bool = false, titleFromName: Bool = false,
-            people: RecordingEntry.People = .init()
+            transcribe: Bool, labelSpeakers: Bool = false, people: RecordingEntry.People = .init()
         ) {
             self.transcribe = transcribe
             self.labelSpeakers = labelSpeakers && transcribe
-            self.titleFromName = titleFromName
             self.people = people
         }
     }
@@ -205,7 +156,9 @@ public enum RecordingImport {
             if !plan.people.isEmpty { try RecordingLibrary.save(people: plan.people, in: folder) }
             if plan.transcribe { try RecordingLibrary.markTranscript("waiting", in: folder) }
             let name = (candidate.name as NSString).deletingPathExtension
-            if plan.titleFromName || !plan.transcribe, !name.isEmpty {
+            // The file's own name is the title; the folder's date and time
+            // keep two of the same name apart.
+            if !name.isEmpty {
                 return try RecordingLibrary.save(title: name, in: folder)
             }
             return folder
