@@ -10,6 +10,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotKey: HotKey?
     private var commands: NSObjectProtocol?
     private var floating: FloatingControls!
+    private var importWindow: ImportWindow!
+    private var statusDrop: StatusItemDrop?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         EditMenu.install()
@@ -22,6 +24,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         button.setAccessibilityLabel("TapeUp")
         panel = PanelController(model: model, anchor: button)
         floating = FloatingControls(model: model) { [weak self] in self?.stopShowingCard() }
+        importWindow = ImportWindow(model: model)
+        model.openImport = { [weak self] urls in
+            self?.panel.close()
+            self?.importWindow.show(adding: urls)
+        }
+        statusDrop = StatusItemDrop(button: button) { [weak self] urls in self?.model.openImport(urls) }
         hotKey = HotKey.record { [weak self] in self?.shortcutPressed() }
         commands = CommandLink.listen(model)
         if hotKey == nil { model.shortcutLabel = nil }
@@ -75,6 +83,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         func item(_ title: String, _ action: @escaping @MainActor () -> Void) -> NSMenuItem {
             ClosureMenuItem(title: title, action: action)
         }
+        menu.addItem(item("Import…") { [weak self] in self?.model.openImport([]) })
         menu.addItem(
             item("People…") { [weak self] in
                 self?.model.openPeople()

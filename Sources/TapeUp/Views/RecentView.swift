@@ -151,12 +151,13 @@ struct RecentRow: View {
     }
 }
 
-/// Where to go: People and Settings, also on right-click of the menu-bar icon.
+/// Where to go: Import, People and Settings, also on right-click of the menu-bar icon.
 struct MoreMenu: View {
     @Bindable var model: AppModel
 
     var body: some View {
         MoreButton(help: "TapeUp", badge: model.agents.needsAttention) {
+            Button("Import…") { model.openImport([]) }
             Button("People…", action: model.openPeople)
             Button(model.agents.settingsTitle, action: model.openSettings)
             Divider()

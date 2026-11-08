@@ -1,3 +1,4 @@
+import AVFoundation
 import AppKit
 import SwiftUI
 import TapeUpCore
@@ -86,6 +87,9 @@ enum UITest {
                 try? pill.run()
                 pill.waitUntilExit()
             }
+            roundedOnScreen(
+                window, file: outURL.appendingPathComponent(String(format: "%02d-%@-shadow.png", step, name)),
+                expect: expect)
             let shot = Process()
             shot.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
             shot.arguments = [
@@ -135,7 +139,10 @@ enum UITest {
                 charactersIgnoringModifiers: "v", isARepeat: false, keyCode: 9)
             expect(NSApp.mainMenu?.performKeyEquivalent(with: paste!) == true, "⌘V reaches the text field")
             settle(0.2)
-            expect(field.stringValue == "Priya Shah", "a pasted name lands in Add a person (\(field.stringValue))")
+            let locked = NSApp.keyWindow == nil ? ": no window has the keyboard; is the screen locked?" : ""
+            expect(
+                field.stringValue == "Priya Shah", "a pasted name lands in Add a person (\(field.stringValue))\(locked)"
+            )
             field.stringValue = ""
             panel.window.makeFirstResponder(nil)
             board.clearContents()
@@ -433,6 +440,8 @@ enum UITest {
         check("undone")
         expect(model.recent.contains { $0.folder == victim.folder }, "undo put it back")
 
+        importRecordings(model: model, base: base, out: outURL, expect: expect, settle: settle)
+
         panel.close()
         settle(0.3)
         panel.show()
@@ -567,6 +576,109 @@ enum UITest {
         try? FileManager.default.removeItem(at: base)
         print(failures.isEmpty ? "PASS \(step) steps" : "FAILED\n" + failures.joined(separator: "\n"))
         exit(failures.isEmpty ? 0 : 1)
+    }
+
+    /// With its shadow, as it sits on screen: the panel's corners must be
+    /// round, not a square of window behind them (a shadow taken from the
+    /// window's rectangle showed white corners).
+    private static func roundedOnScreen(_ window: NSWindow, file: URL, expect: (Bool, String) -> Void) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+        process.arguments = ["-x", "-l\(window.windowNumber)", file.path]
+        try? process.run()
+        process.waitUntilExit()
+        guard let data = try? Data(contentsOf: file), let image = NSBitmapImageRep(data: data) else {
+            return expect(false, "the panel can be captured with its shadow")
+        }
+        // The opaque body's bounds. Just inside its corner, outside the
+        // rounding, the shadow must fall as it does along an edge; a shadow
+        // cut from the window's rectangle leaves that spot see-through.
+        func alpha(_ x: Int, _ y: Int) -> CGFloat { image.colorAt(x: x, y: y)?.alphaComponent ?? 0 }
+        let middleX = image.pixelsWide / 2
+        let middleY = image.pixelsHigh / 2
+        let rows = (0..<image.pixelsHigh).filter { alpha(middleX, $0) > 0.99 }
+        let columns = (0..<image.pixelsWide).filter { alpha($0, middleY) > 0.99 }
+        guard let top = rows.first, let left = columns.first, left > 2 else {
+            return expect(false, "the panel body is found in its shadow capture")
+        }
+        let edge = alpha(left - 2, middleY)
+        let corner = alpha(left + 2, top + 2)
+        expect(
+            corner > edge / 10,
+            String(format: "the shadow is round at the corners (corner %.2f, edge %.2f)", corner, edge))
+    }
+
+    /// Import: a mono phone memo, the same file again, and a text file are
+    /// dropped; only the memo comes in, as 48 kHz stereo named after itself,
+    /// and dropping it once more marks it already in TapeUp.
+    private static func importRecordings(
+        model: AppModel, base: URL, out: URL, expect: (Bool, String) -> Void, settle: (Double) -> Void
+    ) {
+        let files = base.appendingPathComponent("to-import")
+        try? FileManager.default.createDirectory(at: files, withIntermediateDirectories: true)
+        let memo = files.appendingPathComponent("Interview with Mei.wav")
+        if let format = AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 1),
+            let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 44_100 * 3),
+            let file = try? AVAudioFile(forWriting: memo, settings: format.settings)
+        {
+            buffer.frameLength = 44_100 * 3
+            for index in 0..<Int(buffer.frameLength) {
+                buffer.floatChannelData?[0][index] = 0.3 * sin(Float(index) * 2 * .pi * 330 / 44_100)
+            }
+            try? file.write(from: buffer)
+        }
+        let twin = files.appendingPathComponent("Interview with Mei copy.wav")
+        try? FileManager.default.copyItem(at: memo, to: twin)
+        try? "notes".write(to: files.appendingPathComponent("notes.txt"), atomically: true, encoding: .utf8)
+
+        let window = ImportWindow(model: model)
+        let imports = window.imports
+        func shot(_ name: String) {
+            settle(0.6)
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+            process.arguments = ["-x", "-o", "-l\(window.window.windowNumber)", out.appendingPathComponent(name).path]
+            try? process.run()
+            process.waitUntilExit()
+        }
+        func waitWhile(_ busy: () -> Bool) {
+            let deadline = Date().addingTimeInterval(20)
+            while busy() && Date() < deadline { settle(0.1) }
+        }
+        window.show()
+        shot("import-empty.png")
+        window.show(adding: [files])
+        waitWhile { imports.items.count < 2 || imports.reading }
+        expect(imports.items.count == 2, "a dropped folder lists its two audio files, not the text file")
+        expect(imports.ready.count == 1, "the copy of the same file is marked a duplicate")
+        expect(imports.items.last?.state == .duplicate, "the second, identical file is the duplicate")
+        shot("import-list.png")
+        imports.transcribe = false
+        shot("import-no-transcript.png")
+        imports.start()
+        waitWhile { imports.importing }
+        expect(imports.copiedCount == 1, "one recording imported")
+        // Of two identical files, the first listed comes in.
+        let entry = model.allEntries.first { $0.title?.hasPrefix("Interview with Mei") == true }
+        expect(entry != nil, "it is in the list, named after the file")
+        if let entry, let audio = try? AVAudioFile(forReading: entry.audio) {
+            expect(
+                audio.fileFormat.sampleRate == 48_000 && audio.fileFormat.channelCount == 2,
+                "its audio is 48 kHz stereo (\(audio.fileFormat.sampleRate), \(audio.fileFormat.channelCount))")
+        } else {
+            expect(false, "its audio can be read")
+        }
+        expect(FileManager.default.fileExists(atPath: memo.path), "the original is left where it was")
+        shot("import-done.png")
+        window.window.close()
+        window.show(adding: [memo])
+        waitWhile { imports.items.isEmpty || imports.reading }
+        expect(imports.items.first?.state == .duplicate, "importing it again is marked already in TapeUp")
+        shot("import-again.png")
+        window.window.close()
+        // Gone again, without going through the user's Trash.
+        if let entry { try? FileManager.default.removeItem(at: entry.folder) }
+        model.reload()
     }
 
     /// The panel content's own height, measured apart from the window.

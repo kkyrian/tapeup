@@ -36,6 +36,8 @@ case "film":
             out: Launcher.value(after: "--out", in: arguments) ?? "tmp/film",
             only: (Launcher.value(after: "--only", in: arguments) ?? "").split(separator: ",").map(String.init))
     }
+case "import-gallery":
+    MainActor.assumeIsolated { ImportGallery.run(out: Launcher.value(after: "--out", in: arguments) ?? "tmp/import") }
 case "uitest":
     MainActor.assumeIsolated {
         UITest.run(

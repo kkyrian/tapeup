@@ -728,10 +728,47 @@ final class AppModel {
     private func transcriptFinished(_ stamp: String) {
         refreshCard(stamp)
         if let folder = library.folder(withStamp: stamp), let entry = RecordingLibrary.entry(at: folder) {
-            // The user's agent only for the recording on the card.
+            // The user's agent only for the recording on the card, or one
+            // imported with "Transcribe and add titles", which asked for it.
             let atCard = card.map { RecordingLibrary.stamp(of: $0.entry.folder) == stamp } ?? false
-            titles.suggest(for: entry, agent: atCard)
+            titles.suggest(for: entry, agent: atCard || RecordingImport.isImported(folder))
+            if entry.transcript == .done, RecordingImport.wantsSpeakerLabels(folder), !speakers.started(entry) {
+                // Names for the voices come from the user, after import.
+                speakers.label(entry, count: entry.people.count, askAgent: false)
+            }
         }
+    }
+
+    // MARK: - Import
+
+    /// Opens the import window, with any files dropped on the menu-bar icon.
+    var openImport: ([URL]) -> Void = { _ in }
+
+    /// Who titles imported recordings: the agent from Settings, else Apple
+    /// Intelligence; nil when neither can, and files keep their names.
+    var titleWriter: String? { agents.chosen?.name ?? (Titles.available ? "Apple Intelligence" : nil) }
+
+    var importLibrary: RecordingLibrary { library }
+
+    /// Copies one file in and starts its transcript when asked; returns the
+    /// new recording's stamp, which finds it after a rename.
+    @discardableResult
+    func importRecording(
+        _ candidate: RecordingImport.Candidate, transcribe: Bool, labelSpeakers: Bool, voices: Int?,
+        progress: @escaping @Sendable (Double) -> Void = { _ in }
+    ) async throws -> String {
+        let plan = RecordingImport.Plan(
+            transcribe: transcribe, labelSpeakers: labelSpeakers, titleFromName: titleWriter == nil,
+            people: .init(count: voices))
+        let folder = try await RecordingImport.copy(candidate, into: library, plan: plan, progress: progress)
+        reload()
+        if transcribe, let entry = RecordingLibrary.entry(at: folder) { transcription.make(entry) }
+        return RecordingLibrary.stamp(of: folder)
+    }
+
+    /// The recording an import made, wherever a title has moved it.
+    func importedEntry(_ stamp: String) -> RecordingEntry? {
+        allEntries.first { RecordingLibrary.stamp(of: $0.folder) == stamp }
     }
 
     /// Reads a recording again after work on it finished: the list, and the card if it is open.
