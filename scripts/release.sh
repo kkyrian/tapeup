@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Makes a TapeUp release on this Mac; GitHub only serves the files.
 #
-# Usage: scripts/release.sh [--dry-run] <version>      e.g. 0.1.0
+# Usage: scripts/release.sh [--dry-run | --draft | --publish] <version>   e.g. 0.1.0
 #
 # 1. Refuses a dirty tree, a version not above VERSION, or failing
 #    `make verify-fast`.
@@ -17,6 +17,11 @@
 # 6. If the tap is cloned ($TAP_DIR, default ~/Developer/homebrew-tap),
 #    writes Casks/tapeup.rb there from packaging/homebrew/tapeup.rb, commits
 #    and pushes.
+#
+# --draft does steps 1 to 5 with the release as a GitHub draft, which no one
+# else sees, so it works while the repository is still private; the tap waits.
+# --publish <version> later makes that draft the latest release, once the
+# repository is public, checks the downloads, and does step 6.
 #
 # --dry-run does all of it except that it signs ad hoc, and commits, tags,
 # pushes and publishes nothing: VERSION and the appcast are put back, and the
@@ -37,21 +42,101 @@ sparkle_bin=".build/artifacts/sparkle/Sparkle/bin"
 feed="https://github.com/$repo/releases/latest/download/appcast.xml"
 
 dry_run=0
+draft=0
+publish=0
 version=""
 for arg in "$@"; do
   case "$arg" in
     --dry-run) dry_run=1 ;;
+    --draft) draft=1 ;;
+    --publish) publish=1 ;;
     -*) echo "unknown option $arg" >&2; exit 2 ;;
     *) version="$arg" ;;
   esac
 done
 if [[ ! "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
-  echo "usage: scripts/release.sh [--dry-run] <version>   (semantic, like 0.1.0)" >&2
+  echo "usage: scripts/release.sh [--dry-run | --draft | --publish] <version>   (semantic, like 0.1.0)" >&2
   exit 2
 fi
+((dry_run + draft + publish <= 1)) || { echo "choose one of --dry-run, --draft and --publish" >&2; exit 2; }
 tag="v$version"
+if ((draft)); then release_kind="--draft"; else release_kind="--latest"; fi
 step() { printf '\n==> %s\n' "$*"; }
 fail() { echo "error: $*" >&2; exit 1; }
+
+# What people and Sparkle download: the stable links must answer.
+check_downloads() {
+  for file in TapeUp.dmg appcast.xml; do
+    curl -fsIL -o /dev/null "https://github.com/$repo/releases/latest/download/$file" \
+      || echo "warning: https://github.com/$repo/releases/latest/download/$file does not answer yet." >&2
+  done
+}
+
+# Writes the cask for $dmg into the tap, or into a copy of it on a dry run.
+update_tap() {
+  local dmg="$1"
+  if [[ ! -d "$tap/.git" ]]; then
+    echo "No tap at $tap; the cask is not updated."
+    return
+  fi
+  local sha target
+  sha="$(shasum -a 256 "$dmg" | awk '{print $1}')"
+  if ((dry_run)); then
+    target="$out/homebrew-tap"
+    git clone -q "$tap" "$target"
+    step "Dry run: writing the cask into a copy of the tap, $target"
+  else
+    step "Updating the Homebrew tap, $tap"
+    [[ -z "$(git -C "$tap" status --porcelain)" ]] || fail "the tap has changes; the release is out, but the cask is not updated."
+    git -C "$tap" pull -q --ff-only
+    target="$tap"
+  fi
+  mkdir -p "$target/Casks"
+  # The template's opening comment is about the template; the cask starts at "cask".
+  sed -e '1,/^cask /{/^#/d;}' -e "s/^  version \".*\"$/  version \"$version\"/" -e "s/^  sha256 \".*\"$/  sha256 \"$sha\"/" \
+    "$cask_template" >"$target/Casks/tapeup.rb"
+  ruby -c "$target/Casks/tapeup.rb" >/dev/null
+  grep -q "version \"$version\"" "$target/Casks/tapeup.rb" && grep -q "sha256 \"$sha\"" "$target/Casks/tapeup.rb" \
+    || fail "the cask template did not take the version and sha256."
+  if ((dry_run)); then
+    git -C "$target" status --short
+    cat "$target/Casks/tapeup.rb"
+  else
+    git -C "$tap" add Casks/tapeup.rb
+    git -C "$tap" commit -q -m "chore(tapeup): $version"
+    git -C "$tap" push -q
+  fi
+}
+
+require_public() {
+  # Release files on a private repository need a sign-in to download.
+  [[ "$(gh repo view "$repo" --json visibility -q .visibility 2>/dev/null)" == PUBLIC ]] \
+    || fail "$repo is not public, so no one could download the release or its updates."
+}
+
+# --- Publishing a draft --------------------------------------------------------
+
+if ((publish)); then
+  step "Publishing the draft $tag"
+  gh auth status >/dev/null 2>&1 || fail "gh is not signed in (gh auth login)."
+  require_public
+  [[ "$(gh release view "$tag" --repo "$repo" --json isDraft -q .isDraft 2>/dev/null)" == true ]] \
+    || fail "there is no draft release $tag; make one with --draft first."
+  out="tmp/release/$version"
+  dmg="$out/TapeUp.dmg"
+  [[ -f "$dmg" ]] || fail "$dmg is missing; the cask needs the image the draft holds."
+  uploaded="$(mktemp -d)"
+  gh release download "$tag" --repo "$repo" --pattern TapeUp.dmg --dir "$uploaded"
+  [[ "$(shasum -a 256 <"$dmg")" == "$(shasum -a 256 <"$uploaded/TapeUp.dmg")" ]] \
+    || fail "$dmg is not the image in the draft."
+  rm -rf "$uploaded"
+  gh release edit "$tag" --repo "$repo" --draft=false --latest
+  check_downloads
+  update_tap "$dmg"
+  step "Done: TapeUp $version is out"
+  echo "Release: https://github.com/$repo/releases/tag/$tag"
+  exit 0
+fi
 
 # --- Checks before anything changes ------------------------------------------
 
@@ -72,9 +157,8 @@ else
   done
   gh auth status >/dev/null 2>&1 || fail "gh is not signed in (gh auth login)."
   [[ "$(git branch --show-current)" == main ]] || fail "releases are made from main."
-  # Release files on a private repository need a sign-in to download.
-  [[ "$(gh repo view "$repo" --json visibility -q .visibility 2>/dev/null)" == PUBLIC ]] \
-    || fail "$repo is not public, so no one could download the release or its updates."
+  # A draft is seen by no one else, so it may be made while private.
+  ((draft)) || require_public
   git fetch -q origin main
   [[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/main)" ]] \
     || fail "main is not the same as origin/main; pull or push first."
@@ -118,7 +202,7 @@ restore() {
   local status=$?
   if ((committed && !published && status != 0)); then
     echo "The release commit and tag $tag are made here. To finish: git push origin main $tag," >&2
-    echo "then gh release create $tag $dmg $out/appcast.xml --repo $repo --title \"TapeUp $version\" --notes-file $out/notes.md --verify-tag --latest" >&2
+    echo "then gh release create $tag $dmg $out/appcast.xml --repo $repo --title \"TapeUp $version\" --notes-file $out/notes.md --verify-tag $release_kind" >&2
   fi
   if ((!committed)); then
     cp "$saved/VERSION" VERSION
@@ -249,51 +333,23 @@ else
   committed=1
   git tag -a "$tag" -m "TapeUp $version"
   git push -q origin main "$tag"
-  step "Publishing the GitHub release"
+  if ((draft)); then step "Uploading the draft release"; else step "Publishing the GitHub release"; fi
   gh release create "$tag" "$dmg" "$out/appcast.xml" --repo "$repo" --title "TapeUp $version" \
-    --notes-file "$out/notes.md" --verify-tag --latest
+    --notes-file "$out/notes.md" --verify-tag $release_kind
   published=1
-  # What people and Sparkle download: the stable links must answer now.
-  for file in TapeUp.dmg appcast.xml; do
-    curl -fsIL -o /dev/null "https://github.com/$repo/releases/latest/download/$file" \
-      || echo "warning: https://github.com/$repo/releases/latest/download/$file does not answer yet." >&2
-  done
+  ((draft)) || check_downloads
 fi
 
 # --- Homebrew --------------------------------------------------------------
 
-if [[ -d "$tap/.git" ]]; then
-  sha="$(shasum -a 256 "$dmg" | awk '{print $1}')"
-  if ((dry_run)); then
-    copy="$out/homebrew-tap"
-    git clone -q "$tap" "$copy"
-    step "Dry run: writing the cask into a copy of the tap, $copy"
-    target="$copy"
-  else
-    step "Updating the Homebrew tap, $tap"
-    [[ -z "$(git -C "$tap" status --porcelain)" ]] || fail "the tap has changes; the release is out, but the cask is not updated."
-    git -C "$tap" pull -q --ff-only
-    target="$tap"
-  fi
-  mkdir -p "$target/Casks"
-  # The template's opening comment is about the template; the cask starts at "cask".
-  sed -e '1,/^cask /{/^#/d;}' -e "s/^  version \".*\"$/  version \"$version\"/" -e "s/^  sha256 \".*\"$/  sha256 \"$sha\"/" \
-    "$cask_template" >"$target/Casks/tapeup.rb"
-  ruby -c "$target/Casks/tapeup.rb" >/dev/null
-  grep -q "version \"$version\"" "$target/Casks/tapeup.rb" && grep -q "sha256 \"$sha\"" "$target/Casks/tapeup.rb" \
-    || fail "the cask template did not take the version and sha256."
-  if ((dry_run)); then
-    git -C "$target" status --short
-    cat "$target/Casks/tapeup.rb"
-  else
-    git -C "$tap" add Casks/tapeup.rb
-    git -C "$tap" commit -q -m "chore(tapeup): $version"
-    git -C "$tap" push -q
-  fi
+if ((draft)); then
+  echo "The tap waits for the draft to be published: scripts/release.sh --publish $version"
 else
-  echo "No tap at $tap; the cask is not updated."
+  update_tap "$dmg"
 fi
 
 step "Done: TapeUp $version"
 echo "Image: $dmg"
 ((dry_run)) || echo "Release: https://github.com/$repo/releases/tag/$tag"
+((draft)) && echo "A draft: only you see it. After the repository is public: scripts/release.sh --publish $version"
+true
