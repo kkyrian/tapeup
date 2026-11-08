@@ -115,10 +115,14 @@ public enum RecordingImport {
         public var labelSpeakers: Bool
         /// Saved as who was there: the voice count, when one was picked.
         public var people: RecordingEntry.People
+        /// The recording's name; the file's name when nil or blank.
+        public var title: String?
 
         public init(
-            transcribe: Bool, labelSpeakers: Bool = false, people: RecordingEntry.People = .init()
+            transcribe: Bool, labelSpeakers: Bool = false, people: RecordingEntry.People = .init(),
+            title: String? = nil
         ) {
+            self.title = title
             self.transcribe = transcribe
             self.labelSpeakers = labelSpeakers && transcribe
             self.people = people
@@ -155,8 +159,9 @@ public enum RecordingImport {
             try data.write(to: MetaFile.url(in: folder), options: .atomic)
             if !plan.people.isEmpty { try RecordingLibrary.save(people: plan.people, in: folder) }
             if plan.transcribe { try RecordingLibrary.markTranscript("waiting", in: folder) }
-            let name = (candidate.name as NSString).deletingPathExtension
-            // The file's own name is the title; the folder's date and time
+            let given = plan.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let name = given.isEmpty ? (candidate.name as NSString).deletingPathExtension : given
+            // The name given, else the file's own; the folder's date and time
             // keep two of the same name apart.
             if !name.isEmpty {
                 return try RecordingLibrary.save(title: name, in: folder)

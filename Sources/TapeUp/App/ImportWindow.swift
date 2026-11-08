@@ -45,6 +45,9 @@ final class ImportWindow: NSObject, NSWindowDelegate {
         imports.add(urls)
         NSApp.activate()
         window.makeKeyAndOrderFront(nil)
+        // Nothing starts focused: AppKit would ring Choose Files… on open.
+        window.makeFirstResponder(nil)
+        DispatchQueue.main.async { [window] in window.makeFirstResponder(nil) }
     }
 
     /// Choose Files…, as a sheet on this window.

@@ -28,8 +28,12 @@ final class Imports {
         var voices: Int?
         /// The recording it became.
         var stamp: String?
+        /// A name typed for the recording, in place of the file's.
+        var title: String?
 
         var name: String { (url.lastPathComponent as NSString).deletingPathExtension }
+        /// What the recording will be called.
+        var shownName: String { title ?? name }
     }
 
     let model: AppModel
@@ -122,6 +126,12 @@ final class Imports {
         }
     }
 
+    /// Names the recording before it comes in; blank goes back to the file's name.
+    func rename(_ item: Item, to text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        set(item.url) { $0.title = trimmed.isEmpty || trimmed == item.name ? nil : trimmed }
+    }
+
     func setVoices(_ voices: Int?, for item: Item) {
         set(item.url) { $0.voices = voices }
         // Once copied, the count is the recording's own.
@@ -142,7 +152,7 @@ final class Imports {
                 do {
                     let stamp = try await model.importRecording(
                         candidate, transcribe: transcribe, labelSpeakers: labeling,
-                        voices: labeling ? item.voices : nil
+                        voices: labeling ? item.voices : nil, title: item.title
                     ) { fraction in
                         Task { @MainActor in self.set(url) { $0.copied = max($0.copied, fraction) } }
                     }
@@ -260,7 +270,8 @@ struct ImportView: View {
                     ImportRow(
                         item: item, twin: twin(of: item), showVoices: imports.labeling,
                         removable: !imports.importing && item.state != .copied,
-                        remove: { imports.remove(item) }, setVoices: { imports.setVoices($0, for: item) })
+                        remove: { imports.remove(item) }, setVoices: { imports.setVoices($0, for: item) },
+                        rename: { imports.rename(item, to: $0) })
                 }
             }
         }
@@ -386,6 +397,7 @@ private struct ImportRow: View {
     let removable: Bool
     let remove: () -> Void
     let setVoices: (Int?) -> Void
+    let rename: (String) -> Void
     @State private var hovering = false
 
     var body: some View {
@@ -400,11 +412,8 @@ private struct ImportRow: View {
             }
             .frame(width: ImportView.iconColumn, height: 20, alignment: .leading)
             VStack(alignment: .leading, spacing: 2) {
-                Text(item.name)
-                    .font(.system(size: 13))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .foregroundStyle(item.state.muted ? .secondary : .primary)
+                NameField(
+                    name: item.shownName, editable: item.state == .ready, muted: item.state.muted, rename: rename)
                 Text(status)
                     .font(.system(size: 11).monospacedDigit())
                     .foregroundStyle(item.state.muted ? .tertiary : .secondary)
@@ -461,6 +470,103 @@ private struct ImportRow: View {
             ByteCountFormatter.string(fromByteCount: candidate.bytes, countStyle: .file),
         ]
         .joined(separator: " · ")
+    }
+}
+
+/// The recording's name, renamed in place before import: click it, type,
+/// then Return or a click elsewhere keeps it and Escape puts it back.
+private struct NameField: View {
+    let name: String
+    let editable: Bool
+    let muted: Bool
+    let rename: (String) -> Void
+
+    @State private var editing = false
+    @State private var text = ""
+    @State private var hovering = false
+    @State private var frame = CGRect.zero
+    @State private var clickMonitor: Any?
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        ZStack(alignment: .leading) {
+            if editing {
+                TextField("Name", text: $text)
+                    .textFieldStyle(.plain)
+                    .focused($focused)
+                    .onSubmit(commit)
+                    .onExitCommand(perform: finish)
+                    .onChange(of: focused) { _, now in if !now { commit() } }
+                    .padding(.horizontal, 5)
+                    .frame(height: 20)
+                    .background(Style.fill, in: .rect(cornerRadius: 5, style: .continuous))
+            } else if editable {
+                Button(action: begin) { label }
+                    .buttonStyle(.plain)
+                    .hoverHelp("Rename")
+                    .accessibilityLabel("\(name), rename")
+                    .onHover { hovering = $0 }
+            } else {
+                label
+            }
+        }
+        .font(.system(size: 13))
+        .padding(.leading, -5)
+        .onGeometryChange(for: CGRect.self) {
+            $0.frame(in: .global)
+        } action: {
+            frame = $0
+        }
+        .onDisappear(perform: commit)
+    }
+
+    private var label: some View {
+        HStack(spacing: 5) {
+            Text(name)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .foregroundStyle(muted ? .secondary : .primary)
+            if editable {
+                Image(systemName: "pencil")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .opacity(hovering ? 1 : 0)
+            }
+        }
+        .padding(.horizontal, 5)
+        .frame(height: 20)
+        .background(hovering ? Style.fillHover : .clear, in: .rect(cornerRadius: 5, style: .continuous))
+        .contentShape(.rect)
+    }
+
+    private func begin() {
+        text = name
+        editing = true
+        DispatchQueue.main.async { focused = true }
+        // A click on the window's background takes no focus, so a click
+        // outside the field ends the rename here.
+        clickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { event in
+            MainActor.assumeIsolated {
+                if let height = event.window?.contentView?.bounds.height {
+                    let point = CGPoint(x: event.locationInWindow.x, y: height - event.locationInWindow.y)
+                    if !frame.contains(point) { commit() }
+                }
+            }
+            return event
+        }
+    }
+
+    private func commit() {
+        guard editing else { return }
+        finish()
+        if text != name { rename(text) }
+    }
+
+    private func finish() {
+        editing = false
+        hovering = false
+        if let clickMonitor { NSEvent.removeMonitor(clickMonitor) }
+        clickMonitor = nil
     }
 }
 

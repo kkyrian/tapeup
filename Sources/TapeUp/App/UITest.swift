@@ -647,11 +647,18 @@ enum UITest {
         }
         window.show()
         shot("import-empty.png")
+        expect(
+            window.window.firstResponder === window.window,
+            "nothing is focused when the window opens (\(String(describing: window.window.firstResponder)))")
         window.show(adding: [files])
         waitWhile { imports.items.count < 2 || imports.reading }
         expect(imports.items.count == 2, "a dropped folder lists its two audio files, not the text file")
         expect(imports.ready.count == 1, "the copy of the same file is marked a duplicate")
         expect(imports.items.last?.state == .duplicate, "the second, identical file is the duplicate")
+        if let first = imports.items.first {
+            imports.rename(first, to: "  Mei, first interview ")
+            expect(imports.items.first?.shownName == "Mei, first interview", "a file is renamed before import")
+        }
         shot("import-list.png")
         imports.transcribe = false
         shot("import-no-transcript.png")
@@ -659,8 +666,11 @@ enum UITest {
         waitWhile { imports.importing }
         expect(imports.copiedCount == 1, "one recording imported")
         // Of two identical files, the first listed comes in.
-        let entry = model.allEntries.first { $0.title?.hasPrefix("Interview with Mei") == true }
-        expect(entry != nil, "it is in the list, named after the file")
+        let entry = model.allEntries.first { $0.title == "Mei, first interview" }
+        expect(entry != nil, "it is in the list, with the name given")
+        expect(
+            entry?.folder.lastPathComponent.hasSuffix(" Mei, first interview") == true,
+            "its folder carries the name")
         if let entry, let audio = try? AVAudioFile(forReading: entry.audio) {
             expect(
                 audio.fileFormat.sampleRate == 48_000 && audio.fileFormat.channelCount == 2,

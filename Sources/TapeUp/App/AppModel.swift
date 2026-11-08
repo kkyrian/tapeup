@@ -750,10 +750,10 @@ final class AppModel {
     @discardableResult
     func importRecording(
         _ candidate: RecordingImport.Candidate, transcribe: Bool, labelSpeakers: Bool, voices: Int?,
-        progress: @escaping @Sendable (Double) -> Void = { _ in }
+        title: String? = nil, progress: @escaping @Sendable (Double) -> Void = { _ in }
     ) async throws -> String {
         let plan = RecordingImport.Plan(
-            transcribe: transcribe, labelSpeakers: labelSpeakers, people: .init(count: voices))
+            transcribe: transcribe, labelSpeakers: labelSpeakers, people: .init(count: voices), title: title)
         let folder = try await RecordingImport.copy(candidate, into: library, plan: plan, progress: progress)
         reload()
         if transcribe, let entry = RecordingLibrary.entry(at: folder) { transcription.make(entry) }
