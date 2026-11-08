@@ -154,8 +154,9 @@ enum CoreAudioSystem {
     static let tapNamePrefix = "TapeUp-"
 
     /// Removes aggregate devices and taps that a TapeUp process which is no
-    /// longer running left behind. Public taps and aggregates outlive a
-    /// crashed process, and a leftover one shows up in other apps' device menus.
+    /// longer running left behind. Earlier builds made them public, and a
+    /// public one outlives a crashed process and shows up in other apps'
+    /// device menus; the private ones made now vanish with the process.
     static func removeLeftovers() -> Int {
         func ownerIsGone(_ suffix: Substring) -> Bool {
             guard let pid = Int32(suffix.prefix { $0.isNumber }) else { return true }

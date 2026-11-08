@@ -5,9 +5,11 @@ import Foundation
 /// Captures everything the Mac plays through a global Core Audio process tap,
 /// read through an aggregate device that contains only the tap.
 ///
-/// The tap and aggregate are public because private ones never run on
-/// macOS 27 (see the device-switching prototype discussion). Their names
-/// carry this process's ID so leftovers from a crash can be told apart.
+/// The tap and aggregate are private to this process, so no other app lists
+/// or can choose them, and they vanish with the process. The aggregate does
+/// not use tap auto-start: a private aggregate with it waits for a tapped app
+/// to play before it runs, so a silent Mac would deliver nothing and the
+/// recorder would take the capture for broken.
 final class SystemAudioCapture: @unchecked Sendable {
     private(set) var tapID = AudioObjectID(kAudioObjectUnknown)
     private(set) var aggregateID = AudioObjectID(kAudioObjectUnknown)
@@ -22,16 +24,16 @@ final class SystemAudioCapture: @unchecked Sendable {
         let description = CATapDescription(stereoGlobalTapButExcludeProcesses: [])
         description.uuid = UUID()
         description.name = "\(CoreAudioSystem.tapNamePrefix)\(pid)"
-        description.isPrivate = false
+        description.isPrivate = true
         description.muteBehavior = .unmuted
         try check("create process tap", AudioHardwareCreateProcessTap(description, &tapID))
 
         let aggregate: [String: Any] = [
             kAudioAggregateDeviceNameKey: "TapeUp",
             kAudioAggregateDeviceUIDKey: "\(CoreAudioSystem.aggregatePrefix)\(pid)-\(UUID().uuidString)",
-            kAudioAggregateDeviceIsPrivateKey: false,
+            kAudioAggregateDeviceIsPrivateKey: true,
             kAudioAggregateDeviceIsStackedKey: false,
-            kAudioAggregateDeviceTapAutoStartKey: true,
+            kAudioAggregateDeviceTapAutoStartKey: false,
             kAudioAggregateDeviceTapListKey: [
                 [kAudioSubTapUIDKey: description.uuid.uuidString, kAudioSubTapDriftCompensationKey: true]
             ],
