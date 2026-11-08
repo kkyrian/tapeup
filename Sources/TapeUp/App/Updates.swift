@@ -17,9 +17,10 @@ final class Updates: NSObject {
     private var installQuietly: (() -> Void)?
     /// An update the user chose to install, waiting for the recording to end.
     private var relaunch: (() -> Void)?
-    /// The quiet install just started, and when: a recording begun in the
-    /// moment before Sparkle asks the app to quit sends it back to waiting.
-    private var started: (install: () -> Void, at: Date)?
+    /// The quiet install last started, to start again if its quit is held.
+    private var startedQuietly: (() -> Void)?
+    /// Sparkle is about to quit the app to install an update.
+    private var relaunching = false
     private var timer: Timer?
 
     init(recording: @escaping () -> Bool, busy: @escaping () -> Bool) {
@@ -43,14 +44,18 @@ final class Updates: NSObject {
         controller.checkForUpdates(nil)
     }
 
-    /// Asked as the app is about to quit. True when a quiet install began
-    /// moments ago and a recording has started since: the quit is cancelled
-    /// and the install waits again (Sparkle allows its handler a second call).
+    /// Asked as the app is about to quit. True when Sparkle is quitting it
+    /// to install and a recording has started since the install began: the
+    /// quit is cancelled. A quiet install waits again (Sparkle allows its
+    /// handler a second call); any other installs at the next quit.
     func holdsQuitForRecording() -> Bool {
-        guard let started, Date.now.timeIntervalSince(started.at) < 30, recording() else { return false }
-        self.started = nil
-        installQuietly = started.install
-        waitUntilFree()
+        guard relaunching, recording() else { return false }
+        relaunching = false
+        if let startedQuietly {
+            self.startedQuietly = nil
+            installQuietly = startedQuietly
+            waitUntilFree()
+        }
         return true
     }
 
@@ -70,7 +75,7 @@ final class Updates: NSObject {
         }
         if !recording(), !busy(), let installQuietly {
             self.installQuietly = nil
-            started = (installQuietly, .now)
+            startedQuietly = installQuietly
             installQuietly()
         }
         if relaunch == nil, installQuietly == nil {
@@ -101,6 +106,11 @@ extension Updates: SPUUpdaterDelegate {
         relaunch = installHandler
         waitUntilFree()
         return true
+    }
+
+    /// Comes just before Sparkle asks the app to quit, quiet or chosen.
+    func updaterWillRelaunchApplication(_ updater: SPUUpdater) {
+        relaunching = true
     }
 }
 

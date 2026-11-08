@@ -34,6 +34,7 @@ appcast="packaging/appcast.xml"
 cask_template="packaging/homebrew/tapeup.rb"
 tap="${TAP_DIR:-$HOME/Developer/homebrew-tap}"
 sparkle_bin=".build/artifacts/sparkle/Sparkle/bin"
+feed="https://github.com/$repo/releases/latest/download/appcast.xml"
 
 dry_run=0
 version=""
@@ -65,14 +66,21 @@ if ((dry_run)); then
   identity="-"
   echo "Dry run: signing ad hoc; nothing is committed, tagged, pushed or published."
 else
+  # The local update test's settings must never reach people.
+  for name in TAPEUP_FEED_URL TAPEUP_ED_PUBLIC_KEY SPARKLE_KEY_FILE TAPEUP_SIGN_IDENTITY; do
+    [[ -z "${!name:-}" ]] || fail "$name is set; it is only for dry runs. Unset it first."
+  done
+  gh auth status >/dev/null 2>&1 || fail "gh is not signed in (gh auth login)."
   [[ "$(git branch --show-current)" == main ]] || fail "releases are made from main."
+  # Release files on a private repository need a sign-in to download.
+  [[ "$(gh repo view "$repo" --json visibility -q .visibility 2>/dev/null)" == PUBLIC ]] \
+    || fail "$repo is not public, so no one could download the release or its updates."
   git fetch -q origin main
   [[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/main)" ]] \
     || fail "main is not the same as origin/main; pull or push first."
   ! git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null || fail "$tag already exists on GitHub."
-  gh auth status >/dev/null 2>&1 || fail "gh is not signed in (gh auth login)."
-  identity="$(security find-identity -v -p codesigning \
-    | awk -v n="\"$identity_name\"" 'index($0, n) {print $2; exit}')"
+  identities="$(security find-identity -v -p codesigning)"
+  identity="$(awk -v n="\"$identity_name\"" 'index($0, n) {print $2; exit}' <<<"$identities")"
   [[ -n "$identity" ]] || fail "no trusted \"$identity_name\" identity; run scripts/make-keys.sh first."
   [[ -s "$public_key_file" ]] || fail "$public_key_file is missing; run scripts/make-keys.sh and commit it."
 fi
@@ -132,8 +140,12 @@ plist="$app/Contents/Info.plist"
 [[ "$(plutil -extract CFBundleShortVersionString raw "$plist")" == "$version" ]] || fail "the app's version is not $version."
 [[ "$(plutil -extract CFBundleVersion raw "$plist")" == "$version" ]] || fail "the app's build version is not $version."
 if ((!dry_run)); then
-  codesign -dvv "$app" 2>&1 | grep -q "^Authority=$identity_name\$" || fail "the app is not signed by \"$identity_name\"."
-  [[ "$(plutil -extract SUPublicEDKey raw "$plist")" == "$public_key" ]] || fail "the app's update key is not $public_key_file."
+  # Read whole first: grep -q stops early, and pipefail would count codesign's SIGPIPE.
+  authority="$(codesign -dvv "$app" 2>&1)"
+  grep -qx "Authority=$identity_name" <<<"$authority" || fail "the app is not signed by \"$identity_name\"."
+  [[ "$(plutil -extract SUPublicEDKey raw "$plist")" == "$(tr -d '[:space:]' <"$public_key_file")" ]] \
+    || fail "the app's update key is not the one in $public_key_file."
+  [[ "$(plutil -extract SUFeedURL raw "$plist")" == "$feed" ]] || fail "the app's update feed is not $feed."
 fi
 
 step "Making TapeUp.dmg"
@@ -241,6 +253,11 @@ else
   gh release create "$tag" "$dmg" "$out/appcast.xml" --repo "$repo" --title "TapeUp $version" \
     --notes-file "$out/notes.md" --verify-tag --latest
   published=1
+  # What people and Sparkle download: the stable links must answer now.
+  for file in TapeUp.dmg appcast.xml; do
+    curl -fsIL -o /dev/null "https://github.com/$repo/releases/latest/download/$file" \
+      || echo "warning: https://github.com/$repo/releases/latest/download/$file does not answer yet." >&2
+  done
 fi
 
 # --- Homebrew --------------------------------------------------------------

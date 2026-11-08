@@ -49,7 +49,7 @@ run() {
 # --- 1. The code-signing identity -------------------------------------------
 
 # Without -v: an identity that exists but is not trusted yet counts too.
-if ((!dry_run)) && security find-identity -p codesigning "$keychain" | grep -q "\"$name\""; then
+if ((!dry_run)) && grep -qF "\"$name\"" <<<"$(security find-identity -p codesigning "$keychain")"; then
   echo "Code signing: \"$name\" is already in your login keychain; kept."
 else
   umask 077
@@ -105,7 +105,8 @@ EOF
 fi
 
 if ((!dry_run)); then
-  fingerprint="$(security find-identity -v -p codesigning "$keychain" | awk -v n="\"$name\"" 'index($0, n) {print $2; exit}')"
+  identities="$(security find-identity -v -p codesigning "$keychain")"
+  fingerprint="$(awk -v n="\"$name\"" 'index($0, n) {print $2; exit}' <<<"$identities")"
   if [[ -z "$fingerprint" ]]; then
     echo "error: \"$name\" is in the keychain but not trusted for code signing." >&2
     echo "Open Keychain Access, find \"$name\", and under Trust set Code Signing to Always Trust." >&2

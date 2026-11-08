@@ -6,7 +6,7 @@ cask "tapeup" do
 
   url "https://github.com/kkyrian/tapeup/releases/download/v#{version}/TapeUp.dmg"
   name "TapeUp"
-  desc "Meeting recorder for Mac, built for you and your AI agent"
+  desc "Meeting recorder built for you and your AI agent"
   homepage "https://github.com/kkyrian/tapeup"
 
   livecheck do
@@ -17,7 +17,7 @@ cask "tapeup" do
   # TapeUp updates itself through Sparkle.
   auto_updates true
   depends_on arch: :arm64
-  depends_on macos: ">= :sequoia"
+  depends_on macos: :sequoia
 
   app "TapeUp.app"
 
