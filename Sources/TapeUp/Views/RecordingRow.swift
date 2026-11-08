@@ -13,11 +13,16 @@ struct RecordingRow: View {
         case date(width: CGFloat)
         /// One line: weekday and day, the title and who was there, under a month heading.
         case dense
+        /// Weekday and day over two lines, for the one-line look while searching.
+        case weekday
     }
 
     let entry: RecordingEntry
     @Bindable var model: AppModel
     var look: Look = .time
+    /// A few words of the transcript, in place of who was there, when the
+    /// search found the row by what was said.
+    var excerpt: RecordingSearch.Excerpt?
     /// Set by the gallery: the row for this folder draws as if hovered.
     @MainActor static var staged: String?
     @State private var hovering = false
@@ -37,11 +42,14 @@ struct RecordingRow: View {
                 VStack(alignment: .leading, spacing: 2) {
                     if let title = entry.title {
                         Text(title).font(.system(size: 13)).lineLimit(1)
-                        if let people = peopleLine {
+                        if let excerpt {
+                            excerptLine(excerpt)
+                        } else if let people = peopleLine {
                             Text(people).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
                         }
                     } else {
                         Text(peopleLine ?? " ").font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(1)
+                        if let excerpt { excerptLine(excerpt) }
                     }
                 }
             }
@@ -50,14 +58,17 @@ struct RecordingRow: View {
             // the title never narrows as the pointer passes.
             ZStack(alignment: .trailing) {
                 Group {
-                    if let progress = model.transcription.progress(of: entry) {
-                        ProgressRing(fraction: progress.fraction, size: 12).frame(width: 16, height: 16)
+                    // A ring only for the one being made; the rest wait their turn.
+                    if model.transcription.current == RecordingLibrary.stamp(of: entry.folder) {
+                        let progress = model.transcription.progress(of: entry)
+                        ProgressRing(fraction: progress?.fraction ?? 0, size: 12).frame(width: 16, height: 16)
                             .hoverHelp(
-                                "Transcribing, \(Int((progress.fraction * 100).rounded()))%"
-                                    + (progress.remaining().map { ", " + Format.left($0) } ?? ""))
+                                "Transcribing, \(Int(((progress?.fraction ?? 0) * 100).rounded()))%"
+                                    + (progress?.remaining().map { ", " + Format.left($0) } ?? ""))
                     } else if model.transcription.isWorking(on: entry) {
-                        ProgressView().controlSize(.small).scaleEffect(0.7).frame(width: 16, height: 16)
-                            .hoverHelp("Transcribing")
+                        Image(systemName: "clock").font(.system(size: 12)).foregroundStyle(.tertiary)
+                            .frame(width: 16, height: 16)
+                            .hoverHelp("Waiting to transcribe")
                     } else {
                         Text(Format.length(entry.duration))
                             .font(.system(size: 11))
@@ -66,7 +77,7 @@ struct RecordingRow: View {
                 }
                 .opacity(hovered || copied ? 0 : 1)
                 HStack(spacing: 0) {
-                    IconButton(symbol: copied ? "checkmark" : "doc.on.doc", help: "Copy path", size: 22, action: copy)
+                    IconButton(symbol: copied ? "checkmark" : "link", help: "Copy path", size: 22, action: copy)
                     IconButton(symbol: "folder", help: "Show in Finder", size: 22) { model.reveal(entry) }
                     IconButton(symbol: "trash", help: "Move to Trash", size: 22) { model.trash(entry) }
                 }
@@ -103,26 +114,50 @@ struct RecordingRow: View {
         .accessibilityAction(named: "Move to Trash") { model.trash(entry) }
     }
 
-    /// The title, then who was there in grey, on one line; the title keeps
-    /// its room and the names give way.
+    /// The title, then who was there in grey, on one line. The names
+    /// never break mid-word: all of them, else the first name and how many
+    /// more, else none; the full list is in the help.
     private var denseText: some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
             if let title = entry.title {
                 Text(title).font(.system(size: 13)).lineLimit(1).layoutPriority(1)
-                if let people = peopleLine {
-                    Text(people).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+                ViewThatFits(in: .horizontal) {
+                    ForEach(shortPeopleLines, id: \.self) { line in
+                        Text(line).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1).fixedSize()
+                    }
+                    Color.clear.frame(width: 0, height: 0)
                 }
             } else {
                 Text(peopleLine ?? " ").font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(1)
             }
         }
+        .hoverHelp(entry.title != nil ? peopleLine ?? "" : "")
+    }
+
+    /// Who was there, longest first: every name, then the first name and a count.
+    private var shortPeopleLines: [String] {
+        guard let full = peopleLine else { return [] }
+        let people = entry.people
+        guard let first = people.names.first else { return [full] }
+        let others = max(people.names.count, (people.count ?? 0) - 1) - 1
+        let short = (first.split(separator: " ").first.map(String.init) ?? first) + (others > 0 ? " +\(others)" : "")
+        return short == full ? [full] : [full, short]
+    }
+
+    /// The transcript's words around the match: the match as said in the
+    /// primary color, the rest grey.
+    private func excerptLine(_ excerpt: RecordingSearch.Excerpt) -> some View {
+        (Text(excerpt.before).foregroundStyle(.secondary) + Text(excerpt.match).foregroundStyle(.primary)
+            + Text(excerpt.after).foregroundStyle(.secondary))
+            .font(.system(size: 11))
+            .lineLimit(1)
     }
 
     private var leading: String {
         switch look {
         case .time: Format.time(entry.started)
         case .date: Format.shortDate(entry.started)
-        case .dense: Format.weekdayDay(entry.started)
+        case .dense, .weekday: Format.weekdayDay(entry.started)
         }
     }
 
@@ -130,7 +165,7 @@ struct RecordingRow: View {
         switch look {
         case .time: Format.timeColumnWidth
         case .date(let width): width
-        case .dense: Format.weekdayDayColumnWidth
+        case .dense, .weekday: Format.weekdayDayColumnWidth
         }
     }
 

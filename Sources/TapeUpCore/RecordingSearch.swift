@@ -40,8 +40,7 @@ public struct RecordingFilter: Sendable, Equatable {
         }
         let words = words
         guard !words.isEmpty else { return true }
-        let known = RecordingSearch.fold(
-            ([entry.title, entry.titleSuggestion].compactMap { $0 } + entry.people.names).joined(separator: "\n"))
+        let known = RecordingSearch.known(entry)
         // Literal: the texts are folded already, and an hour of talk is
         // searched on every keystroke.
         return words.allSatisfy { word in
@@ -51,7 +50,25 @@ public struct RecordingFilter: Sendable, Equatable {
     }
 }
 
+extension RecordingFilter {
+    /// The first typed word found only in the transcript, not in the title
+    /// or names: the row matched by what was said, and this word shows why.
+    /// Nil when the title or names hold every word.
+    public func transcriptOnlyWord(_ entry: RecordingEntry, transcript: String?) -> String? {
+        guard let transcript else { return nil }
+        let known = RecordingSearch.known(entry)
+        return words.first { word in
+            known.range(of: word, options: .literal) == nil && transcript.range(of: word, options: .literal) != nil
+        }
+    }
+}
+
 public enum RecordingSearch {
+    /// The title, suggested title and names, folded.
+    static func known(_ entry: RecordingEntry) -> String {
+        fold(([entry.title, entry.titleSuggestion].compactMap { $0 } + entry.people.names).joined(separator: "\n"))
+    }
+
     /// Lowercased, without accents or width differences, so "jose" finds "José".
     public static func fold(_ text: String) -> String {
         text.folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: nil)
@@ -113,11 +130,50 @@ public enum RecordingSearch {
         return sections.filter { !$0.entries.isEmpty }
     }
 
-    /// What a transcript says, folded for matching: the spoken lines only,
-    /// without the file's heading, times or side labels. Nil when there is none.
-    public static func transcriptText(in folder: URL) -> String? {
-        guard let lines = TranscriptDocument.lines(in: folder) else { return nil }
-        return fold(lines.map(\.text).joined(separator: "\n"))
+    /// What a transcript says: the spoken lines only, without the file's
+    /// heading, times or side labels. Nil when there is none.
+    public static func spokenText(in folder: URL) -> String? {
+        TranscriptDocument.lines(in: folder).map { $0.map(\.text).joined(separator: "\n") }
+    }
+
+    /// The spoken text folded for matching.
+    public static func transcriptText(in folder: URL) -> String? { spokenText(in: folder).map(fold) }
+
+    /// A few words around where `word` is said, for a row found by its
+    /// transcript: a little before, the words as said, and what follows,
+    /// cut at word edges with an ellipsis. Nil when it is not said.
+    public static func excerpt(of word: String, in spoken: String, before: Int = 14, after: Int = 90) -> Excerpt? {
+        let text = spoken.replacingOccurrences(of: "\n", with: " ")
+        guard !word.isEmpty,
+            let match = text.range(of: word, options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive])
+        else { return nil }
+        // Before: the last few whole words.
+        var start = text.index(match.lowerBound, offsetBy: -before, limitedBy: text.startIndex) ?? text.startIndex
+        var lead = ""
+        if start > text.startIndex {
+            if let space = text[start..<match.lowerBound].firstIndex(of: " ") {
+                start = text.index(after: space)
+            } else {
+                start = match.lowerBound
+            }
+            lead = "…"
+        }
+        // After: as many whole words as fit.
+        var end = text.index(match.upperBound, offsetBy: after, limitedBy: text.endIndex) ?? text.endIndex
+        var tail = ""
+        if end < text.endIndex {
+            if let space = text[match.upperBound..<end].lastIndex(of: " ") { end = space }
+            tail = "…"
+        }
+        return Excerpt(
+            before: lead + text[start..<match.lowerBound], match: String(text[match]),
+            after: text[match.upperBound..<end] + tail)
+    }
+
+    public struct Excerpt: Sendable, Equatable {
+        public var before: String
+        public var match: String
+        public var after: String
     }
 
     /// When the recording's transcript last changed, to know a cached text is stale.

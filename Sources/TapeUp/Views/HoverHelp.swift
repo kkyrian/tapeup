@@ -15,7 +15,8 @@ private struct HoverHelpOwner: ViewModifier {
     func body(content: Content) -> some View {
         content
             .onHover { inside in
-                if inside { HoverHelp.shared.show(text, for: id) } else { HoverHelp.shared.hide(id) }
+                // Empty help is none.
+                if inside, !text.isEmpty { HoverHelp.shared.show(text, for: id) } else { HoverHelp.shared.hide(id) }
             }
             .onDisappear { HoverHelp.shared.hide(id) }
             .accessibilityHint(text)

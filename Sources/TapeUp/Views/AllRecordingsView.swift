@@ -47,9 +47,11 @@ struct AllRecordingsView: View {
 
     // MARK: Search and chips
 
+    /// Two rows at most: the backfill chips, always, then the people met
+    /// most, as many whole chips as fit on one line.
     private func chips(all: [RecordingEntry], frequent: [(name: String, count: Int)]) -> some View {
         // Someone picked who has since dropped out of the most met keeps a
-        // chip, so a filter that is on can always be seen and turned off.
+        // chip, first, so a filter that is on can always be seen and turned off.
         let keys = Set(frequent.map { RecordingSearch.fold($0.name) })
         let extra = filter.people.filter { !keys.contains(RecordingSearch.fold($0)) }.sorted().map { name in
             let key = RecordingSearch.fold(name)
@@ -57,26 +59,33 @@ struct AllRecordingsView: View {
                 name: name, count: all.filter { $0.people.names.contains { RecordingSearch.fold($0) == key } }.count
             )
         }
-        return FlowLayout(spacing: 6, lineSpacing: 6) {
-            ForEach(frequent + extra, id: \.name) { person in
-                // A chip is the person, however their name was last written.
-                let key = RecordingSearch.fold(person.name)
-                let picked = filter.people.filter { RecordingSearch.fold($0) == key }
-                FilterChip(title: person.name, count: person.count, on: !picked.isEmpty) {
-                    if picked.isEmpty {
-                        model.recordingsFilter.people.insert(person.name)
-                    } else {
-                        model.recordingsFilter.people.subtract(picked)
+        let people = extra + frequent
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                FilterChip(
+                    title: "No transcript", count: all.filter(RecordingSearch.needsTranscript).count,
+                    on: filter.noTranscript
+                ) { model.recordingsFilter.noTranscript.toggle() }
+                FilterChip(
+                    title: "No names yet", count: all.filter(RecordingSearch.needsNames).count, on: filter.noNames
+                ) { model.recordingsFilter.noNames.toggle() }
+            }
+            if !people.isEmpty {
+                OneRowLayout(spacing: 6, height: 22) {
+                    ForEach(people, id: \.name) { person in
+                        // A chip is the person, however their name was last written.
+                        let key = RecordingSearch.fold(person.name)
+                        let picked = filter.people.filter { RecordingSearch.fold($0) == key }
+                        FilterChip(title: person.name, count: person.count, on: !picked.isEmpty) {
+                            if picked.isEmpty {
+                                model.recordingsFilter.people.insert(person.name)
+                            } else {
+                                model.recordingsFilter.people.subtract(picked)
+                            }
+                        }
                     }
                 }
             }
-            FilterChip(
-                title: "No transcript", count: all.filter(RecordingSearch.needsTranscript).count,
-                on: filter.noTranscript
-            ) { model.recordingsFilter.noTranscript.toggle() }
-            FilterChip(
-                title: "No names yet", count: all.filter(RecordingSearch.needsNames).count, on: filter.noNames
-            ) { model.recordingsFilter.noNames.toggle() }
         }
     }
 
@@ -128,25 +137,29 @@ struct AllRecordingsView: View {
             .hoverHelp("Make each transcript on this Mac, one after another")
             .clickTarget("Transcribe all")
         } else {
-            HStack(spacing: 8) {
-                ProgressView().controlSize(.small).scaleEffect(0.7).frame(width: 16, height: 16)
-                Text("Transcribing, \(shown.count) left")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-            }
-            .frame(maxWidth: .infinity)
-            .frame(height: 32)
+            // On the text edge the rows' times start from; each row shows its own state.
+            Text("Transcribing, \(shown.count) left")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(height: 32)
         }
     }
 
     private var empty: some View {
         VStack(spacing: 6) {
             Text(emptyText).font(.system(size: 12)).foregroundStyle(.secondary)
-            LinkButton("Clear search and filters") { model.recordingsFilter = RecordingFilter() }
+            LinkButton(clearTitle) { model.recordingsFilter = RecordingFilter() }
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 48)
+    }
+
+    private var clearTitle: String {
+        let chips = !filter.people.isEmpty || filter.noTranscript || filter.noNames
+        if filter.query.isEmpty { return "Clear filters" }
+        return chips ? "Clear search and filters" : "Clear search"
     }
 
     private var emptyText: String {
@@ -154,6 +167,17 @@ struct AllRecordingsView: View {
         if alone, filter.noTranscript, !filter.noNames { return "Every recording has a transcript" }
         if alone, filter.noNames, !filter.noTranscript { return "Every recording has its people named" }
         return "No recordings match"
+    }
+
+    /// A row, with a few words of its transcript when that is what the search found.
+    private func row(_ entry: RecordingEntry, look: RecordingRow.Look) -> RecordingRow {
+        var excerpt: RecordingSearch.Excerpt?
+        if let word = filter.transcriptOnlyWord(entry, transcript: model.transcriptIndex.text(for: entry)),
+            let spoken = model.transcriptIndex.spoken(for: entry)
+        {
+            excerpt = RecordingSearch.excerpt(of: word, in: spoken)
+        }
+        return RecordingRow(entry: entry, model: model, look: look, excerpt: excerpt)
     }
 
     // MARK: Design 1, by day
@@ -172,14 +196,18 @@ struct AllRecordingsView: View {
                 !thisMonth
                 && (index == 0 || !calendar.isDate(groups[index - 1].key, equalTo: group.key, toGranularity: .month))
             if newMonth {
-                MonthHeading(text: Format.month(group.key)).padding(.top, index == 0 ? 2 : 18)
+                MonthHeading(
+                    text: Format.month(group.key),
+                    count: shown.count { calendar.isDate($0.started, equalTo: group.key, toGranularity: .month) }
+                )
+                .padding(.top, index == 0 ? 2 : 18)
             }
             SectionLabel(text: thisMonth ? Format.day(group.key) : Format.dayInMonth(group.key))
                 .padding(.horizontal, 6)
                 .padding(.top, index == 0 ? 2 : newMonth ? 6 : 10)
                 .padding(.bottom, 2)
             ForEach(group.value.sorted { $0.started > $1.started }) { entry in
-                RecordingRow(entry: entry, model: model).id(Self.stamp(entry))
+                row(entry, look: .time).id(Self.stamp(entry))
             }
         }
     }
@@ -239,12 +267,12 @@ struct AllRecordingsView: View {
                     .padding(.bottom, 2)
             }
             ForEach(open ? section.entries : Array(section.entries.prefix(limit))) { entry in
-                RecordingRow(entry: entry, model: model, look: .date(width: width))
+                row(entry, look: .date(width: width))
                     .id(rowID(section.key, Self.stamp(entry)))
             }
             if filter.isEmpty, section.entries.count > limit {
                 // Its words start where the dates do.
-                LinkButton(open ? "Show fewer" : "Show \(section.entries.count - limit) more") {
+                LinkButton(open ? "Show fewer" : "Show \(section.entries.count - limit) more", quiet: true) {
                     if model.expandedPeople.remove(section.key) == nil { model.expandedPeople.insert(section.key) }
                 }
                 .padding(.top, 2)
@@ -263,18 +291,12 @@ struct AllRecordingsView: View {
         }
         .sorted { $0.key > $1.key }
         ForEach(Array(groups.enumerated()), id: \.element.key) { index, group in
-            HStack(alignment: .firstTextBaseline) {
-                MonthHeading(text: Format.month(group.key))
-                Spacer()
-                Text("\(group.value.count)")
-                    .font(.system(size: 11).monospacedDigit())
-                    .foregroundStyle(.tertiary)
-                    .padding(.trailing, 6)
-            }
-            .padding(.top, index == 0 ? 2 : 14)
-            .padding(.bottom, 2)
+            MonthHeading(text: Format.month(group.key), count: group.value.count)
+                .padding(.top, index == 0 ? 2 : 14)
+                .padding(.bottom, 2)
             ForEach(group.value.sorted { $0.started > $1.started }) { entry in
-                RecordingRow(entry: entry, model: model, look: .dense).id(Self.stamp(entry))
+                // Two lines while searching, so what was said can show why.
+                row(entry, look: filter.words.isEmpty ? .dense : .weekday).id(Self.stamp(entry))
             }
         }
     }
@@ -337,9 +359,18 @@ private struct SearchField: View {
 /// A month's or a person's name over their recordings.
 private struct MonthHeading: View {
     let text: String
+    /// How many recordings it holds, ending where the lengths do.
+    var count: Int?
 
     var body: some View {
-        Text(text).font(.system(size: 13, weight: .semibold)).padding(.horizontal, 6)
+        HStack(alignment: .firstTextBaseline) {
+            Text(text).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+            Spacer(minLength: 8)
+            if let count {
+                Text("\(count)").font(.system(size: 11).monospacedDigit()).foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.horizontal, 6)
     }
 }
 
@@ -361,7 +392,7 @@ private struct FilterChip: View {
                     .foregroundStyle(on ? Color(nsColor: .windowBackgroundColor) : .secondary)
             }
             .padding(.horizontal, 9)
-            .frame(height: 24)
+            .frame(height: 22)
             .foregroundStyle(on ? Color(nsColor: .windowBackgroundColor) : .primary)
             .background(fill, in: .capsule)
             .contentShape(.capsule)

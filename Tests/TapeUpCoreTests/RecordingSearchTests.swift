@@ -132,4 +132,28 @@ struct RecordingSearchTests {
         #expect(!folded.contains("qwen"))
         #expect(RecordingSearch.transcriptModified(in: folder) != nil)
     }
+
+    @Test func excerptCutsAtWordEdgesAroundTheWordAsSaid() throws {
+        let said =
+            "We spent the first half on travel.\nThen we need the Budget numbers before Thursday, and the survey."
+        let excerpt = try #require(RecordingSearch.excerpt(of: "budget", in: said, before: 14, after: 22))
+        #expect(excerpt.match == "Budget")
+        #expect(excerpt.before == "…we need the ")
+        #expect(excerpt.after == " numbers before…")
+        let start = try #require(RecordingSearch.excerpt(of: "we", in: said))
+        #expect(start.before == "")
+        #expect(start.match == "We")
+        #expect(RecordingSearch.excerpt(of: "zebra", in: said) == nil)
+        #expect(RecordingSearch.excerpt(of: "jose", in: "Thanks, José.")?.match == "José")
+        let end = try #require(RecordingSearch.excerpt(of: "survey", in: said))
+        #expect(end.after == ".")
+    }
+
+    @Test func onlyAWordMissingFromTitleAndNamesShowsTheTranscript() {
+        let review = entry(2, title: "Budget review", names: ["Mei"])
+        let said = RecordingSearch.fold("The budget numbers came from Mei and the survey.")
+        #expect(RecordingFilter(query: "budget mei").transcriptOnlyWord(review, transcript: said) == nil)
+        #expect(RecordingFilter(query: "budget survey").transcriptOnlyWord(review, transcript: said) == "survey")
+        #expect(RecordingFilter(query: "survey").transcriptOnlyWord(review, transcript: nil) == nil)
+    }
 }

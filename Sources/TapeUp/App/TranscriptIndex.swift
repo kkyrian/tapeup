@@ -10,6 +10,8 @@ import TapeUpCore
 final class TranscriptIndex {
     private struct Text {
         var modified: Date?
+        /// As said, for showing a few words of it.
+        var spoken: String?
         var folded: String?
     }
 
@@ -21,6 +23,11 @@ final class TranscriptIndex {
     /// The folded text, nil when none is known yet or there is no transcript.
     func text(for entry: RecordingEntry) -> String? {
         entry.transcript == .done ? texts[RecordingLibrary.stamp(of: entry.folder)]?.folded : nil
+    }
+
+    /// The text as said, nil when none is known yet.
+    func spoken(for entry: RecordingEntry) -> String? {
+        entry.transcript == .done ? texts[RecordingLibrary.stamp(of: entry.folder)]?.spoken : nil
     }
 
     /// Reads every finished transcript not read yet, or changed since.
@@ -37,7 +44,8 @@ final class TranscriptIndex {
             for (stamp, folder) in wanted {
                 let modified = RecordingSearch.transcriptModified(in: folder)
                 if let known = cached[stamp], known == modified { continue }
-                read.append((stamp, Text(modified: modified, folded: RecordingSearch.transcriptText(in: folder))))
+                let spoken = RecordingSearch.spokenText(in: folder)
+                read.append((stamp, Text(modified: modified, spoken: spoken, folded: spoken.map(RecordingSearch.fold))))
             }
             await MainActor.run { [weak self, read] in
                 guard let self else { return }

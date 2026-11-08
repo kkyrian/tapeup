@@ -47,10 +47,12 @@ enum RecordingsGallery {
             shoot("\(prefix)-4-two-chips")
             model.recordingsFilter = RecordingFilter(noTranscript: true)
             shoot("\(prefix)-5-no-transcript")
-            model.recordingsFilter = RecordingFilter(query: "budget")
+            model.recordingsFilter = RecordingFilter(query: "thursday")
             model.transcriptIndex.load(model.allEntries)
             RunLoop.main.run(until: Date().addingTimeInterval(0.5))
-            shoot("\(prefix)-6-search")
+            shoot("\(prefix)-6-search-transcript")
+            model.recordingsFilter = RecordingFilter(query: "budget")
+            shoot("\(prefix)-6-search-title-and-transcript")
             model.recordingsFilter = RecordingFilter(query: "zebra")
             shoot("\(prefix)-7-search-nothing")
             model.recordingsFilter = RecordingFilter(noNames: true)
@@ -61,6 +63,12 @@ enum RecordingsGallery {
         model.recordingsFilter = RecordingFilter(noTranscript: true)
         let waiting = model.allEntries.filter(RecordingSearch.needsTranscript)
         model.makeTranscripts(waiting)
+        // The first one being made, the rest waiting their turn.
+        if let first = waiting.first {
+            model.transcription.stage(
+                current: RecordingLibrary.stamp(of: first.folder),
+                progress: .init(fraction: 0.4, line: nil, first: (0.1, Date().addingTimeInterval(-60))))
+        }
         shoot("d1-9-transcribing")
         model.closeAllRecordings()
 
