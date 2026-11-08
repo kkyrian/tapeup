@@ -286,9 +286,11 @@ final class Take {
     func at(_ point: CGPoint) -> CGPoint { CGPoint(x: panelOrigin.x + point.x, y: panelOrigin.y + point.y) }
 
     /// Glides to the middle of a named control (see `clickTarget`).
-    func move(toTarget name: String, _ seconds: Double = 0.7) async {
+    /// `at` places the pointer along it, 0 at the left edge and 1 at the
+    /// right, so it can rest clear of the label.
+    func move(toTarget name: String, at x: CGFloat = 0.5, _ seconds: Double = 0.7) async {
         guard let frame = ClickTargets.frame(name) else { return print("  no control named \(name)") }
-        await move(to: CGPoint(x: frame.midX, y: frame.midY), seconds)
+        await move(to: CGPoint(x: frame.minX + frame.width * x, y: frame.midY), seconds)
     }
 
     /// Glides to a point in the panel's own coordinates.

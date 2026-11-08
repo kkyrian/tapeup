@@ -382,27 +382,29 @@ struct Journey {
             // A few months of meetings beside the usual recent ones.
             RecordingsGallery.seed(take.root)
             take.model.reload()
+            // Starts near the menu-bar item, so the film opens on the panel.
+            take.director.cursor = CGPoint(x: take.item.x - 40, y: take.item.y + 70)
         },
         script: { take in
             let model = take.model
-            await take.pause(0.15)
             await take.openPanel()
-            await take.pause(0.6)
+            await take.pause(0.5)
             await take.move(toTarget: "Show all", 0.7)
             await take.click { model.openAllRecordings() }
             model.transcriptIndex.load(model.allEntries)
             await take.pause(1.6)
-            await take.move(toTarget: "No transcript", 0.7)
-            await take.click { withAnimation(.snappy(duration: 0.2)) { model.recordingsFilter.noTranscript = true } }
+            // Chips are clicked past their count, clear of the label.
+            await take.move(toTarget: "No transcript", at: 0.985, 0.7)
+            await take.click { model.recordingsFilter.noTranscript = true }
             await take.pause(1.0)
-            await take.move(toTarget: "Transcribe all", 0.6)
+            await take.move(toTarget: "Transcribe all", at: 0.12, 0.6)
             let waiting = model.allEntries.filter(RecordingSearch.needsTranscript)
             await take.click { model.makeTranscripts(waiting) }
             // The first one's ring fills; the rest wait their turn.
             if let first = waiting.first {
                 let stamp = RecordingLibrary.stamp(of: first.folder)
-                for step in 1...14 {
-                    let fraction = Double(step) / 16
+                for step in 1...12 {
+                    let fraction = Double(step) / 14
                     withAnimation(.easeOut(duration: 0.2)) {
                         model.transcription.stage(
                             current: stamp,
@@ -412,10 +414,9 @@ struct Journey {
                     await take.pause(0.2)
                 }
             }
-            await take.pause(0.4)
-            await take.move(toTarget: "No transcript", 0.6)
-            await take.click { withAnimation(.snappy(duration: 0.2)) { model.recordingsFilter.noTranscript = false } }
-            await take.pause(0.5)
+            await take.move(toTarget: "No transcript", at: 0.985, 0.6)
+            await take.click { model.recordingsFilter.noTranscript = false }
+            await take.pause(2.0)
             await take.move(toTarget: "Search", 0.6)
             await take.click()
             await take.type("thursday", into: "Titles, names, transcripts")

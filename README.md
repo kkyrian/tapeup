@@ -89,6 +89,22 @@ glimpse of what was said. The originals stay where they are.
 <br clear="all">
 <br>
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/images/all-recordings-dark.gif">
+  <img align="right" width="380" src=".github/images/all-recordings.gif" alt="Show all, under the recent recordings, opens every recording by month. The No transcript chip lists the ones without a transcript, and Transcribe 25 recordings starts them: the first one's ring fills while the rest wait. Then a search for “thursday” finds the meetings where it was said, each with the words around it.">
+</picture>
+
+### Find any meeting
+
+**Show all** lists every recording by month. Search the titles, the
+names, or the words said.
+
+**No transcript** and **No names yet** show what is missing. The missing
+transcripts start in one click.
+
+<br clear="all">
+<br>
+
 ### Hand it to your agent
 
 Press **Copy path**, paste it into Claude Code or Codex, and ask.
