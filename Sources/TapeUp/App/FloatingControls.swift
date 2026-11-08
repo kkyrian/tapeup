@@ -30,9 +30,7 @@ final class FloatingControls {
         background.material = .popover
         background.blendingMode = .behindWindow
         background.state = .active
-        background.wantsLayer = true
-        background.layer?.cornerRadius = size.height / 2
-        background.layer?.masksToBounds = true
+        background.maskImage = .roundedMask(radius: size.height / 2, continuous: false)
         var drag: @MainActor (CGSize, Bool) -> Void = { _, _ in }
         let host = NSHostingView(rootView: FloatingControlsView(model: model, stop: stop, drag: { drag($0, $1) }))
         host.frame = background.bounds

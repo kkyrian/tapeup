@@ -85,10 +85,9 @@ final class PanelController: NSObject, NSWindowDelegate {
         background.material = .popover
         background.blendingMode = .behindWindow
         background.state = .active
-        background.wantsLayer = true
-        background.layer?.cornerRadius = 14
-        background.layer?.cornerCurve = .continuous
-        background.layer?.masksToBounds = true
+        // A mask, not a clipped layer: the window server draws the shadow
+        // from the mask, so the corners never show the square window behind.
+        background.maskImage = .roundedMask(radius: 14)
         // Plain autoresizing, no constraints: constraints let the hosting view
         // resize the window's content on top of each window resize, so the
         // panel drew one height change too far (cut off, or see-through).
@@ -221,4 +220,25 @@ final class PanelController: NSObject, NSWindowDelegate {
 final class Panel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
+}
+
+extension NSImage {
+    /// A stretchable rounded rectangle for `NSVisualEffectView.maskImage`,
+    /// with SwiftUI's continuous corners (which reach past the radius), or a
+    /// capsule's round ends for a radius of half the height.
+    static func roundedMask(radius: CGFloat, continuous: Bool = true) -> NSImage {
+        let corner = continuous ? ceil(radius * 1.6) : radius
+        let edge = corner * 2 + 1
+        let image = NSImage(size: NSSize(width: edge, height: edge), flipped: false) { rect in
+            let shape = RoundedRectangle(cornerRadius: radius, style: continuous ? .continuous : .circular)
+            guard let context = NSGraphicsContext.current?.cgContext else { return false }
+            context.addPath(shape.path(in: rect).cgPath)
+            context.setFillColor(.black)
+            context.fillPath()
+            return true
+        }
+        image.capInsets = NSEdgeInsets(top: corner, left: corner, bottom: corner, right: corner)
+        image.resizingMode = .stretch
+        return image
+    }
 }
