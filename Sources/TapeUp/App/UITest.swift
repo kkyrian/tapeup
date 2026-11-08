@@ -50,6 +50,7 @@ enum UITest {
         for key in keys.dropFirst() { defaults.removeObject(forKey: key) }
 
         EditMenu.install()
+        ClickTargets.recording = true
         let model = AppModel()
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         item.button?.title = "UITest"
@@ -630,6 +631,8 @@ enum UITest {
             check("after-mac-only")
         }
 
+        allRecordings(model: model, panel: panel, check: check, expect: expect, settle: settle)
+
         let moved = base.appendingPathComponent("moved")
         let count = model.allEntries.count
         model.changeRoot(to: moved, moving: true)
@@ -807,11 +810,143 @@ enum UITest {
         model.reload()
     }
 
+    /// Clicks the control the views named `name` on the panel, with the
+    /// mouse events a person's click sends, at its middle.
+    private static func click(_ name: String, in panel: PanelController) -> Bool {
+        guard let frame = ClickTargets.frame(name), let content = panel.window.contentView else { return false }
+        // SwiftUI's frames run down from the top; the window's run up.
+        let point = NSPoint(x: frame.midX, y: content.bounds.height - frame.midY)
+        for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+            guard
+                let event = NSEvent.mouseEvent(
+                    with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                    windowNumber: panel.window.windowNumber, context: nil, eventNumber: 0, clickCount: 1,
+                    pressure: type == .leftMouseDown ? 1 : 0)
+            else { return false }
+            panel.window.sendEvent(event)
+            // SwiftUI sees the press before the release, as with a hand.
+            RunLoop.main.run(until: Date().addingTimeInterval(0.08))
+        }
+        return true
+    }
+
+    /// All recordings: more recordings than Recent shows bring Show all,
+    /// which opens the page; a person's chip narrows it, a word said in one
+    /// transcript finds that recording, a card opened from it comes back to
+    /// it, and Back returns to Recent at the height it had.
+    private static func allRecordings(
+        model: AppModel, panel: PanelController, check: (String) -> Void, expect: (Bool, String) -> Void,
+        settle: (Double) -> Void
+    ) {
+        let library = RecordingLibrary(root: model.root)
+        var said: URL?
+        for day in 0..<4 {
+            let started = Date().addingTimeInterval(-Double(40 + day) * 86_400)
+            guard let folder = try? library.newFolder(at: started) else { continue }
+            let meta: [String: Any] = [
+                "status": "recorded", "audio": "audio.m4a", "duration_seconds": 600.0,
+                "started": ISO8601DateFormatter().string(from: started),
+            ]
+            try? JSONSerialization.data(withJSONObject: meta).write(to: folder.appendingPathComponent("meta.json"))
+            try? RecordingLibrary.save(people: .init(count: 2, names: ["Nora Quinn"]), in: folder)
+            if day == 1 {
+                let lines = [TranscriptLine(start: 0, end: 5, text: "The zebra crossing study starts in March.")]
+                try? TranscriptDocument.save(lines: lines, failures: 0, pieces: 1, model: .large, in: folder)
+                said = folder
+            }
+        }
+        model.reload()
+        let recentHeight = panel.window.frame.height
+        check("recent-show-all")
+        expect(model.allEntries.count > model.recent.count, "more recordings than Recent shows")
+        expect(click("Show all", in: panel), "Show all is on Recent and clicks")
+        check("all-recordings")
+        expect(model.showingAllRecordings, "Show all opens All recordings")
+        let pageHeight = panel.window.frame.height
+        expect(
+            model.allEntries.contains { $0.people.names.contains("Nora Quinn") }
+                && click("Nora Quinn", in: panel),
+            "the chip for someone met four times clicks")
+        check("all-recordings-chip")
+        expect(model.recordingsFilter.people == ["Nora Quinn"], "the chip narrows the list to them")
+        expect(abs(panel.window.frame.height - pageHeight) <= 1, "narrowing keeps the page's height")
+        if let field = textField(placeholder: "Titles, names, transcripts", in: panel.window.contentView) {
+            panel.window.makeFirstResponder(field)
+            settle(0.2)
+            field.currentEditor()?.insertText("zebra")
+            settle(0.2)
+            expect(
+                model.recordingsFilter.query == "zebra", "typing reaches the search (\(model.recordingsFilter.query))")
+        } else {
+            expect(false, "the search field is on the page")
+        }
+        func shown() -> [RecordingEntry] {
+            model.allEntries.filter {
+                model.recordingsFilter.matches($0, transcript: model.transcriptIndex.text(for: $0))
+            }
+        }
+        for _ in 0..<40 where model.transcriptIndex.loading || shown().count != 1 { settle(0.1) }
+        check("all-recordings-search")
+        expect(
+            shown().map { RecordingLibrary.stamp(of: $0.folder) } == said.map { [RecordingLibrary.stamp(of: $0)] },
+            "a word said in one transcript finds that recording (\(shown().count) shown)")
+        model.recordingsFilter.query = "no such words anywhere"
+        check("all-recordings-nothing")
+        expect(abs(panel.window.frame.height - pageHeight) <= 1, "nothing found keeps the page's height")
+        model.recordingsFilter.query = "zebra"
+        panel.window.makeFirstResponder(nil)
+        settle(0.3)
+        if let found = shown().first {
+            let stamp = RecordingLibrary.stamp(of: found.folder)
+            expect(click("row " + stamp, in: panel), "the row found clicks")
+            check("all-recordings-card")
+            expect(model.card.map { RecordingLibrary.stamp(of: $0.entry.folder) } == stamp, "and opens its card")
+            expect(click("Back", in: panel), "the card's Back clicks")
+            check("all-recordings-card-back")
+            expect(model.card == nil && model.showingAllRecordings, "a card opened from the page goes back to it")
+            expect(model.recordingsFilter.query == "zebra", "with the search kept")
+            expect(abs(panel.window.frame.height - pageHeight) <= 1, "at the page's height")
+        }
+        // No transcript, then the one action: every recording shown joins the queue.
+        model.recordingsFilter = RecordingFilter()
+        settle(0.2)
+        expect(click("No transcript", in: panel), "the No transcript chip clicks")
+        check("all-recordings-no-transcript")
+        let missing = shown()
+        expect(
+            !missing.isEmpty && missing.allSatisfy { $0.transcript != .done },
+            "it keeps recordings without a transcript")
+        let asked = missing.filter { !model.transcription.isWorking(on: $0) }
+        expect(click("Transcribe all", in: panel), "Transcribe all is there and clicks")
+        settle(0.2)
+        // Recordings with no audio fail at once, so taken up means queued,
+        // being made, or already tried.
+        func takenUp(_ entry: RecordingEntry) -> Bool {
+            let now = model.allEntries.first {
+                RecordingLibrary.stamp(of: $0.folder) == RecordingLibrary.stamp(of: entry.folder)
+            }
+            return model.transcription.isWorking(on: entry) || (now.map { $0.transcript != .none } ?? false)
+        }
+        expect(!asked.isEmpty && asked.allSatisfy(takenUp), "every one of them is taken up (\(asked.count))")
+        check("all-recordings-transcribing")
+        expect(abs(panel.window.frame.height - pageHeight) <= 1, "the action keeps the page's height")
+        // The seeded recordings have no audio: each fails in turn, and the
+        // queue is empty again before anything else moves the folders.
+        let stamps = Set(asked.map { RecordingLibrary.stamp(of: $0.folder) })
+        for _ in 0..<480 where !model.transcription.working.isDisjoint(with: stamps) { settle(0.25) }
+        expect(model.transcription.working.isDisjoint(with: stamps), "the queue finishes")
+        expect(click("Back", in: panel), "Back is on the page and clicks")
+        check("all-recordings-back")
+        expect(!model.showingAllRecordings, "Back returns to Recent")
+        expect(abs(panel.window.frame.height - recentHeight) <= 1, "at the height it had")
+    }
+
     /// The panel content's own height, measured apart from the window.
     private static func naturalHeight(model: AppModel) -> CGFloat {
         let real = PanelView.laidOutHeight
         defer { PanelView.laidOutHeight = real }
-        let host = NSHostingView(rootView: PanelView(model: model, close: {}, resized: { _ in }))
+        let host = NSHostingView(
+            rootView: PanelView(model: model, close: {}, resized: { _ in }).environment(\.measuringPanel, true))
         return host.fittingSize.height
     }
 }
@@ -819,4 +954,52 @@ enum UITest {
 /// When the main thread was free, for the stall check while recording.
 @MainActor private final class Beats {
     var times: [Double] = []
+}
+
+/// Where `TapeUp uitest` clicks: named controls' frames in the panel,
+/// kept only while the test runs.
+@MainActor
+enum ClickTargets {
+    static var recording = false
+    /// Each control on screen by its name, one entry per copy of it shown.
+    private static var shown: [String: [UUID: CGRect]] = [:]
+
+    static func set(_ name: String, _ id: UUID, _ frame: CGRect?) { shown[name, default: [:]][id] = frame }
+
+    static func frame(_ name: String) -> CGRect? { shown[name]?.values.first }
+}
+
+extension EnvironmentValues {
+    /// True in a copy of the panel laid out only to measure it, whose
+    /// controls are not the ones on screen.
+    @Entry var measuringPanel = false
+}
+
+extension View {
+    /// Names this control for `TapeUp uitest` to click; nothing otherwise.
+    @ViewBuilder
+    func clickTarget(_ name: String) -> some View {
+        if ClickTargets.recording { modifier(ClickTarget(name: name)) } else { self }
+    }
+}
+
+private struct ClickTarget: ViewModifier {
+    let name: String
+    @Environment(\.measuringPanel) private var measuring
+    @State private var id = UUID()
+
+    func body(content: Content) -> some View {
+        if measuring {
+            content
+        } else {
+            content
+                .onGeometryChange(for: CGRect.self) {
+                    $0.frame(in: .global)
+                } action: {
+                    ClickTargets.set(name, id, $0)
+                }
+                // Another page's control of the same name may already be showing.
+                .onDisappear { ClickTargets.set(name, id, nil) }
+        }
+    }
 }

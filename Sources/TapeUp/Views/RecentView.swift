@@ -32,7 +32,7 @@ struct RecentView: View {
                     SectionLabel(text: first.day)
                 }
                 Spacer()
-                IconButton(symbol: "folder", help: "Open recordings folder", action: model.openRoot)
+                IconButton(symbol: "folder", help: "Open in Finder", action: model.openRoot)
                 MoreMenu(model: model)
             }
             .padding(.leading, Style.inset)
@@ -49,110 +49,19 @@ struct RecentView: View {
                             .padding(.bottom, 2)
                     }
                     ForEach(group.entries) { entry in
-                        RecentRow(entry: entry, model: model)
+                        RecordingRow(entry: entry, model: model)
                     }
+                }
+                // Its words start where the rows' times do.
+                if model.allEntries.count > model.recent.count {
+                    LinkButton("Show all", action: model.openAllRecordings)
+                        .clickTarget("Show all")
+                        .padding(.top, 4)
                 }
             }
             .padding(.horizontal, 6)
         }
         .padding(.bottom, 6)
-    }
-}
-
-struct RecentRow: View {
-    let entry: RecordingEntry
-    @Bindable var model: AppModel
-    @State private var hovering = false
-    @State private var copied = false
-
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(Format.time(entry.started))
-                .font(.system(size: 12).monospacedDigit())
-                .foregroundStyle(.secondary)
-                .frame(width: Format.timeColumnWidth, alignment: .leading)
-            VStack(alignment: .leading, spacing: 2) {
-                if let title = entry.title {
-                    Text(title).font(.system(size: 13)).lineLimit(1)
-                    if let people = peopleLine {
-                        Text(people).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
-                    }
-                } else {
-                    Text(peopleLine ?? " ").font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(1)
-                }
-            }
-            Spacer(minLength: 4)
-            // One fixed slot: the length at rest, the actions on hover, so
-            // the title never narrows as the pointer passes.
-            ZStack(alignment: .trailing) {
-                Group {
-                    if let progress = model.transcription.progress(of: entry) {
-                        ProgressRing(fraction: progress.fraction, size: 12).frame(width: 16, height: 16)
-                            .hoverHelp(
-                                "Transcribing, \(Int((progress.fraction * 100).rounded()))%"
-                                    + (progress.remaining().map { ", " + Format.left($0) } ?? ""))
-                    } else if model.transcription.isWorking(on: entry) {
-                        ProgressView().controlSize(.small).scaleEffect(0.7).frame(width: 16, height: 16)
-                            .hoverHelp("Transcribing")
-                    } else {
-                        Text(Format.length(entry.duration))
-                            .font(.system(size: 11))
-                            .foregroundStyle(.tertiary)
-                    }
-                }
-                .opacity(hovering || copied ? 0 : 1)
-                HStack(spacing: 0) {
-                    IconButton(symbol: copied ? "checkmark" : "doc.on.doc", help: "Copy path", size: 22, action: copy)
-                    IconButton(symbol: "folder", help: "Show in Finder", size: 22) { model.reveal(entry) }
-                    IconButton(symbol: "trash", help: "Move to Trash", size: 22) { model.trash(entry) }
-                }
-                .opacity(hovering || copied ? 1 : 0)
-                .allowsHitTesting(hovering || copied)
-            }
-            .frame(width: 68, alignment: .trailing)
-            .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
-            .animation(.easeOut(duration: 0.12), value: hovering)
-        }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 6)
-        .frame(minHeight: 28)
-        .background(hovering ? Style.fill : .clear, in: .rect(cornerRadius: 6, style: .continuous))
-        .contentShape(.rect)
-        .onHover { hovering = $0 }
-        .onTapGesture { model.open(entry) }
-        .contextMenu {
-            Button("Copy Path", action: copy)
-            Button("Show in Finder") { model.reveal(entry) }
-            Button("Rename…") { model.open(entry) }
-            Divider()
-            Button("Move to Trash") { model.trash(entry) }
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(
-            [entry.title, Format.when(entry.started), Format.spokenDuration(entry.duration)].compactMap { $0 }
-                .joined(separator: ", ")
-        )
-        .accessibilityAction(named: "Copy path") { model.copy(entry) }
-        .accessibilityAction(named: "Show in Finder") { model.reveal(entry) }
-        .accessibilityAction(named: "Open") { model.open(entry) }
-        .accessibilityAction(named: "Move to Trash") { model.trash(entry) }
-    }
-
-    private func copy() {
-        model.copy(entry)
-        copied = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { copied = false }
-    }
-
-    private var peopleLine: String? {
-        let people = entry.people
-        guard !people.isEmpty else { return nil }
-        if !people.names.isEmpty {
-            let names = people.names.joined(separator: ", ")
-            let others = (people.count ?? 0) - people.names.count - 1
-            return others > 0 ? "\(names) +\(others)" : names
-        }
-        return people.count.map { $0 == 1 ? "Just you" : "\($0) people" }
     }
 }
 

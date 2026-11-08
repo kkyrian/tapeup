@@ -124,7 +124,7 @@ enum Snapshot {
         exit(0)
     }
 
-    private static func render(model: AppModel, dark: Bool, to url: URL) {
+    static func render(model: AppModel, dark: Bool, to url: URL) {
         let view = PanelView(model: model, close: {}, resized: { _ in })
             .background(Color(nsColor: .windowBackgroundColor))
         let host = NSHostingView(rootView: view)

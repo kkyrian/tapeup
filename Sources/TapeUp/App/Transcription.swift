@@ -302,12 +302,13 @@ final class Transcription {
 
     /// One click: make a transcript for a recording that has none or whose
     /// transcript failed. Works with transcripts off; the click is the ask.
-    func make(_ entry: RecordingEntry) {
+    /// Without `announce`, the caller refreshes the list itself, once for many.
+    func make(_ entry: RecordingEntry, announce: Bool = true) {
         let stamp = RecordingLibrary.stamp(of: entry.folder)
         try? RecordingLibrary.markTranscript("waiting", model: model.name, in: entry.folder)
         explicit.insert(stamp)
         enqueue(stamp)
-        finished(stamp)
+        if announce { finished(stamp) }
     }
 
     private func enqueue(_ stamp: String) {

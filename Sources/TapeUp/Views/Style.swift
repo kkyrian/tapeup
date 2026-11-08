@@ -220,6 +220,7 @@ struct PageHeader<Accessory: View, Trailing: View>: View {
     var body: some View {
         HStack(spacing: 0) {
             IconButton(symbol: "chevron.left", help: "Back", action: back)
+                .clickTarget("Back")
                 .padding(.leading, -6)
                 .frame(width: Style.textEdge - Style.inset, alignment: .leading)
             Text(title).font(.system(size: 13, weight: .semibold))

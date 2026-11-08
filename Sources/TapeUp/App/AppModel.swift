@@ -38,6 +38,18 @@ final class AppModel {
     var showingPeople = false
     /// The page in place of the recorder: the folder, your AI and the app.
     var showingSettings = false
+    /// The page in place of the recorder: every recording, to browse and search.
+    var showingAllRecordings = false
+    /// What that page is narrowed to, kept while a card opened from it is up.
+    var recordingsFilter = RecordingFilter()
+    /// Which of the three layouts on trial the page shows; in memory only, until one is picked.
+    var recordingsDesign = 1
+    /// Person sections shown in full rather than their newest few; "" is Others.
+    var expandedPeople: Set<String> = []
+    /// The stamp of the recording last opened from the page, scrolled back into view on return.
+    var recordingsAnchor: String?
+    /// The transcripts' text for that page's search.
+    let transcriptIndex = TranscriptIndex()
     /// What the people page reports after a copy, a paste or the file changing.
     private(set) var peopleNotice: PeopleNotice?
 
@@ -265,6 +277,7 @@ final class AppModel {
             card = nil
             showingPeople = false
             showingSettings = false
+            showingAllRecordings = false
             phase = .recording(started: recorder.started)
             testing = false
             elapsed = 0
@@ -289,6 +302,7 @@ final class AppModel {
         // The saved card shows, whichever page was open.
         showingPeople = false
         showingSettings = false
+        showingAllRecordings = false
         tickClock()
         paused = false
         pausedSince = nil
@@ -639,14 +653,40 @@ final class AppModel {
         if card?.finishing != true { card = nil }
         peopleNotice = nil
         showingSettings = false
+        showingAllRecordings = false
         showingPeople = true
     }
 
     func openSettings() {
         if card?.finishing != true { card = nil }
         showingPeople = false
+        showingAllRecordings = false
         showingSettings = true
         agents.refresh()
+    }
+
+    func openAllRecordings() {
+        if card?.finishing != true { card = nil }
+        showingPeople = false
+        showingSettings = false
+        recordingsFilter = RecordingFilter()
+        expandedPeople = []
+        recordingsAnchor = nil
+        showingAllRecordings = true
+    }
+
+    func closeAllRecordings() {
+        showingAllRecordings = false
+        recordingsAnchor = nil
+    }
+
+    /// One click for every recording shown without a transcript: each joins
+    /// the queue, which makes them one after another.
+    func makeTranscripts(_ entries: [RecordingEntry]) {
+        let waiting = entries.filter { !transcription.isWorking(on: $0) }
+        guard !waiting.isEmpty else { return }
+        for entry in waiting { transcription.make(entry, announce: false) }
+        reload()
     }
 
     func closeSettings() {
@@ -678,6 +718,7 @@ final class AppModel {
     func open(_ entry: RecordingEntry) {
         showingPeople = false
         showingSettings = false
+        if showingAllRecordings { recordingsAnchor = RecordingLibrary.stamp(of: entry.folder) }
         card = Card(entry: entry, finishing: false, justRecorded: false)
         titles.suggest(for: entry, agent: true)
     }

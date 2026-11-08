@@ -49,6 +49,7 @@ struct CardView: View {
                 symbol: card.justRecorded ? "xmark" : "chevron.left", help: card.justRecorded ? "Close" : "Back",
                 action: model.closeCard
             )
+            .clickTarget(card.justRecorded ? "Close" : "Back")
             // The chevron sits in the icon column and the title on the text
             // edge, as on every page.
             .padding(.leading, -6)
