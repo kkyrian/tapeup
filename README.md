@@ -30,14 +30,13 @@ brew install kkyrian/tap/tapeup
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset=".github/images/floating-dark.gif">
-  <img align="left" width="440" src=".github/images/floating.gif" alt="In a video call in another app, ⌥⌘R starts recording. Small controls float under the menu bar with the time, Pause and Stop. Pause holds the clock, play resumes, and Stop saves: the recording drops from the menu bar and names itself “Beta launch plan”.">
+  <img align="left" width="380" src=".github/images/floating.gif" alt="In a video call in another app, ⌥⌘R starts recording. Small controls float under the menu bar with the time, Pause and Stop. Pause holds the clock, play resumes, and Stop saves: the recording drops from the menu bar and names itself “Beta launch plan”.">
 </picture>
 
 ### Record from any app
 
-Press **⌥⌘R** mid-call. Small controls float over your windows, so
-pausing or stopping is one click away, and the saved recording drops
-from the menu bar.
+Press **⌥⌘R** mid-call. Small controls float over your windows to
+pause or stop, and the saved recording drops from the menu bar.
 
 <br clear="all">
 <br>

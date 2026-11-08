@@ -32,7 +32,7 @@ for movie in tmp/film/*.mov; do
   # width, a little less.
   case "$name" in
     handoff) width=1388 ;;
-    floating) width=880 ;;
+    floating) width=760 ;;
     *) width=840 ;;
   esac
   # The first moments are the window settling; the journey starts after.
