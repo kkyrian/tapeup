@@ -42,12 +42,12 @@ struct SettingsView: View {
 
             section("App")
             SettingRow(
-                symbol: "pip", title: "Floating controls",
-                action: { model.showsFloatingControls.toggle() }
+                symbol: "pip", title: "Floating controls", subtitle: "Under the menu bar while recording",
+                on: model.showsFloatingControls, action: { model.showsFloatingControls.toggle() }
             ) { MiniSwitch(on: model.showsFloatingControls) }
             SettingRow(
-                symbol: "power", title: "Open at login",
-                action: { model.launchAtLogin.toggle() }
+                symbol: "power", title: "Open at login", subtitle: "In the menu bar when you log in",
+                on: launchAtLogin, action: { model.launchAtLogin.toggle() }
             ) { MiniSwitch(on: launchAtLogin) }
         }
         .padding(Style.inset)
@@ -112,6 +112,9 @@ struct SettingRow<Trailing: View>: View {
     let title: String
     /// How it stands, under the title; nil keeps the row to one line.
     var subtitle: String?
+    /// For a switch: off dims the row and its words roll to "Off", as on
+    /// the source rows.
+    var on: Bool?
     var action: (() -> Void)?
     @ViewBuilder let trailing: Trailing
     @State private var hovering = false
@@ -121,12 +124,13 @@ struct SettingRow<Trailing: View>: View {
             // The column keeps its width with no mark, so titles line up.
             Image(systemName: symbol ?? "checkmark")
                 .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(markColor)
+                .foregroundStyle(on == false ? markColor.opacity(0.6) : markColor)
                 .opacity(symbol == nil ? 0 : 1)
                 .frame(width: Style.textEdge - Style.inset, alignment: .leading)
             VStack(alignment: .leading, spacing: 1) {
                 Text(title).font(.system(size: 13, weight: .medium))
-                if let subtitle {
+                    .foregroundStyle(on == false ? .secondary : .primary)
+                if let subtitle = on == false ? "Off" : subtitle {
                     Text(subtitle)
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
@@ -139,6 +143,7 @@ struct SettingRow<Trailing: View>: View {
             Spacer(minLength: 8)
             trailing
         }
+        .animation(.snappy(duration: 0.2), value: on)
         .frame(height: subtitle == nil ? 32 : 36)
         .padding(.horizontal, 6)
         .background(
@@ -151,6 +156,6 @@ struct SettingRow<Trailing: View>: View {
         .onTapGesture { action?() }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(title)
-        .accessibilityValue(subtitle ?? "")
+        .accessibilityValue(on == false ? "Off" : subtitle ?? "")
     }
 }
