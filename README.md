@@ -64,9 +64,25 @@ It's optional, and it's what a transcript can't know on its own.
 ### Know who said what
 
 **Label speakers** finds each voice in the recording, on your Mac. Each
-one comes with a line it said, so naming it takes a second.
+one comes with a line it said and a button to hear it, so naming it
+takes a second.
 
 With headphones on, your own lines are marked from the start.
+
+<br clear="all">
+<br>
+
+### Bring in old recordings
+
+Open **Import…** from the ··· menu and drop in files or whole folders,
+or drop them on the menu-bar icon. Each comes in under its own name and
+date, and is transcribed on your Mac, with how far each has come and a
+glimpse of what was said. The originals stay where they are.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/images/import-dark.gif">
+  <img width="100%" src=".github/images/import.gif" alt="From the ··· menu, Import… opens the Import window. Four recordings are dragged in from a Finder window and listed with their dates, lengths and sizes. Import 4 recordings copies them in, and each is transcribed in turn: a ring fills, the lines spoken pass under its name with the time left, speakers are found, and a check marks it ready. Done closes the window, and the recordings appear in TapeUp's list under the days they were made.">
+</picture>
 
 <br clear="all">
 <br>
@@ -113,18 +129,6 @@ It stays off until you pick one. Without it, Apple Intelligence titles
 recordings where your Mac has it.
 
 <br clear="all">
-<br>
-
-### Bring in old recordings
-
-Open **Import…** from the ··· menu and drop in files or whole folders,
-or drop them on the menu-bar icon. Each comes in under its own name and
-date, and is transcribed on your Mac. The originals stay where they are.
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset=".github/images/import-dark.gif">
-  <img width="100%" src=".github/images/import.gif" alt="From the ··· menu, Import… opens the Import window. Four recordings are dragged in from a Finder window and listed with their dates, lengths and sizes. Import 4 recordings copies them in, Done closes the window, and the recordings appear in TapeUp's list under the days they were made.">
-</picture>
 
 ## Also
 
