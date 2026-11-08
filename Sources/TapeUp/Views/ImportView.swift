@@ -126,6 +126,29 @@ final class Imports {
         }
     }
 
+    /// How a recording that came in stands now: its transcript, then its
+    /// speakers; nil when neither was asked for.
+    func progress(of item: Item) -> String? {
+        guard item.state == .copied, let stamp = item.stamp, let entry = model.importedEntry(stamp) else { return nil }
+        switch entry.transcript {
+        case .pending:
+            return model.transcription.current == stamp ? "Transcribing…" : "Waiting to transcribe"
+        case .failed:
+            return "Transcript failed"
+        case .done:
+            if let work = model.speakers.work(on: entry), work != .failed { return "Finding speakers…" }
+            return "Transcript ready"
+        case .none:
+            return nil
+        }
+    }
+
+    /// Shows a recording that came in, in the panel.
+    func open(_ item: Item) {
+        guard let stamp = item.stamp else { return }
+        model.showImported(stamp)
+    }
+
     /// Names the recording before it comes in; blank goes back to the file's name.
     func rename(_ item: Item, to text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -270,8 +293,10 @@ struct ImportView: View {
                     ImportRow(
                         item: item, twin: twin(of: item), showVoices: imports.labeling,
                         removable: !imports.importing && item.state != .copied,
+                        progress: imports.progress(of: item),
                         remove: { imports.remove(item) }, setVoices: { imports.setVoices($0, for: item) },
-                        rename: { imports.rename(item, to: $0) })
+                        rename: { imports.rename(item, to: $0) },
+                        open: item.state == .copied ? { imports.open(item) } : nil)
                 }
             }
         }
@@ -292,10 +317,12 @@ struct ImportView: View {
     private var options: some View {
         VStack(alignment: .leading, spacing: 4) {
             Toggle(isOn: $imports.transcribe) {
-                option("text.quote", "Transcribe", "On this Mac")
+                option("text.quote", "Transcribe", "On this Mac", on: imports.transcribe)
             }
             Toggle(isOn: $imports.labelSpeakers) {
-                option("person.2", "Label speakers", imports.transcribe ? "Who spoke when" : "Needs Transcribe")
+                option(
+                    "person.2", "Label speakers", imports.transcribe ? "Who spoke when" : "Needs Transcribe",
+                    on: imports.labeling || !imports.transcribe)
             }
             .disabled(!imports.transcribe)
         }
@@ -305,17 +332,24 @@ struct ImportView: View {
         .opacity(imports.importing ? 0.5 : 1)
     }
 
-    private func option(_ symbol: String, _ title: String, _ detail: String) -> some View {
+    /// Off reads as the source rows do: dimmed, and the words roll to "Off".
+    private func option(_ symbol: String, _ title: String, _ detail: String, on: Bool) -> some View {
         HStack(spacing: 0) {
             Image(systemName: symbol)
                 .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(on ? Color.secondary : Color.secondary.opacity(0.6))
                 .frame(width: Self.iconColumn, alignment: .leading)
             VStack(alignment: .leading, spacing: 1) {
-                Text(title).font(.system(size: 13, weight: .medium))
-                Text(detail).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+                Text(title).font(.system(size: 13, weight: .medium)).foregroundStyle(on ? .primary : .secondary)
+                Text(on ? detail : "Off")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .contentTransition(.numericText())
             }
         }
+        .animation(.snappy(duration: 0.2), value: on)
+        .animation(.snappy(duration: 0.2), value: detail)
     }
 
     // MARK: Footer
@@ -395,39 +429,70 @@ private struct ImportRow: View {
     let twin: String?
     let showVoices: Bool
     let removable: Bool
+    /// How the recording it became stands, once copied.
+    let progress: String?
     let remove: () -> Void
     let setVoices: (Int?) -> Void
     let rename: (String) -> Void
+    /// Opens the recording it became, once copied.
+    let open: (() -> Void)?
     @State private var hovering = false
 
     var body: some View {
         HStack(spacing: 0) {
-            Group {
-                if hovering && removable {
-                    IconButton(symbol: "xmark", help: "Leave this one out", size: 20, action: remove)
-                        .padding(.leading, -3)
-                } else {
-                    mark
-                }
+            // Once copied, the file's side of the row opens its recording.
+            HStack(spacing: 0) {
+                leading
+                Spacer(minLength: 12)
             }
-            .frame(width: ImportView.iconColumn, height: 20, alignment: .leading)
-            VStack(alignment: .leading, spacing: 2) {
-                NameField(
-                    name: item.shownName, editable: item.state == .ready, muted: item.state.muted, rename: rename)
-                Text(status)
-                    .font(.system(size: 11).monospacedDigit())
-                    .foregroundStyle(item.state.muted ? .tertiary : .secondary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-            }
-            Spacer(minLength: 12)
+            .contentShape(.rect)
+            .onTapGesture { open?() }
+            .hoverHelp(ifAny: open == nil ? nil : "Open in TapeUp")
             if showVoices, item.state == .ready || item.state == .copying || item.state == .copied {
                 VoiceCount(voices: item.voices, set: setVoices).disabled(item.state != .ready)
             }
         }
         .frame(height: 44)
+        .padding(.horizontal, 6)
+        .background(
+            hovering && open != nil ? Style.fillHover : .clear,
+            in: .rect(cornerRadius: Style.corner, style: .continuous)
+        )
+        .padding(.horizontal, -6)
         .contentShape(.rect)
         .onHover { hovering = $0 }
+    }
+
+    @ViewBuilder private var leading: some View {
+        Group {
+            if hovering && removable {
+                IconButton(symbol: "xmark", help: "Leave this one out", size: 20, action: remove)
+                    .padding(.leading, -3)
+            } else {
+                mark
+            }
+        }
+        .frame(width: ImportView.iconColumn, height: 20, alignment: .leading)
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 4) {
+                NameField(
+                    name: item.shownName, editable: item.state == .ready, muted: item.state.muted,
+                    rename: rename)
+                if open != nil {
+                    Image(systemName: "arrow.up.forward")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .opacity(hovering ? 1 : 0)
+                }
+            }
+            Text(status)
+                .font(.system(size: 11).monospacedDigit())
+                .foregroundStyle(item.state.muted ? .tertiary : .secondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .contentTransition(.numericText())
+                .animation(.snappy(duration: 0.2), value: status)
+        }
     }
 
     /// The file's kind, or how its copy stands.
@@ -459,7 +524,8 @@ private struct ImportRow: View {
         case .reading: "Reading…"
         case .duplicate: twin.map { "Copy of “\($0)”" } ?? "Already in TapeUp"
         case .unusable(let reason), .failed(let reason): reason
-        case .ready, .copying, .copied: details
+        case .copied: progress ?? details
+        case .ready, .copying: details
         }
     }
 
@@ -703,5 +769,12 @@ private struct OptionToggle: ToggleStyle {
             .onHover { hovering = $0 }
             .padding(.horizontal, -6)
         }
+    }
+}
+
+extension View {
+    /// Help text only when there is something to say.
+    @ViewBuilder fileprivate func hoverHelp(ifAny text: String?) -> some View {
+        if let text { hoverHelp(text) } else { self }
     }
 }

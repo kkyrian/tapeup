@@ -23,6 +23,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         button.sendAction(on: [.leftMouseDown, .rightMouseDown])
         button.setAccessibilityLabel("TapeUp")
         panel = PanelController(model: model, anchor: button)
+        model.showPanel = { [weak self] in self?.panel.show() }
         floating = FloatingControls(model: model) { [weak self] in self?.stopShowingCard() }
         importWindow = ImportWindow(model: model)
         model.openImport = { [weak self] urls in

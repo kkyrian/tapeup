@@ -41,6 +41,8 @@ final class Transcription {
     /// Saved recordings waiting for a file transcription, oldest first.
     private var queue: [String] = []
     private var processing = false
+    /// The recording whose file is being transcribed now.
+    private(set) var current: String?
     private var live: (stamp: String, feed: LiveFeed)?
     /// Live transcripts still finishing after their recording stopped.
     private var finishing = 0
@@ -309,6 +311,7 @@ final class Transcription {
         let stamp = queue.remove(at: index)
         let (model, loading) = engine(preferring: wanted)
         processing = true
+        current = stamp
         let names = model.takesHints ? names() : nil
         Task {
             do {
@@ -331,10 +334,19 @@ final class Transcription {
             explicit.remove(stamp)
             working.remove(stamp)
             processing = false
+            current = nil
             finished(stamp)
             processQueue()
             scheduleUnload()
         }
+    }
+
+    /// Moves a waiting recording to the front of the queue: the one the user
+    /// opened is the one they want first.
+    func prioritize(_ entry: RecordingEntry) {
+        let stamp = RecordingLibrary.stamp(of: entry.folder)
+        guard let index = queue.firstIndex(of: stamp), index > 0 else { return }
+        queue.insert(queue.remove(at: index), at: 0)
     }
 
     /// True while a recording is transcribing or will be on its own; one

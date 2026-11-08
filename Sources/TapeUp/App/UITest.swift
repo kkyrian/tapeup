@@ -679,6 +679,12 @@ enum UITest {
             expect(false, "its audio can be read")
         }
         expect(FileManager.default.fileExists(atPath: memo.path), "the original is left where it was")
+        if let copied = imports.items.first(where: { $0.state == .copied }) {
+            expect(imports.progress(of: copied) == nil, "with no transcript asked for, the row keeps its details")
+            imports.open(copied)
+            expect(model.card?.entry.title == "Mei, first interview", "the row opens its recording")
+            model.closeCard()
+        }
         shot("import-done.png")
         window.window.close()
         window.show(adding: [memo])

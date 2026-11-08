@@ -70,6 +70,8 @@ final class AppModel {
     var panelFocused = false
     /// Makes the panel take the keyboard; set by the panel controller.
     var focusPanel: () -> Void = {}
+    /// Opens the panel under the menu-bar icon.
+    var showPanel: () -> Void = {}
 
     struct Card: Equatable {
         var entry: RecordingEntry
@@ -758,6 +760,15 @@ final class AppModel {
         reload()
         if transcribe, let entry = RecordingLibrary.entry(at: folder) { transcription.make(entry) }
         return RecordingLibrary.stamp(of: folder)
+    }
+
+    /// Shows an imported recording in the panel; one still waiting for its
+    /// transcript is transcribed next.
+    func showImported(_ stamp: String) {
+        guard let entry = importedEntry(stamp) else { return }
+        open(entry)
+        transcription.prioritize(entry)
+        showPanel()
     }
 
     /// The recording an import made, wherever a title has moved it.
