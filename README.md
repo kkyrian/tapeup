@@ -182,6 +182,9 @@ TapeUp is free and isn't notarized by Apple, so macOS stops it once:
 3. Click the cassette in the menu bar. TapeUp downloads its speech model once
    (2.3 GB, or 680 MB on Macs with less than 16 GB of memory).
 
+After that, TapeUp updates itself. It checks once a day and never installs
+while you record; **Check for Updates…** is in the ··· menu.
+
 ## Build
 
 Needs Xcode and its Metal Toolchain (`xcodebuild -downloadComponent MetalToolchain`).

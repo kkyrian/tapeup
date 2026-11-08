@@ -12,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var floating: FloatingControls!
     private var importWindow: ImportWindow!
     private var statusDrop: StatusItemDrop?
+    private var updates: Updates!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         EditMenu.install()
@@ -31,6 +32,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.importWindow.show(adding: urls)
         }
         statusDrop = StatusItemDrop(button: button) { [weak self] urls in self?.model.openImport(urls) }
+        updates = Updates(
+            recording: { [weak self] in self?.model.phase != .idle },
+            busy: { [weak self] in
+                guard let self else { return false }
+                return panel.isVisible || importWindow.isVisible || importWindow.imports.importing
+                    || !model.transcription.working.isEmpty
+            })
+        if Updates.isSetUp {
+            model.checkForUpdates = { [weak self] in
+                self?.panel.close()
+                self?.updates.check()
+            }
+        }
         hotKey = HotKey.record { [weak self] in self?.shortcutPressed() }
         commands = CommandLink.listen(model)
         if hotKey == nil { model.shortcutLabel = nil }
@@ -55,6 +69,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if updates?.holdsQuitForRecording() == true { return .terminateCancel }
         guard model.phase != .idle else { return .terminateNow }
         if model.isRecording {
             model.stop { NSApp.reply(toApplicationShouldTerminate: true) }
@@ -96,6 +111,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.panel.show()
             })
         menu.addItem(.separator())
+        let check = item("Check for Updates…") { [weak self] in self?.model.checkForUpdates?() }
+        check.isEnabled = model.checkForUpdates != nil
+        menu.addItem(check)
         menu.addItem(item("Quit TapeUp") { NSApp.terminate(nil) })
         menu.autoenablesItems = false
         return menu

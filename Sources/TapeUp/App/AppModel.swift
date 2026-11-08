@@ -86,6 +86,8 @@ final class AppModel {
     var focusPanel: () -> Void = {}
     /// Opens the panel under the menu-bar icon.
     var showPanel: () -> Void = {}
+    /// Check for Updates…; nil in a build that cannot update (no release key).
+    var checkForUpdates: (() -> Void)?
 
     struct Card: Equatable {
         var entry: RecordingEntry
