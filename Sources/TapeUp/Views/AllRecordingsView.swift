@@ -214,6 +214,7 @@ private struct SearchField: View {
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
                 .focused($focused)
+                .clickTarget("Search")
             if !model.recordingsFilter.query.isEmpty {
                 if model.transcriptIndex.loading {
                     ProgressView().controlSize(.small).scaleEffect(0.6).frame(width: 16, height: 16)

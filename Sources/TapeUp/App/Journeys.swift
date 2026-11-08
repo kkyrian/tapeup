@@ -33,7 +33,7 @@ struct Journey {
     let script: @MainActor (Take) async -> Void
 
     static let all: [Journey] = [
-        record, floating, whoWasThere, handoff, people, settings, speakers, importing, probe,
+        record, floating, whoWasThere, handoff, people, settings, speakers, importing, allRecordings, probe,
     ]
 
     static var said: [String] { Shots.said.map(\.1) }
@@ -373,6 +373,57 @@ struct Journey {
             await take.pause(0.25)
         }
     }
+
+    /// Show all under Recent, the No transcript chip and its action, then a
+    /// search that finds a word said in the meetings.
+    static let allRecordings = Journey(
+        name: "all-recordings", size: CGSize(width: 420, height: 640),
+        setUp: { take in
+            // A few months of meetings beside the usual recent ones.
+            RecordingsGallery.seed(take.root)
+            take.model.reload()
+        },
+        script: { take in
+            let model = take.model
+            await take.pause(0.15)
+            await take.openPanel()
+            await take.pause(0.6)
+            await take.move(toTarget: "Show all", 0.7)
+            await take.click { model.openAllRecordings() }
+            model.transcriptIndex.load(model.allEntries)
+            await take.pause(1.6)
+            await take.move(toTarget: "No transcript", 0.7)
+            await take.click { withAnimation(.snappy(duration: 0.2)) { model.recordingsFilter.noTranscript = true } }
+            await take.pause(1.0)
+            await take.move(toTarget: "Transcribe all", 0.6)
+            let waiting = model.allEntries.filter(RecordingSearch.needsTranscript)
+            await take.click { model.makeTranscripts(waiting) }
+            // The first one's ring fills; the rest wait their turn.
+            if let first = waiting.first {
+                let stamp = RecordingLibrary.stamp(of: first.folder)
+                for step in 1...14 {
+                    let fraction = Double(step) / 16
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        model.transcription.stage(
+                            current: stamp,
+                            progress: .init(
+                                fraction: fraction, line: nil, first: (0, Date().addingTimeInterval(-fraction * 90))))
+                    }
+                    await take.pause(0.2)
+                }
+            }
+            await take.pause(0.4)
+            await take.move(toTarget: "No transcript", 0.6)
+            await take.click { withAnimation(.snappy(duration: 0.2)) { model.recordingsFilter.noTranscript = false } }
+            await take.pause(0.5)
+            await take.move(toTarget: "Search", 0.6)
+            await take.click()
+            await take.type("thursday", into: "Titles, names, transcripts")
+            await take.pause(2.2)
+            take.resignKeyboard()
+            await take.move(to: CGPoint(x: 200, y: 610), 0.8)
+            await take.pause(1.6)
+        })
 
     /// Not for the README: holds each page for a second and prints when,
     /// so `Spot` can be measured from the movie.

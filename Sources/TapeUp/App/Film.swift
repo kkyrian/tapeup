@@ -235,6 +235,8 @@ final class Take {
 
     init(root: URL, dark: Bool, size: CGSize) {
         self.root = root
+        // Films find controls by name, as the UI test does.
+        ClickTargets.recording = true
         self.dark = dark
         self.size = size
         Shots.seed(root)
@@ -282,6 +284,12 @@ final class Take {
 
     /// A point in the panel's own coordinates, on the stage.
     func at(_ point: CGPoint) -> CGPoint { CGPoint(x: panelOrigin.x + point.x, y: panelOrigin.y + point.y) }
+
+    /// Glides to the middle of a named control (see `clickTarget`).
+    func move(toTarget name: String, _ seconds: Double = 0.7) async {
+        guard let frame = ClickTargets.frame(name) else { return print("  no control named \(name)") }
+        await move(to: CGPoint(x: frame.midX, y: frame.midY), seconds)
+    }
 
     /// Glides to a point in the panel's own coordinates.
     func move(toPanel point: CGPoint, _ seconds: Double = 0.7) async { await move(to: at(point), seconds) }
