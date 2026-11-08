@@ -47,7 +47,16 @@ final class Agents {
     /// the settings each time: `TapeUp agent off` changes them from outside.
     var chosen: AgentKind? {
         _ = version
+        if let staged { return staged.chosen }
         return testing ?? Self.chosen
+    }
+    /// For `TapeUp film`: agents as shown, nothing checked, saved or called.
+    private var staged: (states: [AgentKind: AgentState], chosen: AgentKind?)?
+
+    func stage(states: [AgentKind: AgentState], chosen: AgentKind?) {
+        staged = (states, chosen)
+        self.states = states
+        version += 1
     }
     private var version = 0
     /// For the UI test: an agent and model used without touching the
@@ -80,6 +89,11 @@ final class Agents {
 
     /// Picking Off or another agent also stops a call on the one withdrawn.
     func choose(_ kind: AgentKind?) {
+        if staged != nil {
+            staged?.chosen = kind
+            version += 1
+            return
+        }
         UserDefaults.standard.set(kind?.rawValue, forKey: "agent")
         version += 1
         Run.stopAll()
@@ -88,7 +102,7 @@ final class Agents {
     /// Checks both agents, at most every few seconds and one check at a
     /// time: when Settings opens.
     func refresh() {
-        guard checking == nil, Date().timeIntervalSince(checkedAt) > 3 else { return }
+        guard staged == nil, checking == nil, Date().timeIntervalSince(checkedAt) > 3 else { return }
         checkedAt = Date()
         checking = Task {
             for kind in AgentKind.allCases {
@@ -161,7 +175,7 @@ final class Agents {
     func ask(
         _ task: String, prompt: String, schema: [String: Any], stamp: String, in library: RecordingLibrary
     ) async -> Data? {
-        guard let kind = chosen else { return nil }
+        guard staged == nil, let kind = chosen else { return nil }
         let previous = calls
         let schemaText = String(
             decoding: (try? JSONSerialization.data(withJSONObject: schema)) ?? Data(), as: UTF8.self)

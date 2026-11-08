@@ -7,6 +7,7 @@ import TapeUpCore
 //   TapeUp permissions [--out <file>]
 //   TapeUp snapshot [--out <dir>]   renders every panel state to PNGs for design review
 //   TapeUp shots [--out <dir>] [--demo <dir>]   the README's pictures; --demo only makes the sample library
+//   TapeUp film [--out <dir>] [--only <names>]  the README's journeys as movies of the real panel
 //   TapeUp uitest [--out <dir>] [--record] [--agent claude|codex]   drives the real panel through
 //     every flow and checks it; --agent also calls that agent for real
 //   TapeUp time-transcribe <recording folder> [--model large|small] [--live]   timed run; --live
@@ -28,6 +29,12 @@ case "shots":
         Shots.run(
             out: Launcher.value(after: "--out", in: arguments) ?? "tmp/shots",
             demo: Launcher.value(after: "--demo", in: arguments))
+    }
+case "film":
+    MainActor.assumeIsolated {
+        Film.run(
+            out: Launcher.value(after: "--out", in: arguments) ?? "tmp/film",
+            only: (Launcher.value(after: "--only", in: arguments) ?? "").split(separator: ",").map(String.init))
     }
 case "uitest":
     MainActor.assumeIsolated {

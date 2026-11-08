@@ -2,10 +2,11 @@ import AppKit
 import SwiftUI
 import TapeUpCore
 
-/// `TapeUp shots --out <dir>`: the README's pictures and the frames of its
-/// animation, from the real panel with made-up meetings, light and dark.
-/// `TapeUp shots --demo <dir>` only makes the made-up library, for running
-/// an agent against it. `scripts/shots.sh` runs both and builds the GIF.
+/// `TapeUp shots --out <dir>`: GitHub's link preview, from the real panel
+/// with made-up meetings. `TapeUp shots --demo <dir>` only makes the made-up
+/// library, for running an agent against it. The README's journeys are
+/// filmed by `TapeUp film`, which shares the parts here; `scripts/shots.sh`
+/// runs both.
 @MainActor
 enum Shots {
     static func run(out: String, demo: String?) -> Never {
@@ -18,9 +19,7 @@ enum Shots {
             exit(0)
         }
         let outURL = URL(fileURLWithPath: out)
-        let frames = outURL.appendingPathComponent("frames")
-        try? FileManager.default.removeItem(at: frames)
-        try? FileManager.default.createDirectory(at: frames, withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: outURL, withIntermediateDirectories: true)
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("tapeup-shots-\(UUID().uuidString)")
         let savedRoot = UserDefaults.standard.object(forKey: "recordingsRoot")
         func restore() {
@@ -31,36 +30,13 @@ enum Shots {
             }
             try? FileManager.default.removeItem(at: root)
         }
-        let past = root.appendingPathComponent("past")
-        let full = root.appendingPathComponent("full")
-        seed(past, withNewest: false)
-        guard let latestFolder = seed(full) else {
-            restore()
-            Launcher.fail("could not make the sample library", code: 1)
-        }
-
+        seed(root, withNewest: false)
         let model = AppModel()
-        model.root = full
-        model.transcription.stage(download: .ready)
         let devices = (microphone: "AirPods Pro", output: "MacBook Pro Speakers")
-        guard let latest = model.recent.first(where: { $0.folder.lastPathComponent == latestFolder.lastPathComponent })
-        else {
-            restore()
-            Launcher.fail("the sample recording is missing", code: 1)
-        }
-        var lanes = Lanes()
+        let lanes = Lanes()
 
-        func picture(_ name: String, scene: SceneKind, status: StatusLook) {
-            for dark in [false, true] {
-                guard let panel = panelImage(model: model, dark: dark) else { continue }
-                write(
-                    Scene(panel: panel, dark: dark, status: status, kind: scene),
-                    to: outURL.appendingPathComponent("\(name)-\(dark ? "dark" : "light").png"))
-            }
-        }
-
-        // The hero: recording, the latest words under the timer.
-        model.root = past
+        // Recording, the latest words in the Transcript row.
+        model.root = root
         model.transcription.stage(download: .ready, live: true, latest: [said[2].1, said[3].1])
         model.stage(
             phase: .recording(started: Date()), elapsed: 74, microphone: devices.microphone,
@@ -74,94 +50,15 @@ enum Shots {
             }
         }
 
-        model.root = full
-        model.transcription.stage(download: .ready)
-        model.stage(phase: .idle, microphone: devices.microphone, output: devices.output)
-        model.card = nil
-        model.openPeople()
-        picture("people", scene: .panelOnly, status: .idle)
-        model.closePeople()
-
-        // The animation, ten frames a second, in each look: open the panel,
-        // record (cut from the first seconds to the last), stop, and copy.
-        // Points in the panel where the pointer clicks.
-        let record = CGPoint(x: 112, y: 152)
-        let copyPath = CGPoint(x: 74, y: 82)
-        let rest = CGPoint(x: 200, y: 300)
-        func along(_ from: CGPoint, _ to: CGPoint, _ t: Double) -> CGPoint {
-            let eased = 1 - pow(1 - min(max(t, 0), 1), 3)
-            return CGPoint(x: from.x + (to.x - from.x) * eased, y: from.y + (to.y - from.y) * eased)
-        }
-        model.root = past
-        model.card = nil
-        model.transcription.stage(download: .ready, live: true, latest: [said[0].1, said[1].1])
-        model.stage(
-            phase: .recording(started: Date()), elapsed: 0, microphone: devices.microphone, output: devices.output,
-            levels: lanes.levels)
-        let tallest = panelImage(model: model, dark: false)?.size.height ?? 480
-        let height = (26 + 8 + tallest + 30).rounded()
-        for dark in [false, true] {
-            var frame = 0
-            func shoot(_ status: StatusLook, cursor: CGPoint?, clicking: Bool = false) {
-                guard let panel = panelImage(model: model, dark: dark) else { return }
-                write(
-                    Scene(
-                        panel: panel, dark: dark, status: status, kind: .animation, height: height, cursor: cursor,
-                        clicking: clicking),
-                    to: frames.appendingPathComponent(String(format: "%@-%03d.png", dark ? "dark" : "light", frame)))
-                frame += 1
-            }
-            model.card = nil
-            model.root = past
-            model.transcription.stage(download: .ready)
-            model.stage(phase: .idle, microphone: devices.microphone, output: devices.output)
-            for index in 0..<14 {
-                shoot(.idle, cursor: along(rest, record, Double(index) / 9), clicking: index == 11 || index == 12)
-            }
-            let words = said.prefix(3).map(\.1).joined(separator: " ").split(separator: " ")
-            var shown = 0
-            for index in 0..<56 {
-                if index % 2 == 0, shown < words.count { shown += 1 }
-                let text = words.prefix(shown).joined(separator: " ")
-                // The first two seconds, then the last few of the call.
-                let elapsed = index < 20 ? Double(index) / 10 : 116 + Double(index - 20) / 10
-                let latest = index < 20 ? lastTwoSentences(text) : [said[12].1, said[13].1]
-                model.transcription.stage(download: .ready, live: true, latest: latest)
-                lanes.advance()
-                model.stage(
-                    phase: .recording(started: Date()), elapsed: elapsed, microphone: devices.microphone,
-                    output: devices.output, levels: lanes.levels)
-                let pointer =
-                    index < 46 ? along(record, rest, Double(index) / 8) : along(rest, record, Double(index - 46) / 6)
-                shoot(.recording(Format.duration(elapsed)), cursor: pointer, clicking: index >= 53)
-            }
-            model.transcription.stage(download: .ready)
-            model.root = full
-            model.stage(phase: .idle, microphone: devices.microphone, output: devices.output)
-            var saved = latest
-            saved.title = nil
-            saved.transcript = .pending
-            model.card = .init(entry: saved, finishing: true, justRecorded: true)
-            for index in 0..<5 { shoot(.idle, cursor: along(record, copyPath, Double(index) / 14)) }
-            model.card = .init(entry: saved, finishing: false, justRecorded: true)
-            for index in 5..<15 { shoot(.idle, cursor: along(record, copyPath, Double(index) / 14)) }
-            saved.transcript = .done
-            saved.title = "Beta launch plan"
-            model.card = .init(entry: saved, finishing: false, justRecorded: true)
-            for index in 0..<16 { shoot(.idle, cursor: copyPath, clicking: index >= 14) }
-            model.card = .init(entry: saved, finishing: false, copied: true, justRecorded: true)
-            for _ in 0..<24 { shoot(.idle, cursor: copyPath) }
-        }
-
-        if let handoff = try? String(contentsOfFile: "scripts/shots/handoff.md", encoding: .utf8) {
-            write(Terminal(text: handoff), to: outURL.appendingPathComponent("handoff.png"))
-        }
         print(outURL.path)
         restore()
         exit(0)
     }
 
-    private static func lastTwoSentences(_ text: String) -> [String] {
+    /// Claude Code's real answer to the sample recording; scripts/shots/README.md says how it was made.
+    static var handoff: String? { try? String(contentsOfFile: "scripts/shots/handoff.md", encoding: .utf8) }
+
+    static func lastTwoSentences(_ text: String) -> [String] {
         var sentences: [String] = []
         var current = ""
         for character in text {
@@ -179,7 +76,7 @@ enum Shots {
 
     /// Two moving lanes of levels: speech in bursts on the microphone, the
     /// call steadier on the computer side.
-    @MainActor private struct Lanes {
+    @MainActor struct Lanes {
         var microphone = (0..<AppModel.laneLength).map { i in i % 9 < 4 ? Float.random(in: 0.3...0.8) : 0.06 }
         var computer = (0..<AppModel.laneLength).map { _ in Float.random(in: 0.3...0.85) }
         var tick = 0
@@ -231,101 +128,13 @@ enum Shots {
         return image
     }
 
-    private static func write(_ scene: some View, to url: URL) {
-        let renderer = ImageRenderer(content: scene)
-        renderer.scale = 2
-        guard let image = renderer.cgImage else { return }
-        let bitmap = NSBitmapImageRep(cgImage: image)
-        try? bitmap.representation(using: .png, properties: [:])?.write(to: url)
-    }
-
     enum StatusLook {
         case idle
         case recording(String)
     }
 
-    enum SceneKind {
-        /// The panel alone, on a transparent ground.
-        case panelOnly
-        /// Under the menu bar on a desktop, one height for every frame.
-        case animation
-    }
-
-    /// The panel where it lives: under its menu-bar item, on a desktop.
-    /// Alone, it sits on nothing, so the page around it shows through.
-    private struct Scene: View {
-        let panel: NSImage
-        let dark: Bool
-        let status: StatusLook
-        let kind: SceneKind
-        var height: CGFloat = 0
-        /// Where the pointer is, in the panel's own points, and whether it clicks.
-        var cursor: CGPoint?
-        var clicking = false
-
-        private var width: CGFloat { PanelView.width + (kind == .panelOnly ? 64 : 72) }
-        private var panelOrigin: CGPoint { CGPoint(x: width - PanelView.width - 30, y: 26 + 8) }
-
-        var body: some View {
-            Group {
-                if kind == .panelOnly {
-                    panelView.padding(32)
-                } else {
-                    ZStack(alignment: .topLeading) {
-                        Palette.page(dark)
-                        ZStack(alignment: .topLeading) {
-                            Palette.desktop(dark)
-                            MenuBar(dark: dark, status: status, wide: false).frame(width: width, height: 26)
-                            panelView
-                                .position(
-                                    x: panelOrigin.x + panel.size.width / 2, y: panelOrigin.y + panel.size.height / 2)
-                            if let cursor {
-                                pointer.position(x: panelOrigin.x + cursor.x, y: panelOrigin.y + cursor.y)
-                            }
-                        }
-                        .clipShape(.rect(cornerRadius: 12, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .strokeBorder(Palette.hairline(dark), lineWidth: 0.5))
-                    }
-                    .frame(width: width, height: height)
-                }
-            }
-            .environment(\.colorScheme, dark ? .dark : .light)
-        }
-
-        private var pointer: some View {
-            ZStack(alignment: .topLeading) {
-                if clicking {
-                    Circle()
-                        .fill(Color.black.opacity(dark ? 0.0 : 0.10))
-                        .overlay(Circle().strokeBorder(Color.white.opacity(dark ? 0.5 : 0.0), lineWidth: 1))
-                        .frame(width: 26, height: 26)
-                        .offset(x: -13, y: -13)
-                }
-                Arrow().fill(Color.black).overlay(Arrow().stroke(Color.white, lineWidth: 1.2))
-                    .frame(width: 13, height: 20)
-                    .shadow(color: .black.opacity(0.25), radius: 1.5, y: 1)
-            }
-            .frame(width: 1, height: 1, alignment: .topLeading)
-        }
-
-        private var panelView: some View {
-            Image(nsImage: panel)
-                .resizable()
-                .frame(width: panel.size.width, height: panel.size.height)
-                .clipShape(.rect(cornerRadius: 14, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .strokeBorder(dark ? Color.white.opacity(0.14) : Color.black.opacity(0.08), lineWidth: 0.5)
-                )
-                .shadow(color: .black.opacity(dark ? 0.45 : 0.10), radius: 16, y: 8)
-                .shadow(color: .black.opacity(dark ? 0.3 : 0.06), radius: 2, y: 1)
-        }
-    }
-
     /// The system pointer's shape, tip at the top left.
-    private struct Arrow: Shape {
+    struct Arrow: Shape {
         func path(in rect: CGRect) -> Path {
             let w = rect.width / 13
             let h = rect.height / 20
@@ -359,10 +168,12 @@ enum Shots {
         static let graphite = Color(red: 0.086, green: 0.086, blue: 0.094)
     }
 
-    private struct MenuBar: View {
+    struct MenuBar: View {
         let dark: Bool
         let status: StatusLook
         let wide: Bool
+        /// Clicked: the item darkens, as the real one does while its panel opens.
+        var pressed = false
 
         /// Two minutes after the sample call began, in this Mac's own format.
         private var clock: String {
@@ -418,12 +229,13 @@ enum Shots {
             .frame(height: 22)
             .background(
                 RoundedRectangle(cornerRadius: 5, style: .continuous)
-                    .fill(dark ? Color.white.opacity(0.16) : Color.black.opacity(0.08)))
+                    .fill(
+                        dark ? Color.white.opacity(pressed ? 0.24 : 0.16) : Color.black.opacity(pressed ? 0.14 : 0.08)))
         }
     }
 
     /// The menu-bar glyph, as AppDelegate draws it.
-    private struct Cassette: Shape {
+    struct Cassette: Shape {
         func path(in rect: CGRect) -> Path {
             var path = Path()
             let sx = rect.width / 20
@@ -443,9 +255,14 @@ enum Shots {
     /// A terminal window showing an agent being handed a recording:
     /// `>` lines were typed, `~` lines summarize its tools, the rest is its
     /// answer in Markdown (bold, lists and one kind of table).
-    private struct Terminal: View {
+    struct Terminal: View {
         let text: String
-        private let width: CGFloat = 760
+        /// What is being typed at the prompt, under the text, with a caret.
+        var typing: String?
+        /// In a film the window sits on the desktop, not on the page.
+        var compact = false
+        var width: CGFloat = 760
+        var height: CGFloat?
         private let ink = Color(white: 0.88)
         private let dim = Color(white: 0.55)
 
@@ -460,12 +277,20 @@ enum Shots {
                 .overlay(Text("~/TapeUp — claude").font(.system(size: 12, weight: .medium)).foregroundStyle(dim))
                 .padding(.horizontal, 14)
                 .frame(height: 36)
+                // With a height, a terminal: text starts at the top, and once
+                // it fills the window the oldest lines scroll off.
                 VStack(alignment: .leading, spacing: 3) {
                     ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in block }
+                    if let typing { prompt(typing) }
                 }
                 .padding(.horizontal, 22)
                 .padding(.top, 6)
                 .padding(.bottom, 24)
+                .frame(width: width, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(minHeight: height.map { $0 - 36 }, alignment: .top)
+                .frame(height: height.map { $0 - 36 }, alignment: .bottom)
+                .clipped()
             }
             .frame(width: width, alignment: .leading)
             .background(Color(red: 0.11, green: 0.115, blue: 0.13), in: .rect(cornerRadius: 12, style: .continuous))
@@ -474,8 +299,24 @@ enum Shots {
                     .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5)
             )
             .shadow(color: .black.opacity(0.18), radius: 16, y: 8)
-            .padding(32)
+            .padding(compact ? 0 : 32)
             .environment(\.colorScheme, .dark)
+        }
+
+        /// The prompt: the first line after `>`, the rest indented, then a caret.
+        private func prompt(_ typed: String) -> some View {
+            let lines = typed.components(separatedBy: "\n")
+            let blue = Color(red: 0.62, green: 0.72, blue: 1.0)
+            return VStack(alignment: .leading, spacing: 3) {
+                ForEach(Array(lines.enumerated()), id: \.offset) { index, text in
+                    HStack(spacing: 0) {
+                        line((index == 0 ? "> " : "  ") + text, color: blue)
+                        if index == lines.count - 1 {
+                            Rectangle().fill(blue.opacity(0.8)).frame(width: 7.5, height: 15)
+                        }
+                    }
+                }
+            }
         }
 
         private var blocks: [AnyView] {

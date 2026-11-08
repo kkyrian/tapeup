@@ -1,33 +1,37 @@
 #!/usr/bin/env bash
-# Renders the README's pictures and its animation from the real panel with
-# made-up meetings, into .github/images. Shows a window briefly per frame.
-# Needs ffmpeg. Usage: scripts/shots.sh
+# Films the README's journeys from the real panel with made-up meetings and
+# renders GitHub's link preview, into .github/images. Each take shows a
+# window behind your others for a few seconds; it is recorded on its own,
+# so your mouse and windows stay out of it. Needs ffmpeg.
+# Usage: scripts/shots.sh [journey,...]   (all of them by default)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 scripts/bundle.sh debug >/dev/null
-out="tmp/shots"
-.build/TapeUp.app/Contents/MacOS/TapeUp shots --out "$out" >/dev/null
-
+app=.build/TapeUp.app/Contents/MacOS/TapeUp
 images=".github/images"
-mkdir -p "$images"
-for name in people; do
-  for look in light dark; do
-    cp "$out/$name-$look.png" "$images/$name-$look.png"
-  done
-done
+mkdir -p "$images" tmp/film tmp/shots
 
-cp "$out/handoff.png" "$images/"
+$app film --out tmp/film ${1:+--only "$1"} >/dev/null
+$app shots --out tmp/shots >/dev/null
+
 # GitHub takes a link preview under 1 MB.
-sips -s format jpeg -s formatOptions 88 "$out/social.png" --out "$images/social.jpg" >/dev/null
+sips -s format jpeg -s formatOptions 88 tmp/shots/social.png --out "$images/social.jpg" >/dev/null
 sips -s format png -Z 256 Resources/AppIcon.icns --out "$images/icon.png" >/dev/null
 
-# Ten frames a second; one palette per look, redrawing only what changed.
-for look in light dark; do
-  gif="$images/flow.gif"
-  [ "$look" = dark ] && gif="$images/flow-dark.gif"
-  ffmpeg -loglevel error -y -framerate 10 -i "$out/frames/$look-%03d.png" \
-    -vf "split[a][b];[a]palettegen=max_colors=256:stats_mode=diff[p];[b][p]paletteuse=dither=none:diff_mode=rectangle" \
-    "$gif"
+# Twenty-five frames a second, sharp on Retina screens (shown at half
+# width), one palette per movie, redrawing only what changed.
+for movie in tmp/film/*.mov; do
+  base="$(basename "$movie" .mov)"
+  name="${base%-light}"
+  name="${name%-dark}"
+  [ "$name" = probe ] && continue
+  gif="$images/$name.gif"
+  [ "$base" = "$name-dark" ] && gif="$images/$name-dark.gif"
+  # The terminal journey is wide; it shows at full width, a little smaller.
+  width=$([ "$name" = handoff ] && echo 1388 || echo 840)
+  ffmpeg -loglevel error -y -i "$movie" -vf \
+    "fps=25,scale=$width:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=160:stats_mode=diff[p];[b][p]paletteuse=dither=none:diff_mode=rectangle" \
+    -loop 0 "$gif"
 done
 ls -lh "$images"
