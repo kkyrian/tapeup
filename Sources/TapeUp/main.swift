@@ -72,16 +72,16 @@ case "time-speakers":
         count: Launcher.value(after: "--voices", in: arguments).flatMap(Int.init),
         turns: Launcher.value(after: "--turns", in: arguments))
     app.run()
-// Any other word, or a `--` flag first, is a command line, never a second
-// app. macOS itself may pass `-NS…` or `-psn_…` to the app.
-case _ where CLI.commands.contains(command) || command.hasPrefix("--") || !(command.isEmpty || command.hasPrefix("-")):
-    MainActor.assumeIsolated { CLI.run(arguments) }
 case "record":
     guard let out = Launcher.value(after: "--out", in: arguments) else {
         Launcher.fail("usage: TapeUp record --out <dir> [--seconds N]", code: 2)
     }
     Launcher.record(out: out, arguments: arguments)
     app.run()
+// Any other word, or a `--` flag first, is a command line, never a second
+// app. macOS itself may pass `-NS…` or `-psn_…` to the app.
+case _ where CLI.commands.contains(command) || command.hasPrefix("--") || !(command.isEmpty || command.hasPrefix("-")):
+    MainActor.assumeIsolated { CLI.run(arguments) }
 default:
     // One app per Mac: a second would answer commands and transcribe the same folders.
     let others = NSRunningApplication.runningApplications(withBundleIdentifier: Bundle.main.bundleIdentifier ?? "")
