@@ -302,11 +302,22 @@ enum UITest {
                 expect(
                     player.isPlaying(second, in: current()) && !player.isPlaying(first, in: current()),
                     "playing another voice stops the first")
+                expect((player.playedSeconds() ?? 9) < 0.6, "and plays the second from its start")
                 player.toggle(second, in: current(), result: result)
                 check("card-speakers-stopped")
                 expect(player.playing == nil && player.line == nil, "clicking again stops")
                 expect(panel.window.frame.height == playingHeight, "playing or stopped, the rows stay put")
                 model.speakers.name(second, nil, in: current())
+                // Another count makes other voices: what was playing stops.
+                player.toggle(first, in: current(), result: result)
+                var recount = current().people
+                recount.count = 2
+                model.setPeople(recount)
+                settle(0.3)
+                expect(player.playing == nil, "a recount stops the voice playing")
+                recount.count = 3
+                model.setPeople(recount)
+                settle(0.3)
             } else {
                 expect(false, "the seeded recording has two voices to play")
             }

@@ -69,15 +69,22 @@ public struct VoicePlaylist: Sendable, Equatable {
 extension SpeakerLabels {
     /// Each numbered voice's turns: the model's turns folded as `result` was
     /// folded, or, when no fold gives its labels, the voice's own lines.
+    /// None when the labels are for other lines than these.
     public static func turns(of result: SpeakerResult, heard: VoicePrints?, lines: [TranscriptLine]) -> [Int:
         [VoiceTurn]]
     {
-        if let heard, lines.count == result.assigned.count {
-            // A count asks for at most that many voices and may find fewer,
-            // so the count tapped may be any from the voices found up.
+        guard lines.count == result.assigned.count else { return [:] }
+        if let heard {
+            // Labels made before the count was kept: a count asks for at most
+            // that many voices and may find fewer, so it may be any from the
+            // voices found up. The most voices first, so the turns of a voice
+            // given no line are left out rather than played as someone else.
             let found = max(1, result.count)
             let counts: [Int?] =
-                result.estimated ? [nil] : Array(found...max(found, Set(heard.turns.map(\.voice)).count))
+                result.estimated
+                ? [nil]
+                : result.folded.map { [$0] }
+                    ?? Array((found...max(found, Set(heard.turns.map(\.voice)).count)).reversed())
             for count in counts {
                 let person = VoiceFolding.fold(heard, count: count)
                 let folded = heard.turns.map {

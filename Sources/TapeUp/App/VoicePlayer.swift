@@ -47,10 +47,16 @@ final class VoicePlayer {
                 if self?.plays == play { self?.stop() }
             }
         }
-        do { try engine.start() } catch { return }
-        node.play()
         self.engine = engine
         self.node = node
+        // The output changed (headphones in or out): the engine has stopped.
+        watch = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.stop() }
+        }
+        do { try engine.start() } catch { return stop() }
+        node.play()
         playing = wanted
         let assigned = result.assigned
         line = playlist.line(at: first.start, voice: voice, lines: lines, assigned: assigned)?.text
@@ -66,12 +72,6 @@ final class VoicePlayer {
         // Common modes, so the quote follows while the name menu is open.
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
-        // The output changed (headphones in or out): the engine has stopped.
-        watch = NotificationCenter.default.addObserver(
-            forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.stop() }
-        }
     }
 
     func stop() {

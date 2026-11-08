@@ -119,6 +119,35 @@ struct VoicePlaybackTests {
         #expect(turns[result.assigned[0] ?? 0]?.contains { $0.start == 300 } == true)
     }
 
+    @Test(arguments: [true, false])
+    func aVoiceGivenNoLinePlaysAsNoOne(kept: Bool) {
+        // Two people take turns; a third model voice, the quietest, talks
+        // only where no line was transcribed. Three asked for, two found.
+        var lines: [TranscriptLine] = []
+        var turns: [VoiceTurn] = []
+        for index in 0..<6 {
+            let start = Double(index) * 10
+            lines.append(TranscriptLine(start: start, end: start + 8, text: "Line \(index)"))
+            turns.append(turn(start, start + 8, index % 2))
+        }
+        turns.append(turn(100, 102, 2))
+        let heard = VoicePrints(turns: turns, prints: [0: [1, 0, 0], 1: [0, 1, 0], 2: [0.9, 0.1, 0.4]])
+        var result = SpeakerLabels.label(lines: lines, heard: heard, count: 3)
+        #expect(result.count == 2)
+        // Labels made before the folded count was kept find it by search.
+        if !kept { result.folded = nil }
+        let played = SpeakerLabels.turns(of: result, heard: heard, lines: lines)
+        #expect(played.count == 2)
+        #expect(!played.values.joined().contains { $0.start == 100 })
+    }
+
+    @Test func labelsForOtherLinesPlayNothing() {
+        let (lines, heard) = heard()
+        let result = SpeakerLabels.label(lines: lines, heard: heard, count: 2)
+        #expect(SpeakerLabels.turns(of: result, heard: heard, lines: Array(lines.dropLast())).isEmpty)
+        #expect(SpeakerLabels.turns(of: result, heard: nil, lines: Array(lines.dropLast())).isEmpty)
+    }
+
     @Test func withoutWhatTheModelHeardEachVoicePlaysItsLines() {
         let (lines, heard) = heard()
         var result = SpeakerLabels.label(lines: lines, heard: heard, count: 2)

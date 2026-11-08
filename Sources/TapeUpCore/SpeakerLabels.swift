@@ -190,7 +190,9 @@ public enum SpeakerLabels {
         let turns = heard.turns.map { VoiceTurn(start: $0.start, end: $0.end, voice: person[$0.voice] ?? $0.voice) }
         let assigned = assign(lines: lines, turns: turns)
         let voices = voices(lines: lines, assigned: assigned)
-        return SpeakerResult(count: voices.count, estimated: count == nil, voices: voices, assigned: assigned)
+        var result = SpeakerResult(count: voices.count, estimated: count == nil, voices: voices, assigned: assigned)
+        result.folded = count
+        return result
     }
 
     /// Names from earlier labels, moved to whichever new voice holds most of
@@ -253,6 +255,9 @@ public struct SpeakerResult: Sendable, Equatable, Codable {
     /// Names the user's agent suggested for voices the user has not named,
     /// shown until the user takes or replaces them. A recount drops them.
     public var suggested: [Int: String] = [:]
+    /// The count the voices were folded to; nil for the estimate, and in
+    /// labels made before it was kept.
+    public var folded: Int?
 
     public init(count: Int, estimated: Bool, voices: [Voice], assigned: [Int?]) {
         self.count = count
@@ -269,6 +274,7 @@ public struct SpeakerResult: Sendable, Equatable, Codable {
         assigned = try values.decode([Int?].self, forKey: .assigned)
         names = try values.decodeIfPresent([Int: String].self, forKey: .names) ?? [:]
         suggested = try values.decodeIfPresent([Int: String].self, forKey: .suggested) ?? [:]
+        folded = try values.decodeIfPresent(Int.self, forKey: .folded)
     }
 }
 

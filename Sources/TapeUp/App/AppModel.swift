@@ -247,6 +247,8 @@ final class AppModel {
                 "TapeUp can't hear \(missing.joined(separator: " or ")). Choose Allow access, turn TapeUp on, then record."
             return
         }
+        // The computer-audio tap would hear a voice still playing.
+        speakers.player.stop()
         do {
             let folder = try library.newFolder()
             var options = Recorder.Options(folder: folder)
