@@ -42,10 +42,6 @@ final class AppModel {
     var showingAllRecordings = false
     /// What that page is narrowed to, kept while a card opened from it is up.
     var recordingsFilter = RecordingFilter()
-    /// Which of the three layouts on trial the page shows; in memory only, until one is picked.
-    var recordingsDesign = 1
-    /// Person sections shown in full rather than their newest few; "" is Others.
-    var expandedPeople: Set<String> = []
     /// The stamp of the recording last opened from the page, scrolled back into view on return.
     var recordingsAnchor: String?
     /// The transcripts' text for that page's search.
@@ -670,7 +666,6 @@ final class AppModel {
         showingPeople = false
         showingSettings = false
         recordingsFilter = RecordingFilter()
-        expandedPeople = []
         recordingsAnchor = nil
         showingAllRecordings = true
     }

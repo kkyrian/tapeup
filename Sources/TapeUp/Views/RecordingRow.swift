@@ -9,8 +9,6 @@ struct RecordingRow: View {
     enum Look: Equatable {
         /// The time of day, under a day heading.
         case time
-        /// The date, where no heading says the day, in a column this wide.
-        case date(width: CGFloat)
         /// One line: weekday and day, the title and who was there, under a month heading.
         case dense
         /// Weekday and day over two lines, for the one-line look while searching.
@@ -156,7 +154,6 @@ struct RecordingRow: View {
     private var leading: String {
         switch look {
         case .time: Format.time(entry.started)
-        case .date: Format.shortDate(entry.started)
         case .dense, .weekday: Format.weekdayDay(entry.started)
         }
     }
@@ -164,7 +161,6 @@ struct RecordingRow: View {
     private var leadingWidth: CGFloat {
         switch look {
         case .time: Format.timeColumnWidth
-        case .date(let width): width
         case .dense, .weekday: Format.weekdayDayColumnWidth
         }
     }

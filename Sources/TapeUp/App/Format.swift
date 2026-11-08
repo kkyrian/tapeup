@@ -60,13 +60,6 @@ enum Format {
         return ceil(text.size(withAttributes: [.font: font]).width) + 2
     }()
 
-    /// "Nov 3" this year, "9/28/25" before it.
-    static func shortDate(_ date: Date, now: Date = Date()) -> String {
-        Calendar.current.isDate(date, equalTo: now, toGranularity: .year)
-            ? date.formatted(.dateTime.month(.abbreviated).day())
-            : date.formatted(.dateTime.month(.defaultDigits).day().year(.twoDigits))
-    }
-
     /// "Sat 8", for a line under its month.
     static func weekdayDay(_ date: Date) -> String { date.formatted(.dateTime.weekday(.abbreviated).day()) }
 
@@ -76,35 +69,15 @@ enum Format {
             ? date.formatted(.dateTime.month(.wide)) : date.formatted(.dateTime.month(.wide).year())
     }
 
-    /// A day heading under its month: "Tuesday 28".
-    static func dayInMonth(_ date: Date) -> String { date.formatted(.dateTime.weekday(.wide).day()) }
-
-    /// The date column's width: narrow while every date is this year's.
-    static func dateColumnWidth(for dates: [Date], now: Date = Date()) -> CGFloat {
-        dates.allSatisfy { Calendar.current.isDate($0, equalTo: now, toGranularity: .year) }
-            ? dateWidths.thisYear : dateWidths.any
-    }
-
-    private static let dateWidths: (thisYear: CGFloat, any: CGFloat) = {
-        let june = Calendar.current.date(from: DateComponents(year: 2026, month: 6, day: 1))!
-        let samples = (1...12).flatMap { month in
-            [2025, 2026].map { year in
-                shortDate(Calendar.current.date(from: DateComponents(year: year, month: month, day: 28))!, now: june)
-            }
-        }
-        return (widest(samples.enumerated().filter { $0.offset % 2 == 1 }.map(\.element)), widest(samples))
-    }()
-
-    static let weekdayDayColumnWidth: CGFloat = widest(
-        (1...7).map { day in
-            weekdayDay(Calendar.current.date(from: DateComponents(year: 2026, month: 6, day: 20 + day))!)
-        })
-
-    /// The width the widest of these takes in the rows' leading column.
-    private static func widest(_ samples: [String]) -> CGFloat {
+    /// The width of the widest weekday and day, so a column of them lines up.
+    static let weekdayDayColumnWidth: CGFloat = {
         let font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .regular)
-        return ceil(samples.map { ($0 as NSString).size(withAttributes: [.font: font]).width }.max() ?? 0) + 2
-    }
+        let widths = (1...7).map { day in
+            let date = Calendar.current.date(from: DateComponents(year: 2026, month: 6, day: 20 + day))!
+            return (weekdayDay(date) as NSString).size(withAttributes: [.font: font]).width
+        }
+        return ceil(widths.max() ?? 0) + 2
+    }()
 
     /// A day heading: "Today", "Yesterday", "Wednesday", or "Oct 28".
     static func day(_ date: Date, now: Date = Date()) -> String {

@@ -98,19 +98,6 @@ struct RecordingSearchTests {
         #expect(!RecordingFilter(noNames: true).isEmpty)
     }
 
-    @Test func byPersonPutsSharedRecordingsInEachSectionAndTheRestInOthers() {
-        let both = entry(3, names: ["Priya Shah", "Mei"])
-        let mei = entry(2, names: ["mei"])
-        let solo = entry(1, count: 1)
-        let sections = RecordingSearch.byPerson([both, mei, solo], people: ["Priya Shah", "Mei", "Ana"])
-        #expect(sections.map(\.person) == ["Priya Shah", "Mei", nil])
-        #expect(sections[0].entries == [both])
-        #expect(sections[1].entries == [both, mei])
-        #expect(sections[2].entries == [solo])
-        #expect(RecordingSearch.byPerson([mei], people: ["Mei"]).map(\.person) == ["Mei"])
-        #expect(RecordingSearch.byPerson([], people: ["Mei"]).isEmpty)
-    }
-
     @Test func transcriptTextIsTheSpokenLinesOnly() throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("search-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)

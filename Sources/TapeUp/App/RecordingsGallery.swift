@@ -3,10 +3,9 @@ import SwiftUI
 import TapeUpCore
 
 /// `TapeUp recordings-gallery --out <dir>`: pictures of the All recordings
-/// page, light and dark, in each of its three layouts on trial, over a
-/// made-up library of a few months: at rest, a chip on, the No transcript
-/// action and its progress, a search and a search with nothing found, and
-/// Recent with its Show all link.
+/// page, light and dark, over a made-up library of a few months: at rest,
+/// hovered, chips on, the No transcript action and its queue at work,
+/// searches with and without a match, and Recent with its Show all link.
 @MainActor
 enum RecordingsGallery {
     static func run(out: String) -> Never {
@@ -33,43 +32,37 @@ enum RecordingsGallery {
         }
 
         shoot("00-recent-show-all")
-        for design in 1...3 {
-            let prefix = "d\(design)"
-            model.openAllRecordings()
-            model.recordingsDesign = design
-            shoot("\(prefix)-1-many")
-            RecordingRow.staged = model.allEntries[1].id
-            shoot("\(prefix)-2-hover")
-            RecordingRow.staged = nil
-            model.recordingsFilter.people = ["Priya Shah"]
-            shoot("\(prefix)-3-chip")
-            model.recordingsFilter.people = ["Priya Shah", "Mei"]
-            shoot("\(prefix)-4-two-chips")
-            model.recordingsFilter = RecordingFilter(noTranscript: true)
-            shoot("\(prefix)-5-no-transcript")
-            model.recordingsFilter = RecordingFilter(query: "thursday")
-            model.transcriptIndex.load(model.allEntries)
-            RunLoop.main.run(until: Date().addingTimeInterval(0.5))
-            shoot("\(prefix)-6-search-transcript")
-            model.recordingsFilter = RecordingFilter(query: "budget")
-            shoot("\(prefix)-6-search-title-and-transcript")
-            model.recordingsFilter = RecordingFilter(query: "zebra")
-            shoot("\(prefix)-7-search-nothing")
-            model.recordingsFilter = RecordingFilter(noNames: true)
-            shoot("\(prefix)-8-no-names")
-        }
-        // The action, clicked: every one waits its turn.
-        model.recordingsDesign = 1
+        model.openAllRecordings()
+        shoot("01-many")
+        RecordingRow.staged = model.allEntries[1].id
+        shoot("02-hover")
+        RecordingRow.staged = nil
+        model.recordingsFilter.people = ["Priya Shah"]
+        shoot("03-chip")
+        model.recordingsFilter.people = ["Priya Shah", "Mei"]
+        shoot("04-two-chips")
         model.recordingsFilter = RecordingFilter(noTranscript: true)
+        shoot("05-no-transcript")
+        model.recordingsFilter = RecordingFilter(query: "thursday")
+        model.transcriptIndex.load(model.allEntries)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+        shoot("06-search-transcript")
+        model.recordingsFilter = RecordingFilter(query: "budget")
+        shoot("07-search-title-and-transcript")
+        model.recordingsFilter = RecordingFilter(query: "zebra")
+        shoot("08-search-nothing")
+        model.recordingsFilter = RecordingFilter(noNames: true)
+        shoot("09-no-names")
+        model.recordingsFilter = RecordingFilter(noTranscript: true)
+        // The action, clicked: the first one being made, the rest waiting their turn.
         let waiting = model.allEntries.filter(RecordingSearch.needsTranscript)
         model.makeTranscripts(waiting)
-        // The first one being made, the rest waiting their turn.
         if let first = waiting.first {
             model.transcription.stage(
                 current: RecordingLibrary.stamp(of: first.folder),
                 progress: .init(fraction: 0.4, line: nil, first: (0.1, Date().addingTimeInterval(-60))))
         }
-        shoot("d1-9-transcribing")
+        shoot("10-queue-running")
         model.closeAllRecordings()
 
         if let savedRoot {

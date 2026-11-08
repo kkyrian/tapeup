@@ -90,14 +90,11 @@ struct IconButton: View {
 /// gains a fill on hover, like every other clickable thing.
 struct LinkButton: View {
     let title: String
-    /// Grey instead of the accent, for a link that only shows more.
-    var quiet = false
     let action: () -> Void
     @State private var hovering = false
 
-    init(_ title: String, quiet: Bool = false, action: @escaping () -> Void) {
+    init(_ title: String, action: @escaping () -> Void) {
         self.title = title
-        self.quiet = quiet
         self.action = action
     }
 
@@ -105,7 +102,7 @@ struct LinkButton: View {
         Button(action: action) {
             Text(title)
                 .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(quiet ? Color.secondary : Color.accentColor)
+                .foregroundStyle(Color.accentColor)
                 .padding(.horizontal, 6)
                 .frame(height: 22)
                 .background(hovering ? Style.fill : .clear, in: .rect(cornerRadius: 5, style: .continuous))

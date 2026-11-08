@@ -107,29 +107,6 @@ public enum RecordingSearch {
             .map { ($0.name, $0.count) }
     }
 
-    /// A section for each of `people` with the recordings they were at, in
-    /// the order given, then one (named nil) for recordings with none of
-    /// them. A recording with two of them is in both sections; empty
-    /// sections are left out.
-    public static func byPerson(_ entries: [RecordingEntry], people: [String]) -> [(
-        person: String?, entries: [RecordingEntry]
-    )] {
-        let keys = people.map(fold)
-        var sections: [(person: String?, entries: [RecordingEntry])] = people.map { ($0, []) }
-        var others: [RecordingEntry] = []
-        for entry in entries {
-            let there = Set(entry.people.names.map(fold))
-            var placed = false
-            for (index, key) in keys.enumerated() where there.contains(key) {
-                sections[index].entries.append(entry)
-                placed = true
-            }
-            if !placed { others.append(entry) }
-        }
-        sections.append((nil, others))
-        return sections.filter { !$0.entries.isEmpty }
-    }
-
     /// What a transcript says: the spoken lines only, without the file's
     /// heading, times or side labels. Nil when there is none.
     public static func spokenText(in folder: URL) -> String? {

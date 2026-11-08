@@ -3,12 +3,12 @@ import TapeUpCore
 
 /// Every recording, to browse and then search: chips for the people met
 /// most and for what is missing, a search over titles, names and
-/// transcripts, and the list in one of three layouts on trial.
+/// transcripts, and the list by month, one line a recording.
 struct AllRecordingsView: View {
     @Bindable var model: AppModel
 
     /// The list's height whatever it holds, so filtering never moves the
-    /// page's edges or the strip under it.
+    /// page's edges.
     static let listHeight: CGFloat = 372
 
     private var filter: RecordingFilter { model.recordingsFilter }
@@ -30,11 +30,9 @@ struct AllRecordingsView: View {
             }
             SearchField(model: model).padding(.top, 10)
             chips(all: all, frequent: frequent).padding(.top, 8)
-            results(shown, frequent: frequent.map(\.name))
+            results(shown)
                 .frame(height: Self.listHeight, alignment: .top)
                 .padding(.top, 10)
-            Divider()
-            designStrip.padding(.top, 8)
         }
         .padding(Style.inset)
         .onChange(of: filter.query.isEmpty, initial: true) { _, empty in
@@ -92,7 +90,7 @@ struct AllRecordingsView: View {
     // MARK: The list
 
     @ViewBuilder
-    private func results(_ shown: [RecordingEntry], frequent: [String]) -> some View {
+    private func results(_ shown: [RecordingEntry]) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             if filter.noTranscript, !shown.isEmpty {
                 transcribeAll(shown).padding(.bottom, 8)
@@ -103,11 +101,7 @@ struct AllRecordingsView: View {
                 ScrollViewReader { scroller in
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 0) {
-                            switch model.recordingsDesign {
-                            case 2: byPerson(shown, frequent: frequent)
-                            case 3: byMonth(shown)
-                            default: byDay(shown)
-                            }
+                            byMonth(shown)
                         }
                     }
                     .scrollIndicators(.automatic)
@@ -117,8 +111,7 @@ struct AllRecordingsView: View {
                         // Back from a card opened here: that row in view again, once.
                         guard let anchor = model.recordingsAnchor else { return }
                         model.recordingsAnchor = nil
-                        let id = model.recordingsDesign == 2 ? personRowID(anchor, shown, frequent: frequent) : anchor
-                        if let id { DispatchQueue.main.async { scroller.scrollTo(id, anchor: .center) } }
+                        DispatchQueue.main.async { scroller.scrollTo(anchor, anchor: .center) }
                     }
                 }
             }
@@ -180,107 +173,8 @@ struct AllRecordingsView: View {
         return RecordingRow(entry: entry, model: model, look: look, excerpt: excerpt)
     }
 
-    // MARK: Design 1, by day
-
-    /// Days under day headings, as on Recent; past this month, each month
-    /// gets a heading and its days are named within it.
-    @ViewBuilder
-    private func byDay(_ shown: [RecordingEntry]) -> some View {
-        let calendar = Calendar.current
-        let now = Date()
-        let groups = Dictionary(grouping: shown) { calendar.startOfDay(for: $0.started) }
-            .sorted { $0.key > $1.key }
-        ForEach(Array(groups.enumerated()), id: \.element.key) { index, group in
-            let thisMonth = calendar.isDate(group.key, equalTo: now, toGranularity: .month)
-            let newMonth =
-                !thisMonth
-                && (index == 0 || !calendar.isDate(groups[index - 1].key, equalTo: group.key, toGranularity: .month))
-            if newMonth {
-                MonthHeading(
-                    text: Format.month(group.key),
-                    count: shown.count { calendar.isDate($0.started, equalTo: group.key, toGranularity: .month) }
-                )
-                .padding(.top, index == 0 ? 2 : 18)
-            }
-            SectionLabel(text: thisMonth ? Format.day(group.key) : Format.dayInMonth(group.key))
-                .padding(.horizontal, 6)
-                .padding(.top, index == 0 ? 2 : newMonth ? 6 : 10)
-                .padding(.bottom, 2)
-            ForEach(group.value.sorted { $0.started > $1.started }) { entry in
-                row(entry, look: .time).id(Self.stamp(entry))
-            }
-        }
-    }
-
-    // MARK: Design 2, by person
-
-    private struct PersonSection {
-        /// The person's name, or "" for everyone else.
-        var key: String
-        var entries: [RecordingEntry]
-    }
-
-    private func personSections(_ shown: [RecordingEntry], frequent: [String]) -> [PersonSection] {
-        RecordingSearch.byPerson(shown, people: frequent).map {
-            PersonSection(key: $0.person ?? "", entries: $0.entries)
-        }
-    }
-
-    private static let collapsed = 3
-
-    private func rowID(_ section: String, _ stamp: String) -> String { section + "\u{1F}" + stamp }
-
-    /// Where a recording shows in By person: the first section that has it
-    /// in view, not folded away.
-    private func personRowID(_ stamp: String, _ shown: [RecordingEntry], frequent: [String]) -> String? {
-        guard filter.people.isEmpty else { return rowID("", stamp) }
-        for section in personSections(shown, frequent: frequent) {
-            guard let index = section.entries.firstIndex(where: { Self.stamp($0) == stamp }) else { continue }
-            if index < Self.collapsed || !filter.isEmpty || model.expandedPeople.contains(section.key) {
-                return rowID(section.key, stamp)
-            }
-        }
-        return nil
-    }
-
     /// Rows go by stamp, which naming a recording (and so its folder) keeps.
     private static func stamp(_ entry: RecordingEntry) -> String { RecordingLibrary.stamp(of: entry.folder) }
-
-    /// A section for each person met most, their newest few first, then
-    /// everyone else. Narrowed by a chip or a search, every match shows.
-    @ViewBuilder
-    private func byPerson(_ shown: [RecordingEntry], frequent: [String]) -> some View {
-        // With people picked, every recording shown has them all: one list, no headings.
-        let sections =
-            filter.people.isEmpty
-            ? personSections(shown, frequent: frequent) : [PersonSection(key: "", entries: shown)]
-        let only = sections.count == 1 && sections[0].key.isEmpty
-        // From every recording, so narrowing never moves the titles.
-        let width = Format.dateColumnWidth(for: model.allEntries.map(\.started))
-        ForEach(Array(sections.enumerated()), id: \.element.key) { index, section in
-            let open = !filter.isEmpty || model.expandedPeople.contains(section.key)
-            let limit = Self.collapsed
-            if !only {
-                MonthHeading(text: section.key.isEmpty ? "Others" : section.key)
-                    .lineLimit(1)
-                    .padding(.top, index == 0 ? 2 : 16)
-                    .padding(.bottom, 2)
-            }
-            ForEach(open ? section.entries : Array(section.entries.prefix(limit))) { entry in
-                row(entry, look: .date(width: width))
-                    .id(rowID(section.key, Self.stamp(entry)))
-            }
-            if filter.isEmpty, section.entries.count > limit {
-                // Its words start where the dates do.
-                LinkButton(open ? "Show fewer" : "Show \(section.entries.count - limit) more", quiet: true) {
-                    if model.expandedPeople.remove(section.key) == nil { model.expandedPeople.insert(section.key) }
-                }
-                .padding(.top, 2)
-            }
-        }
-    }
-
-    // MARK: Design 3, by month, compact
 
     /// One line a recording under each month, with the month's count.
     @ViewBuilder
@@ -298,20 +192,6 @@ struct AllRecordingsView: View {
                 // Two lines while searching, so what was said can show why.
                 row(entry, look: filter.words.isEmpty ? .dense : .weekday).id(Self.stamp(entry))
             }
-        }
-    }
-
-    // MARK: The trial's switch
-
-    /// Temporary: the three layouts side by side for the owner to pick from.
-    private var designStrip: some View {
-        HStack(spacing: 4) {
-            ForEach(Array(["By day", "By person", "By month, compact"].enumerated()), id: \.offset) { index, name in
-                DesignTab(title: "Design \(index + 1)", help: name, on: model.recordingsDesign == index + 1) {
-                    model.recordingsDesign = index + 1
-                }
-            }
-            Spacer()
         }
     }
 }
@@ -356,19 +236,17 @@ private struct SearchField: View {
     }
 }
 
-/// A month's or a person's name over their recordings.
+/// A month's name over its recordings.
 private struct MonthHeading: View {
     let text: String
     /// How many recordings it holds, ending where the lengths do.
-    var count: Int?
+    let count: Int
 
     var body: some View {
         HStack(alignment: .firstTextBaseline) {
             Text(text).font(.system(size: 13, weight: .semibold)).lineLimit(1)
             Spacer(minLength: 8)
-            if let count {
-                Text("\(count)").font(.system(size: 11).monospacedDigit()).foregroundStyle(.tertiary)
-            }
+            Text("\(count)").font(.system(size: 11).monospacedDigit()).foregroundStyle(.tertiary)
         }
         .padding(.horizontal, 6)
     }
@@ -406,33 +284,5 @@ private struct FilterChip: View {
 
     private var fill: Color {
         on ? Color.primary.opacity(hovering ? 0.62 : 0.7) : hovering ? Style.fillHover : Style.fill
-    }
-}
-
-/// One of the trial's layouts: a small tab, filled when shown.
-private struct DesignTab: View {
-    let title: String
-    let help: String
-    let on: Bool
-    let action: () -> Void
-    @State private var hovering = false
-
-    var body: some View {
-        Button(action: action) {
-            Text(title)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(on ? .primary : .secondary)
-                .padding(.horizontal, 8)
-                .frame(height: 22)
-                .background(
-                    on ? Style.fillHover : hovering ? Style.fill : .clear,
-                    in: .rect(cornerRadius: 5, style: .continuous)
-                )
-                .contentShape(.rect)
-        }
-        .buttonStyle(Pressable())
-        .onHover { hovering = $0 }
-        .hoverHelp(help)
-        .accessibilityAddTraits(on ? .isSelected : [])
     }
 }
