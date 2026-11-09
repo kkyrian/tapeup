@@ -176,6 +176,19 @@ TapeUp is free and isn't notarized by Apple, so macOS stops it once:
 After that, TapeUp updates itself. It checks once a day and never installs
 while you record; **Check for Updates…** is in the ··· menu.
 
+## Models
+
+TapeUp runs open models on your Mac with [speech-swift](https://github.com/soniqo/speech-swift) on MLX:
+
+- **Transcripts:** [Qwen3-ASR 1.7B](https://huggingface.co/aufklarer/Qwen3-ASR-1.7B-MLX-8bit), 8-bit,
+  or [0.6B](https://huggingface.co/aufklarer/Qwen3-ASR-0.6B-MLX-4bit), 4-bit, on Macs with less than
+  16 GB of memory, with [Silero](https://huggingface.co/aufklarer/Silero-VAD-v6.2.1-MLX) to find the pauses.
+- **Speakers:** [Nemotron 3 Diarization](https://huggingface.co/aufklarer/Nemotron-3-Diarization-100M-MLX-INT8)
+  and [WeSpeaker](https://huggingface.co/aufklarer/WeSpeaker-ResNet34-LM-MLX) voice prints.
+- **Titles and who was there:** the Claude Code or Codex you pick, with the
+  model it is set to. Without one, Apple Intelligence's model on your Mac
+  writes the titles.
+
 ## Build
 
 Needs Xcode and its Metal Toolchain (`xcodebuild -downloadComponent MetalToolchain`).
