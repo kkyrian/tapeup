@@ -4,6 +4,16 @@
         <title>TapeUp</title>
         <link>https://github.com/kkyrian/tapeup</link>
         <item>
+            <title>TapeUp 0.1.1</title>
+            <pubDate>Mon, 09 Nov 2026 04:30:04 GMT</pubDate>
+            <sparkle:version>0.1.1</sparkle:version>
+            <sparkle:shortVersionString>0.1.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[<h3>What's new</h3><ul><li><b>Get names from your AI assistant</b>, on a recording with no names to suggest yet, now opens People on its <b>Fill from your AI</b> steps: copy the request, paste it into your assistant, then paste its answer back. Before, it opened the list and left you to find the steps.</li></ul><h3>Install</h3><p>Download <b>TapeUp.dmg</b> below and drag TapeUp to Applications, or:</p><pre>brew install kkyrian/tap/tapeup
+</pre><p>Already on 0.1.0? TapeUp updates itself when you're not recording, or use <b>Check for Updates…</b> in the ··· menu.</p>]]></description>
+            <enclosure url="https://github.com/kkyrian/tapeup/releases/download/v0.1.1/TapeUp.dmg" type="application/octet-stream" sparkle:edSignature="I2x/OX/cQTvXKFzuloRYri94vm3QungQwwS4zZQlkzHBrGfANGQp6/8smwzopQjLUGR9Xt/ZhW833NRuMgC1Dg==" length="49899114"/>
+        </item>
+        <item>
             <title>TapeUp 0.1.0</title>
             <pubDate>Mon, 09 Nov 2026 00:10:45 GMT</pubDate>
             <sparkle:version>0.1.0</sparkle:version>
