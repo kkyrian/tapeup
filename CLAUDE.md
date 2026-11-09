@@ -1,23 +1,33 @@
 This repository owns TapeUp, a macOS menu-bar recorder that captures computer
 audio and the default microphone together and saves each recording as a
 self-describing folder for agents to process later. It is built with agents and
-will be public under MIT; everything committed here must be safe to publish.
+public under MIT; everything committed here must be safe to publish.
 
 `_docs/SYSTEM.md` is the design authority for purpose, boundaries,
 architecture, invariants, and decisions. This file is its lean operational
 projection and loses on disagreement.
 
-After this file, read `_docs/STATE.md`, then any active artifact it names, in
-full. Never proceed from a mid-session summary alone when a project document
-exists; summaries are lossy and settled state is on disk.
+## Public and private layers
 
-## Public repository, private notes
+This project has two layers. The public repository (this folder) holds code,
+README, CONTRIBUTING, LICENSE, its own `CLAUDE.md` and a public `_docs/`. A
+maintainer may keep a private workspace around it; contributors never need it.
 
-Never commit people's names, personal context, private paths, or the
-maintainer's private discussions. Those live in the maintainer's private
-notes. On the maintainer's machines an uncommitted `CLAUDE.local.md` points to
-them; read it when present, and keep anything derived from it out of commits
-unless it is public-safe.
+- Every instruction lives once. It goes in the public `CLAUDE.md` unless it
+  names the owner's words, people, accounts, machines or strategy; then it goes
+  in the private `CLAUDE.md`.
+- Records lean private: current state, discussions, decision reasons, memory
+  and source material go in the private `_docs/`.
+- A public doc exists only when someone deliberately cleans up a note and
+  promotes it into the public `_docs/`.
+- `_docs/SYSTEM.md` in the public repository is the single full design
+  authority. It links public docs directly and cites private records by
+  stable ID (`TU-014`). Agents resolve an ID in the private
+  `_docs/decisions.md`; contributors see only the ID.
+- Public instructions may rely on skills embedded with `install: embed`.
+  Linked skills are absent for others and change nothing for them.
+
+Never commit people's names, personal context or private paths here.
 
 ## Verification
 
@@ -58,10 +68,11 @@ line; otherwise skip this. Linked skills are local state and never committed.
 The `mattpocock-*` skills supply technique, never layout. Where one names a
 glossary (`GLOSSARY.md`, `CONTEXT.md`), read `_docs/SYSTEM.md` § Glossary if
 it exists. Where one names ADRs or `docs/adr/`, the decisions are
-`_docs/SYSTEM.md` and `_docs/_discussions/`. Where one names an issue
-tracker, a spec, `.scratch/`, or `docs/agents/issue-tracker.md`, the work
-record is `_docs/STATE.md`, `_docs/_discussions/`, and the commit and PR
-history; take specs from there instead of running setup. Never create
+`_docs/SYSTEM.md` (and the private `_docs/decisions.md` its IDs point to). Where
+one names an issue tracker, a spec, `.scratch/`, or
+`docs/agents/issue-tracker.md`, the work record is the issues, the commit and
+PR history, and the private layer's `_docs/STATE.md` and `_docs/_discussions/`
+when present; take specs from there instead of running setup. Never create
 `GLOSSARY.md`, `CONTEXT.md`, `docs/adr/`, `docs/agents/`, or `.scratch/`.
 
 ## Artifact Rules
@@ -90,10 +101,11 @@ preserve them verbatim and add
 `> Raw source material — exempt from artifact rules; consumed by: <link(s)>`
 when a consuming artifact exists.
 
-Design discussions live in `_docs/_discussions/` with
+Design discussions live in the private layer's `_docs/_discussions/` with
 `YYYY-MM-DD-<topic>.md` names, or a same-named folder when supporting material
-must travel with the discussion. When architecture, invariants, or design
-decisions change, update `_docs/SYSTEM.md` in the same change.
+must travel with the discussion; contributors discuss in issues and pull
+requests. When architecture, invariants, or design decisions change, update
+`_docs/SYSTEM.md` in the same change.
 
 Each fact has one canonical home. Operational files may carry a deliberately
 sized projection with an explicit precedence pointer; they must not become an
@@ -104,8 +116,8 @@ unmarked second authority.
 - Use a system temporary directory or the repository's ignored `tmp/`
   directory for disposable intermediates, including test recordings.
 - Put durable evidence and supporting artifacts for bounded design or research
-  work beside the discussion that owns them, usually under
-  `_docs/_discussions/<YYYY-MM-DD-topic>/`. Audio evidence stays out of Git.
+  work beside the private discussion that owns them. Audio evidence stays out
+  of Git.
 - Put generated deliverables meant to be inspected or retained, but which are
   not canonical project documentation, under `_output/<skill-or-tool>/`.
   `_output/` is local by default; commit an output only when it is itself a
@@ -134,8 +146,8 @@ scope where it is true instead of duplicating it here.
 ## How to update this document
 
 Keep this file limited to instructions and orientation needed on every run.
-Put design rationale in `_docs/SYSTEM.md`, current activity in
-`_docs/STATE.md`, and folder-specific rules in nested `CLAUDE.md` files.
+Put design in `_docs/SYSTEM.md`, current activity and decision reasons in the
+private layer, and folder-specific rules in nested `CLAUDE.md` files.
 Re-project canonical blocks from their named sources rather than editing them
 independently.
 
