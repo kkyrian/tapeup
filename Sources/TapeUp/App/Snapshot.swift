@@ -123,6 +123,11 @@ enum Snapshot {
             model.stage(phase: .idle, microphone: devices.microphone, output: devices.output)
             model.updatedTo = "0.1.1"
         }
+        shoot("11-updated-with-problem") {
+            model.stage(
+                phase: .idle, microphone: devices.microphone, output: devices.output,
+                problem: "Could not start recording: the microphone is in use by another app.")
+        }
         model.updatedTo = nil
         shoot("12-settings") { model.openSettings() }
         shoot("12-settings-updates-off") { model.automaticUpdates = false }

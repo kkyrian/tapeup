@@ -105,7 +105,7 @@ struct LinkButton: View {
                 .foregroundStyle(Color.accentColor)
                 .padding(.horizontal, 6)
                 .frame(height: 22)
-                .background(hovering ? Style.fill : .clear, in: .rect(cornerRadius: 5, style: .continuous))
+                .background(hovering ? Style.fillHover : .clear, in: .rect(cornerRadius: 5, style: .continuous))
                 .contentShape(.rect)
         }
         .buttonStyle(Pressable())

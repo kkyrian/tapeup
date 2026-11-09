@@ -52,7 +52,7 @@ struct SettingsView: View {
             if Updates.isSetUp {
                 SettingRow(
                     symbol: "arrow.down.circle", title: "Automatic updates",
-                    subtitle: "Installs when idle, never while recording",
+                    subtitle: "Never while recording",
                     on: model.automaticUpdates, action: { model.automaticUpdates.toggle() }
                 ) { MiniSwitch(on: model.automaticUpdates) }
                 .clickTarget("Automatic updates")

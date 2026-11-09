@@ -45,13 +45,14 @@ struct PanelView: View {
         } else {
             VStack(spacing: 0) {
                 RecorderView(model: model)
-                if let version = model.updatedTo {
-                    UpdatedBanner(version: version, dismiss: { model.updatedTo = nil })
+                if let problem = model.problem {
+                    ProblemBanner(text: problem, dismiss: model.dismissProblem)
                         .padding(.horizontal, Style.inset)
                         .padding(.bottom, Style.inset)
                 }
-                if let problem = model.problem {
-                    ProblemBanner(text: problem, dismiss: model.dismissProblem)
+                // Information, so below a problem the user has to act on.
+                if let version = model.updatedTo {
+                    UpdatedBanner(version: version, dismiss: { model.updatedTo = nil })
                         .padding(.horizontal, Style.inset)
                         .padding(.bottom, Style.inset)
                 }
@@ -73,14 +74,25 @@ struct UpdatedBanner: View {
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
                 .frame(width: Style.textEdge - Style.inset, alignment: .leading)
-            Text("Updated to \(version)").font(.system(size: 12))
+            Text("Updated to \(version)")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
             Spacer(minLength: 4)
             if let page = Updates.releasePage(for: version) {
-                LinkButton("What's new") { NSWorkspace.shared.open(page) }
-                    .hoverHelp("Open the release notes")
+                // Read, the line has done its job.
+                LinkButton("What's new") {
+                    NSWorkspace.shared.open(page)
+                    dismiss()
+                }
+                .fixedSize()
+                .hoverHelp("Open the release notes")
             }
             IconButton(symbol: "xmark", help: "Dismiss", size: 18, action: dismiss)
         }
+        // The problem line's height: the buttons' hover fills spill into the padding.
+        .frame(height: 16)
     }
 }
 
