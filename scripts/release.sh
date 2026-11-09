@@ -350,6 +350,10 @@ fi
 
 step "Done: TapeUp $version"
 echo "Image: $dmg"
-((dry_run)) || echo "Release: https://github.com/$repo/releases/tag/$tag"
-((draft)) && echo "A draft: only you see it. After the repository is public: scripts/release.sh --publish $version"
-true
+if ((draft)); then
+  # A draft has no page at its tag until it is published.
+  echo "Draft: $(gh release view "$tag" --repo "$repo" --json url -q .url)"
+  echo "Only you see it. After the repository is public: scripts/release.sh --publish $version"
+elif ((!dry_run)); then
+  echo "Release: https://github.com/$repo/releases/tag/$tag"
+fi
