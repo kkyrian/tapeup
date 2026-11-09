@@ -67,6 +67,25 @@ final class Imports {
     var importing: Bool { worker != nil }
     var ready: [Item] { items.filter { $0.state == .ready } }
     var readyBytes: Int64 { ready.reduce(0) { $0 + ($1.candidate?.bytes ?? 0) } }
+
+    /// How much of these files is copied, by size, so the bar moves within
+    /// a file too. A failed file counts as done.
+    static func copiedShare(of items: [Item]) -> Double {
+        var total = 0.0
+        var copied = 0.0
+        for item in items {
+            let bytes = Double(max(item.candidate?.bytes ?? 1, 1))
+            switch item.state {
+            case .copied: copied += bytes
+            case .copying: copied += bytes * min(max(item.copied, 0), 1)
+            case .failed: copied += bytes
+            case .ready, .reading: break
+            default: continue
+            }
+            total += bytes
+        }
+        return total > 0 ? copied / total : 0
+    }
     /// Files dropped and not yet listed, or listed and not yet read.
     var reading: Bool { !adding.isEmpty || items.contains { $0.state == .reading } }
     private var adding: Set<UUID> = []
@@ -415,7 +434,8 @@ struct ImportView: View {
             let done = current.count { $0.state == .copied || $0.state.isFailure }
             let total = done + current.count { $0.state == .ready || $0.state == .copying || $0.state == .reading }
             HStack(spacing: 12) {
-                ProgressView(value: Double(done), total: Double(max(total, 1)))
+                ProgressView(value: Imports.copiedShare(of: current))
+                    .animation(.linear(duration: 0.2), value: Imports.copiedShare(of: current))
                 Text("Copying \(min(done + 1, total)) of \(total)")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)

@@ -134,6 +134,20 @@ enum UITest {
         panel.show()
         check("idle")
         let idleHeight = panel.window.frame.height
+        // The import bar moves within a file, not only between files.
+        let file = { (state: Imports.State, copied: Double) in
+            Imports.Item(url: URL(fileURLWithPath: "/x/\(UUID())"), state: state, copied: copied)
+        }
+        expect(
+            abs(Imports.copiedShare(of: [file(.copying, 0.85)]) - 0.85) < 0.001,
+            "one file 85% copied fills 85% of the bar")
+        expect(
+            abs(Imports.copiedShare(of: [file(.copied, 1), file(.copying, 0.5), file(.ready, 0)]) - 0.5) < 0.001,
+            "a file and a half of three fills half the bar")
+        expect(
+            abs(Imports.copiedShare(of: [file(.failed("x"), 0), file(.copying, 0), file(.duplicate, 0)]) - 0.5) < 0.001,
+            "a failed file counts as done and a duplicate not at all")
+        expect(Imports.copiedShare(of: []) == 0, "nothing to copy leaves the bar empty")
         // From a recording, Get names from your AI opens on the steps.
         model.openPeople(filling: true)
         settle(0.3)
