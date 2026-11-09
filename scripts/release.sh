@@ -10,8 +10,9 @@
 # 3. Makes TapeUp.dmg (the app and an Applications link, volume
 #    "TapeUp <version>"), checks the signature and the mounted image.
 # 4. Signs the image for Sparkle (the update key in the keychain) and adds an
-#    item to packaging/appcast.xml, with notes from the commits since the
-#    last tag.
+#    item to packaging/appcast.xml. The notes, for people, are
+#    packaging/release-notes/<version>.md; a dry run without one lists the
+#    feat, fix and perf commits since the last tag instead.
 # 5. Commits, tags v<version>, pushes main and the tag, and publishes a
 #    GitHub release with TapeUp.dmg and appcast.xml.
 # 6. If the tap is cloned ($TAP_DIR, default ~/Developer/homebrew-tap),
@@ -167,6 +168,8 @@ else
   identity="$(awk -v n="\"$identity_name\"" 'index($0, n) {print $2; exit}' <<<"$identities")"
   [[ -n "$identity" ]] || fail "no trusted \"$identity_name\" identity; run scripts/make-keys.sh first."
   [[ -s "$public_key_file" ]] || fail "$public_key_file is missing; run scripts/make-keys.sh and commit it."
+  [[ -s "packaging/release-notes/$version.md" ]] \
+    || fail "packaging/release-notes/$version.md is missing: write what this release brings, for people, and commit it."
 fi
 
 make verify-fast
@@ -258,22 +261,22 @@ echo "Volume \"TapeUp $version\": TapeUp.app and Applications."
 # --- Release notes and the appcast -------------------------------------------
 
 step "Writing the release notes and the appcast"
-last_tag="$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || true)"
-if [[ -z "$last_tag" ]]; then
-  notes=("The first release.")
+written="packaging/release-notes/$version.md"
+if [[ -s "$written" ]]; then
+  cp "$written" "$out/notes.md"
 else
-  # What changed for people: features, fixes and speedups, without the
-  # Conventional Commits prefix. Other commits only when there are none.
-  subjects="$(git log --no-merges --format=%s "$last_tag..HEAD")"
-  user_facing="$(grep -E '^(feat|fix|perf)(\([^)]*\))?!?: ' <<<"$subjects" | sed -E 's/^[a-z]+(\([^)]*\))?!?: //' || true)"
-  [[ -n "$user_facing" ]] || user_facing="$(sed -E 's/^[a-z]+(\([^)]*\))?!?: //' <<<"$subjects")"
-  notes=()
-  while IFS= read -r line; do
-    [[ -n "$line" ]] && notes+=("$(tr '[:lower:]' '[:upper:]' <<<"${line:0:1}")${line:1}")
-  done <<<"$user_facing"
-  ((${#notes[@]})) || notes=("Small changes.")
+  last_tag="$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || true)"
+  if [[ -z "$last_tag" ]]; then
+    echo "- The first release." >"$out/notes.md"
+  else
+    # What changed for people: features, fixes and speedups, without the
+    # Conventional Commits prefix.
+    subjects="$(git log --no-merges --format=%s "$last_tag..HEAD")"
+    user_facing="$(grep -E '^(feat|fix|perf)(\([^)]*\))?!?: ' <<<"$subjects" | sed -E 's/^[a-z]+(\([^)]*\))?!?: //' || true)"
+    [[ -n "$user_facing" ]] || user_facing="Small changes."
+    sed -E 's/^(.)/- \1/' <<<"$user_facing" >"$out/notes.md"
+  fi
 fi
-printf -- '- %s\n' "${notes[@]}" >"$out/notes.md"
 
 signature=""
 if ((${#sign_args[@]})); then
@@ -286,17 +289,48 @@ else
 fi
 
 minimum="$(plutil -extract LSMinimumSystemVersion raw Resources/Info.plist)"
-NOTES="$(printf '%s\n' "${notes[@]}")" python3 - "$appcast" "$version" "$tag" "$minimum" "$signature" "$repo" <<'PY'
-import email.utils, html, os, sys
+NOTES="$(cat "$out/notes.md")" python3 - "$appcast" "$version" "$tag" "$minimum" "$signature" "$repo" <<'PY'
+import email.utils, html, os, re, sys
 path, version, tag, minimum, signature, repo = sys.argv[1:]
-items = "".join(f"<li>{html.escape(n)}</li>" for n in os.environ["NOTES"].splitlines() if n)
+
+def inline(text):
+    text = html.escape(text, quote=False)
+    text = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", text)
+    text = re.sub(r"`(.+?)`", r"<code>\1</code>", text)
+    return re.sub(r"\[(.+?)\]\((https?://[^)]+)\)", r'<a href="\2">\1</a>', text)
+
+# The notes' Markdown as the plain HTML Sparkle's window shows.
+parts, in_list, in_code = [], False, False
+for line in os.environ["NOTES"].splitlines():
+    if line.startswith("```"):
+        parts.append("</pre>" if in_code else "<pre>")
+        in_code = not in_code
+        continue
+    if in_code:
+        parts.append(html.escape(line) + "\n")
+        continue
+    if line.startswith("- ") and not in_list:
+        parts.append("<ul>")
+        in_list = True
+    elif not line.startswith("- ") and in_list:
+        parts.append("</ul>")
+        in_list = False
+    if line.startswith("## "):
+        parts.append(f"<h3>{inline(line[3:])}</h3>")
+    elif line.startswith("- "):
+        parts.append(f"<li>{inline(line[2:])}</li>")
+    elif line.strip():
+        parts.append(f"<p>{inline(line)}</p>")
+if in_list:
+    parts.append("</ul>")
+items = "".join(parts)
 item = f"""        <item>
             <title>TapeUp {version}</title>
             <pubDate>{email.utils.formatdate(localtime=False, usegmt=True)}</pubDate>
             <sparkle:version>{version}</sparkle:version>
             <sparkle:shortVersionString>{version}</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>{minimum}</sparkle:minimumSystemVersion>
-            <description><![CDATA[<ul>{items}</ul>]]></description>
+            <description><![CDATA[{items}]]></description>
             <enclosure url="https://github.com/{repo}/releases/download/{tag}/TapeUp.dmg" type="application/octet-stream" {signature}/>
         </item>
 """
