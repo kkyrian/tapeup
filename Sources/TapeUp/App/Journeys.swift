@@ -79,8 +79,8 @@ struct Journey {
         })
 
     /// In a call in another app: ⌥⌘R, a look at the words arriving in the
-    /// panel, close up, then stop from the floating controls; the saved
-    /// recording drops from the menu bar.
+    /// panel, then stop from the floating controls; the saved recording
+    /// drops from the menu bar.
     static let floating = Journey(
         name: "floating", size: CGSize(width: 640, height: 470),
         setUp: { take in
@@ -94,7 +94,7 @@ struct Journey {
             await take.pause(0.25)
             var wordsFrom: TimeInterval?
             take.startRecording(from: 0) { elapsed in
-                // Nothing yet, then a few words at a time once the camera is in.
+                // Nothing yet, then a few words at a time once the panel is open.
                 guard let from = wordsFrom else { return [] }
                 let words = said.prefix(3).joined(separator: " ").split(separator: " ")
                 let shown = min(words.count, max(0, Int((elapsed - from) / 0.75) + 1) * 3)
@@ -104,17 +104,11 @@ struct Journey {
             await take.pause(0.6)
             withAnimation(.easeOut(duration: 0.3)) { take.director.keys = nil }
             await take.pause(0.6)
-            // Into the panel's Transcript row as the words arrive.
+            // The panel, as the words arrive in its Transcript row.
             await take.openPanel()
-            // Out of the close-up, so the pointer doesn't loom over it.
             await take.move(to: CGPoint(x: 120, y: 420), 0.5)
-            take.director.zoomFocus = take.at(CGPoint(x: 156, y: Spot.transcript.y))
-            withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.3)) { take.director.zoom = 2.0 }
-            await take.pause(0.9)
             wordsFrom = take.model.elapsed
             await take.pause(4.8)
-            withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.3)) { take.director.zoom = 1 }
-            await take.pause(1.0)
             withAnimation(.easeOut(duration: 0.12)) {
                 take.director.panelOpen = false
                 take.director.itemPressed = false
@@ -289,22 +283,14 @@ struct Journey {
             {
                 let heard = zip(lines, result.assigned).filter { $0.1 == 1 }.map(\.0.text)
                 await take.move(toTarget: "Play voice 1", 0.7)
-                // Close up on the voices, to see the quote follow the sound.
-                // Below the buttons, down to the last voice.
-                take.director.zoomFocus = take.at(CGPoint(x: 156, y: 440))
-                withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.3)) { take.director.zoom = 1.35 }
-                await take.pause(1.0)
                 await take.click { take.model.speakers.player.stage(1, in: entry, line: heard.first) }
-                // Aside, so the Stop it now shows is seen.
-                let cursor = take.director.cursor
-                await take.move(to: CGPoint(x: cursor.x + 34, y: cursor.y + 10), 0.4)
                 for line in heard.dropFirst().prefix(1) {
                     await take.pause(1.5)
                     take.model.speakers.player.stage(1, in: entry, line: line)
                 }
                 await take.pause(1.3)
             }
-            // Name it, and end close up on the name.
+            // Name it while it plays, then stop it.
             if let entry = take.model.card?.entry {
                 let others = take.model.suggestions(matching: "", excluding: entry.people.names, limit: 12)
                 let items = entry.people.names + (others.isEmpty ? [] : ["-"] + others)
@@ -312,8 +298,8 @@ struct Journey {
                     take.model.speakers.name(1, "Priya Shah", in: entry)
                 }
                 await take.pause(0.6)
-                // The voice has played through.
-                take.model.speakers.player.stop()
+                await take.move(toTarget: "Play voice 1", 0.6)
+                await take.click { take.model.speakers.player.stop() }
             }
             await take.move(to: take.at(CGPoint(x: 330, y: Spot.voice(3).y)), 0.6)
             await take.pause(1.6)

@@ -53,7 +53,7 @@ It's optional, and it's what a transcript can't know on its own.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset=".github/images/speakers-dark.gif">
-  <img align="right" width="380" src=".github/images/speakers.gif" alt="On a saved recording, Label speakers finds four voices, each with how long it talked and a line it said. Play on the first voice turns to Stop, and its line changes to each thing that voice said as it plays. It is named Priya Shah from a menu.">
+  <img align="right" width="380" src=".github/images/speakers.gif" alt="On a saved recording, Label speakers finds four voices, each with how long it talked and a line it said. Play on the first voice turns to Stop, and its line changes to each thing that voice said as it plays. It is named Priya Shah from a menu, then stopped.">
 </picture>
 
 ### Know who said what
@@ -129,7 +129,7 @@ right.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset=".github/images/floating-dark.gif">
-  <img align="left" width="380" src=".github/images/floating.gif" alt="In a video call in another app, ⌥⌘R starts recording, and small controls float under the menu bar with the time, Pause and Stop. The panel opens and the view closes in on its Transcript row, where the call’s words arrive a few at a time. Stop on the floating controls saves: the recording drops from the menu bar and names itself “Beta launch plan”.">
+  <img align="left" width="380" src=".github/images/floating.gif" alt="In a video call in another app, ⌥⌘R starts recording, and small controls float under the menu bar with the time, Pause and Stop. The panel opens, and the call’s words arrive in its Transcript row a few at a time. Stop on the floating controls saves: the recording drops from the menu bar and names itself “Beta launch plan”.">
 </picture>
 
 ### Record from any app
