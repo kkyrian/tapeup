@@ -20,8 +20,9 @@ contributors never need it.
 - Records lean private: current state, discussions, decision reasons, memory,
   source material and private deliverables go in the enclosing folder's
   `_docs/` and `_output/`, never in `tapeup/`.
-- A public doc exists only when someone deliberately cleans up a note and
-  promotes it into `tapeup/_docs/`.
+- Nothing is public by default. A public doc exists only when the owner
+  approves promoting a curated document into `tapeup/_docs/`; agents may
+  propose candidates. Raw discussions are never promoted.
 - `tapeup/_docs/SYSTEM.md` is the single full design authority. It links
   public docs directly and cites private records by stable ID
   (`TU-014`). Agents resolve an ID in the enclosing folder's
