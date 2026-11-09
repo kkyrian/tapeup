@@ -18,6 +18,7 @@ struct PeopleView: View {
     init(model: AppModel) {
         self.model = model
         _findShown = State(initialValue: model.peopleList.people.count > 8)
+        _filling = State(initialValue: model.peopleOpensFilling)
     }
 
     var body: some View {
@@ -75,6 +76,7 @@ struct PeopleView: View {
                     Label(copied ? "Copied" : "Copy request", systemImage: copied ? "checkmark" : "doc.on.doc")
                         .contentTransition(.symbolEffect(.replace))
                 }
+                .clickTarget("Copy request")
                 FlatButton(kind: .plain, action: model.pasteAssistantAnswer) {
                     Label("Paste answer", systemImage: "doc.on.clipboard")
                 }

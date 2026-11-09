@@ -134,7 +134,15 @@ enum UITest {
         panel.show()
         check("idle")
         let idleHeight = panel.window.frame.height
+        // From a recording, Get names from your AI opens on the steps.
+        model.openPeople(filling: true)
+        settle(0.3)
+        expect(ClickTargets.frame("Copy request") != nil, "Get names from your AI opens People on its steps")
+        model.closePeople()
+        settle(0.2)
         model.openPeople()
+        settle(0.3)
+        expect(ClickTargets.frame("Copy request") == nil, "People from the menu opens on the list")
         check("people")
         let seeded = model.peopleList
         // ⌘V the way a person pastes a name copied from an email, through

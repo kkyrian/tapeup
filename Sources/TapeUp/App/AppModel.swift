@@ -36,6 +36,8 @@ final class AppModel {
 
     /// The page in place of the recorder: who you record with.
     var showingPeople = false
+    /// The People page opens on its Fill from your AI steps.
+    private(set) var peopleOpensFilling = false
     /// The page in place of the recorder: the folder, your AI and the app.
     var showingSettings = false
     /// The page in place of the recorder: every recording, to browse and search.
@@ -653,10 +655,13 @@ final class AppModel {
         return true
     }
 
-    func openPeople() {
+    /// People, with the steps for filling it from your AI open when asked
+    /// from a recording that has no names to suggest yet.
+    func openPeople(filling: Bool = false) {
         // A card still saving comes back when the page closes.
         if card?.finishing != true { card = nil }
         peopleNotice = nil
+        peopleOpensFilling = filling
         showingSettings = false
         showingAllRecordings = false
         showingPeople = true

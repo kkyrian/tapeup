@@ -109,6 +109,12 @@ enum Snapshot {
             model.openPeople()
             model.stage(phase: .idle, microphone: devices.microphone, output: devices.output, notice: .added(12))
         }
+        shoot("08-people-filling") {
+            model.closePeople()
+            model.openPeople(filling: true)
+        }
+        model.closePeople()
+        model.openPeople()
         model.root = empty
         shoot("09-people-empty") {
             model.stage(phase: .idle, microphone: devices.microphone, output: devices.output, notice: .copied)

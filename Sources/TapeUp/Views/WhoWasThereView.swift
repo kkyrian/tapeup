@@ -30,7 +30,8 @@ struct WhoWasThereView: View {
             namesField
             suggestionsView
             if !model.hasSuggestionSource {
-                LinkButton("Get names from your AI assistant", action: model.openPeople).padding(.leading, -6)
+                LinkButton("Get names from your AI assistant") { model.openPeople(filling: true) }
+                    .padding(.leading, -6)
             }
         }
         .animation(.easeOut(duration: 0.2), value: savedFlash)

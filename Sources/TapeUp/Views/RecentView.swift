@@ -73,7 +73,7 @@ struct MoreMenu: View {
     var body: some View {
         MoreButton(help: "TapeUp", badge: model.agents.needsAttention) {
             Button("Import…") { model.openImport([]) }
-            Button("People…", action: model.openPeople)
+            Button("People…") { model.openPeople() }
             Button(model.agents.settingsTitle, action: model.openSettings)
             Divider()
             Button("Check for Updates…") { model.checkForUpdates?() }
