@@ -24,7 +24,11 @@ brew install kkyrian/tap/tapeup
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset=".github/images/record-dark.gif">
-    <img src=".github/images/record.gif" width="420" alt="Clicking the cassette in the menu bar opens TapeUp. The Microphone and Transcript switches are turned on, and Record starts the clock, and the call's words appear in the Transcript row. Stop saves the recording, and it names itself “Beta launch plan”.">
+    <img src=".github/images/record.gif" width="357" alt="Clicking the cassette in the menu bar opens TapeUp. The Microphone and Transcript switches are turned on, and Record starts the clock, and the call's words appear in the Transcript row. Stop saves the recording, and it names itself “Beta launch plan”.">
+  </picture>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/images/import-dark.gif">
+    <img src=".github/images/import.gif" width="450" alt="From the ··· menu, Import… opens the Import window. Four recordings are dragged in from a Finder window and listed with their dates, lengths and sizes. Import 4 recordings copies them in, and each is transcribed in turn: a ring fills, the lines spoken pass under its name with the time left, speakers are found, and a check marks it ready. Done closes the window, and the recordings appear in TapeUp's list under the days they were made.">
   </picture>
 </p>
 
@@ -81,10 +85,6 @@ or drop them on the menu-bar icon. Each comes in under its own name and
 date, and is transcribed on your Mac, with how far each has come and a
 glimpse of what was said. The originals stay where they are.
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset=".github/images/import-dark.gif">
-  <img width="100%" src=".github/images/import.gif" alt="From the ··· menu, Import… opens the Import window. Four recordings are dragged in from a Finder window and listed with their dates, lengths and sizes. Import 4 recordings copies them in, and each is transcribed in turn: a ring fills, the lines spoken pass under its name with the time left, speakers are found, and a check marks it ready. Done closes the window, and the recordings appear in TapeUp's list under the days they were made.">
-</picture>
 
 <br clear="all">
 <br>
