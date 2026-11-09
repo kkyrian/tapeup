@@ -24,11 +24,11 @@ brew install kkyrian/tap/tapeup
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset=".github/images/record-dark.gif">
-    <img src=".github/images/record.gif" width="36%" alt="Clicking the cassette in the menu bar opens TapeUp. The Microphone and Transcript switches are turned on, and Record starts the clock, and the call's words appear in the Transcript row. Stop saves the recording, and it names itself “Beta launch plan”.">
+    <img src=".github/images/record.gif" width="35.7%" alt="Clicking the cassette in the menu bar opens TapeUp. The Microphone and Transcript switches are turned on, and Record starts the clock, and the call's words appear in the Transcript row. Stop saves the recording, and it names itself “Beta launch plan”.">
   </picture>
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset=".github/images/import-dark.gif">
-    <img src=".github/images/import.gif" width="61%" alt="The Import window is open beside a Finder window. Four recordings are dragged in from the Finder and listed with their dates, lengths and sizes. Import 4 recordings copies them in, and each is transcribed in turn: a ring fills, the lines spoken pass under its name with the time left, speakers are found, and a check marks it ready. Done closes the window, and the recordings appear in TapeUp's list under the days they were made.">
+    <img src=".github/images/import.gif" width="61.2%" alt="The Import window is open beside a Finder window. Four recordings are dragged in from the Finder and listed with their dates, lengths and sizes. Import 4 recordings copies them in, and each is transcribed in turn: a ring fills, the lines spoken pass under its name with the time left, speakers are found, and a check marks it ready. Done closes the window, and the recordings appear in TapeUp's list under the days they were made.">
   </picture>
 </p>
 
