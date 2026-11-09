@@ -80,17 +80,30 @@ With headphones on, your own lines are marked from the start.
 <br clear="all">
 <br>
 
+### Hand it to your agent
+
+Press **Copy path**, paste it into Claude Code or Codex, and ask.
+That answer is Claude Code's own, unedited.
+
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset=".github/images/import-progress-dark.gif">
-  <img align="right" width="380" src=".github/images/import-progress.gif" alt="The Import window transcribes four recordings in turn. Each one's ring fills as the lines spoken pass under its name, with the percentage and the time left, and a check marks it ready with its speakers.">
+  <source media="(prefers-color-scheme: dark)" srcset=".github/images/handoff-dark.gif">
+  <img width="100%" src=".github/images/handoff.gif" alt="Copy path on the recording, pasted into Claude Code with the question “What did we decide, and what do I owe by when?”. Claude reads the transcript and answers with the decisions, a table of what the user owes and by when, what others owe, and what is still open.">
 </picture>
 
-### Bring in old recordings
+<br>
 
-Open **Import…** from the ··· menu and drop in files or whole folders,
-or drop them on the menu-bar icon. Each comes in under its own name and
-date, and is transcribed on your Mac, with how far each has come and a
-glimpse of what was said. The originals stay where they are.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/images/settings-dark.gif">
+  <img align="right" width="380" src=".github/images/settings.gif" alt="From the ··· menu, Settings… opens Settings. Under Your AI, Claude Code is picked instead of Off.">
+</picture>
+
+### Let your AI do the naming
+
+Pick Claude Code or Codex in Settings, the one you're signed in to,
+and it titles each recording and suggests who was there.
+
+It stays off until you pick one. Without it, Apple Intelligence titles
+recordings where your Mac has it.
 
 <br clear="all">
 <br>
@@ -111,18 +124,6 @@ transcripts start in one click.
 <br clear="all">
 <br>
 
-### Hand it to your agent
-
-Press **Copy path**, paste it into Claude Code or Codex, and ask.
-That answer is Claude Code's own, unedited.
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset=".github/images/handoff-dark.gif">
-  <img width="100%" src=".github/images/handoff.gif" alt="Copy path on the recording, pasted into Claude Code with the question “What did we decide, and what do I owe by when?”. Claude reads the transcript and answers with the decisions, a table of what the user owes and by when, what others owe, and what is still open.">
-</picture>
-
-<br>
-
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset=".github/images/people-dark.gif">
   <img align="right" width="380" src=".github/images/people.gif" alt="From the ··· menu, People… opens the list of people: Sam, Priya Shah, José Ortiz, Ana and Mei, each with a note. Nora Quinn is added with the note “sales”.">
@@ -135,22 +136,6 @@ Names with a word on who they are. Add them here, or press
 
 The list feeds the name suggestions, and transcripts spell those names
 right.
-
-<br clear="all">
-<br>
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset=".github/images/settings-dark.gif">
-  <img align="left" width="380" src=".github/images/settings.gif" alt="From the ··· menu, Settings… opens Settings. Under Your AI, Claude Code is picked instead of Off.">
-</picture>
-
-### Let your AI do the naming
-
-Pick Claude Code or Codex in Settings, the one you're signed in to,
-and it titles each recording and suggests who was there.
-
-It stays off until you pick one. Without it, Apple Intelligence titles
-recordings where your Mac has it.
 
 <br clear="all">
 
