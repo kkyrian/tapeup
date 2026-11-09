@@ -138,6 +138,10 @@ struct TranscriptStateTests {
         let entry = try #require(RecordingLibrary.entry(at: folder))
         #expect(entry.transcript == .done)
         #expect(entry.clipboardText.hasSuffix("\ntranscript: \(folder.path)/transcript.md"))
+        // Once speakers are labeled, Copy path points to the labeled transcript.
+        FileManager.default.createFile(
+            atPath: folder.appendingPathComponent(SpeakerLabels.fileName).path, contents: Data("Sam: Hello.".utf8))
+        #expect(entry.clipboardText.hasSuffix("\ntranscript: \(folder.path)/\(SpeakerLabels.fileName)"))
         let meta = try #require(MetaFile.read(folder))
         #expect(meta["status"] as? String == "transcribed")
         #expect((meta["transcript"] as? [String: Any])?["side_labels"] as? Bool == true)

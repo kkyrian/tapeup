@@ -55,10 +55,15 @@ public struct RecordingEntry: Sendable, Identifiable, Equatable {
 
     public var transcriptFile: URL { folder.appendingPathComponent(TranscriptDocument.fileName) }
 
-    /// The labeled lines Copy path puts on the clipboard.
+    /// The labeled lines Copy path puts on the clipboard. The transcript is
+    /// the one with speaker names once the user has labeled speakers.
     public var clipboardText: String {
         var text = "folder: \(folder.path)\naudio: \(audio.path)"
-        if transcript == .done { text += "\ntranscript: \(transcriptFile.path)" }
+        if transcript == .done {
+            let labeled = folder.appendingPathComponent(SpeakerLabels.fileName)
+            let file = FileManager.default.fileExists(atPath: labeled.path) ? labeled : transcriptFile
+            text += "\ntranscript: \(file.path)"
+        }
         return text
     }
 }
