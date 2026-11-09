@@ -4,6 +4,7 @@
 !.agents/
 /tmp/
 /_output/
+/.claude/worktrees/
 /.build/
 /.swiftpm/
 CLAUDE.local.md

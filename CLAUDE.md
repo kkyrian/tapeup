@@ -9,21 +9,25 @@ projection and loses on disagreement.
 
 ## Public and private layers
 
-This project has two layers. The public repository (this folder) holds code,
+This project has two layers. The public repository (`tapeup/`) holds code,
 README, CONTRIBUTING, LICENSE, its own `CLAUDE.md` and a public `_docs/`. A
-maintainer may keep a private workspace around it; contributors never need it.
+maintainer may keep a private workspace in the folder that encloses it;
+contributors never need it.
 
-- Every instruction lives once. It goes in the public `CLAUDE.md` unless it
-  names the owner's words, people, accounts, machines or strategy; then it goes
-  in the private `CLAUDE.md`.
-- Records lean private: current state, discussions, decision reasons, memory
-  and source material go in the private `_docs/`.
+- Every instruction lives once. It goes in the public `tapeup/CLAUDE.md`
+  unless it names the owner's words, people, accounts, machines or strategy;
+  then it goes in the private `CLAUDE.md` of the enclosing folder.
+- Records lean private: current state, discussions, decision reasons, memory,
+  source material and private deliverables go in the enclosing folder's
+  `_docs/` and `_output/`, never in `tapeup/`.
 - A public doc exists only when someone deliberately cleans up a note and
-  promotes it into the public `_docs/`.
-- `_docs/SYSTEM.md` in the public repository is the single full design
-  authority. It links public docs directly and cites private records by
-  stable ID (`TU-014`). Agents resolve an ID in the private
+  promotes it into `tapeup/_docs/`.
+- `tapeup/_docs/SYSTEM.md` is the single full design authority. It links
+  public docs directly and cites private records by stable ID
+  (`TU-014`). Agents resolve an ID in the enclosing folder's
   `_docs/decisions.md`; contributors see only the ID.
+- Commit messages, branch names, issues, pull requests, tags and release notes
+  of `tapeup/` are public too: write them under the same rule.
 - Public instructions may rely on skills embedded with `install: embed`.
   Linked skills are absent for others and change nothing for them.
 
@@ -115,9 +119,10 @@ unmarked second authority.
 
 - Use a system temporary directory or the repository's ignored `tmp/`
   directory for disposable intermediates, including test recordings.
-- Put durable evidence and supporting artifacts for bounded design or research
-  work beside the private discussion that owns them. Audio evidence stays out
-  of Git.
+- Put durable evidence for bounded design or research work beside the private
+  discussion that owns them, and private deliverables in the enclosing
+  folder's `_output/`. This repository's `tmp/` and `_output/` hold only
+  public-safe material. Audio evidence stays out of Git.
 - Put generated deliverables meant to be inspected or retained, but which are
   not canonical project documentation, under `_output/<skill-or-tool>/`.
   `_output/` is local by default; commit an output only when it is itself a
