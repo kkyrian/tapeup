@@ -37,21 +37,8 @@ brew install kkyrian/tap/tapeup
 <br>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset=".github/images/floating-dark.gif">
-  <img align="left" width="380" src=".github/images/floating.gif" alt="In a video call in another app, ⌥⌘R starts recording. Small controls float under the menu bar with the time, Pause and Stop. Pause holds the clock, play resumes, and Stop saves: the recording drops from the menu bar and names itself “Beta launch plan”.">
-</picture>
-
-### Record from any app
-
-Press **⌥⌘R** mid-call. Small controls float over your windows to
-pause or stop, and the saved recording drops from the menu bar.
-
-<br clear="all">
-<br>
-
-<picture>
   <source media="(prefers-color-scheme: dark)" srcset=".github/images/who-was-there-dark.gif">
-  <img align="right" width="380" src=".github/images/who-was-there.gif" alt="A 31-minute call is stopped. On the saved recording, a tap on 4 sets how many were there, and typing “pr”, “jo” and “an” adds Priya Shah, José Ortiz and Ana from suggestions.">
+  <img align="left" width="380" src=".github/images/who-was-there.gif" alt="A 31-minute call is stopped. On the saved recording, a tap on 4 sets how many were there, and typing “pr”, “jo” and “an” adds Priya Shah, José Ortiz and Ana from suggestions.">
 </picture>
 
 ### Say who was there
@@ -66,7 +53,7 @@ It's optional, and it's what a transcript can't know on its own.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset=".github/images/speakers-dark.gif">
-  <img align="left" width="380" src=".github/images/speakers.gif" alt="On a saved recording, Label speakers finds four voices, each with how long it talked and a line it said. The first is named Priya Shah and the fourth José Ortiz from a menu.">
+  <img align="right" width="380" src=".github/images/speakers.gif" alt="On a saved recording, Label speakers finds four voices, each with how long it talked and a line it said. The first is named Priya Shah and the fourth José Ortiz from a menu.">
 </picture>
 
 ### Know who said what
@@ -136,6 +123,19 @@ Names with a word on who they are. Add them here, or press
 
 The list feeds the name suggestions, and transcripts spell those names
 right.
+
+<br clear="all">
+<br>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/images/floating-dark.gif">
+  <img align="left" width="380" src=".github/images/floating.gif" alt="In a video call in another app, ⌥⌘R starts recording. Small controls float under the menu bar with the time, Pause and Stop. Pause holds the clock, play resumes, and Stop saves: the recording drops from the menu bar and names itself “Beta launch plan”.">
+</picture>
+
+### Record from any app
+
+Press **⌥⌘R** mid-call. Small controls float over your windows to
+pause or stop, and the saved recording drops from the menu bar.
 
 <br clear="all">
 
