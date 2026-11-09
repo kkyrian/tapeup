@@ -10,7 +10,7 @@ projection and loses on disagreement.
 ## Public and private layers
 
 This project has two layers. The public repository (`tapeup/`) holds code,
-README, CONTRIBUTING, LICENSE, its own `CLAUDE.md` and a public `_docs/`. A
+README, LICENSE, its own `CLAUDE.md` and a public `_docs/`. A
 maintainer may keep a private workspace in the folder that encloses it;
 contributors never need it.
 
