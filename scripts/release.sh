@@ -21,8 +21,9 @@
 #
 # --draft does steps 1 to 5 with the release as a GitHub draft, which no one
 # else sees, so it works while the repository is still private; the tap waits.
-# --publish <version> later makes that draft the latest release, once the
-# repository is public, checks the downloads, and does step 6.
+# --publish <version> later, once the repository is public, makes that
+# release the latest if it is still a draft, checks the downloads, and does
+# step 6.
 #
 # --dry-run does all of it except that it signs ad hoc, and commits, tags,
 # pushes and publishes nothing: VERSION and the appcast are put back, and the
@@ -121,8 +122,8 @@ if ((publish)); then
   step "Publishing the draft $tag"
   gh auth status >/dev/null 2>&1 || fail "gh is not signed in (gh auth login)."
   require_public
-  [[ "$(gh release view "$tag" --repo "$repo" --json isDraft -q .isDraft 2>/dev/null)" == true ]] \
-    || fail "there is no draft release $tag; make one with --draft first."
+  is_draft="$(gh release view "$tag" --repo "$repo" --json isDraft -q .isDraft 2>/dev/null)" \
+    || fail "there is no release $tag; make one with --draft first."
   out="tmp/release/$version"
   dmg="$out/TapeUp.dmg"
   [[ -f "$dmg" ]] || fail "$dmg is missing; the cask needs the image the draft holds."
@@ -131,7 +132,8 @@ if ((publish)); then
   [[ "$(shasum -a 256 <"$dmg")" == "$(shasum -a 256 <"$uploaded/TapeUp.dmg")" ]] \
     || fail "$dmg is not the image in the draft."
   rm -rf "$uploaded"
-  gh release edit "$tag" --repo "$repo" --draft=false --latest
+  # A release published while the repository was private needs only the rest.
+  [[ "$is_draft" != true ]] || gh release edit "$tag" --repo "$repo" --draft=false --latest
   check_downloads
   update_tap "$dmg"
   step "Done: TapeUp $version is out"
