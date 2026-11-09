@@ -4,6 +4,16 @@
         <title>TapeUp</title>
         <link>https://github.com/kkyrian/tapeup</link>
         <item>
+            <title>TapeUp 0.1.2</title>
+            <pubDate>Mon, 09 Nov 2026 05:36:48 GMT</pubDate>
+            <sparkle:version>0.1.2</sparkle:version>
+            <sparkle:shortVersionString>0.1.2</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[<h3>What's new</h3><ul><li><b>Copy path gives your agent the names.</b> Once you've labeled speakers, the transcript it points to is the one where each line starts with who spoke. Copy transcript already did this.</li><li><b>The import bar moves while a file copies.</b> Bringing in one long recording, the bar at the bottom of the Import window now fills as it copies, instead of waiting at zero until the file is done.</li></ul><h3>Install</h3><p>Download <b>TapeUp.dmg</b> below and drag TapeUp to Applications, or:</p><pre>brew install kkyrian/tap/tapeup
+</pre><p>Already on TapeUp? It updates itself when you're not recording, or use <b>Check for Updates…</b> in the ··· menu.</p>]]></description>
+            <enclosure url="https://github.com/kkyrian/tapeup/releases/download/v0.1.2/TapeUp.dmg" type="application/octet-stream" sparkle:edSignature="zuZc9qW+Xmv4iWbB3petM97srhHOD10JbOvjEtVFKgdSpkj+o26vIyz6RCLwcu6tVynOVqtVErygpB/yPrIJBw==" length="49863408"/>
+        </item>
+        <item>
             <title>TapeUp 0.1.1</title>
             <pubDate>Mon, 09 Nov 2026 04:30:04 GMT</pubDate>
             <sparkle:version>0.1.1</sparkle:version>
