@@ -88,6 +88,14 @@ final class VoicePlayer {
         if line != nil { line = nil }
     }
 
+    /// Shows a voice playing with the line given, without a sound: for the
+    /// README's films, which have no audio. Nil stops.
+    func stage(_ voice: Int?, in entry: RecordingEntry, line: String?) {
+        guard let voice else { return stop() }
+        playing = Playing(stamp: RecordingLibrary.stamp(of: entry.folder), voice: voice)
+        self.line = line
+    }
+
     /// Seconds of the voice heard so far, while playing.
     func playedSeconds() -> Double? {
         guard let node, let render = node.lastRenderTime, let time = node.playerTime(forNodeTime: render) else {

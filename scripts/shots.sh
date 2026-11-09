@@ -34,7 +34,7 @@ for movie in tmp/film/*.mov; do
     handoff) width=1388 ;;
     import) width=1440 ;;
     import-progress) width=1056 ;;
-    floating) width=760 ;;
+    floating | speakers) width=760 ;;
     *) width=840 ;;
   esac
   # The first moments are the window settling; the journey starts after.

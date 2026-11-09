@@ -168,6 +168,9 @@ final class Director {
     var keys: String?
     /// The floating controls, centered under the menu bar.
     var pill = false
+    /// A camera move: how far in, and the stage point brought to the middle.
+    var zoom: CGFloat = 1
+    var zoomFocus = CGPoint.zero
     /// The Import window, open on the stage, and its height as laid out.
     var importing: Imports?
     var importHeight: CGFloat = 0
@@ -499,6 +502,19 @@ struct Stage: View {
 
     private var panelX: CGFloat { size.width - Self.inset - PanelView.width - 18 }
 
+    private var inner: CGSize { CGSize(width: size.width - Self.inset * 2, height: size.height - Self.inset * 2) }
+
+    /// Brings the zoom's focus to the middle, never past the desktop's edges.
+    private var zoomOffset: CGSize {
+        let scale = director.zoom
+        let focus = CGPoint(x: director.zoomFocus.x - Self.inset, y: director.zoomFocus.y - Self.inset)
+        let x = inner.width / 2 - focus.x * scale
+        let y = inner.height / 2 - focus.y * scale
+        return CGSize(
+            width: min(0, max(inner.width - inner.width * scale, x)),
+            height: min(0, max(inner.height - inner.height * scale, y)))
+    }
+
     var body: some View {
         ZStack(alignment: .topLeading) {
             Shots.Palette.page(dark)
@@ -529,11 +545,7 @@ struct Stage: View {
                 }
                 Shots.MenuBar(dark: dark, status: status, wide: false, pressed: director.itemPressed)
                     .frame(width: size.width - Self.inset * 2, height: 26)
-                if director.panelOpen {
-                    panel
-                        .offset(x: panelX - Self.inset, y: 26 + 6)
-                        .transition(.opacity)
-                }
+                // Under the panel: opened later, the panel comes to the front.
                 if director.pill {
                     FloatingControlsView(model: model, stop: {}, drag: { _, _ in })
                         .background(Color(nsColor: .windowBackgroundColor), in: .capsule)
@@ -543,6 +555,11 @@ struct Stage: View {
                         )
                         .shadow(color: .black.opacity(dark ? 0.45 : 0.14), radius: 10, y: 4)
                         .offset(x: Take.pillOrigin(size).x - Self.inset, y: Take.pillOrigin(size).y - Self.inset)
+                        .transition(.opacity)
+                }
+                if director.panelOpen {
+                    panel
+                        .offset(x: panelX - Self.inset, y: 26 + 6)
                         .transition(.opacity)
                 }
                 if let keys = director.keys {
@@ -567,6 +584,9 @@ struct Stage: View {
                 }
                 pointer.offset(x: director.cursor.x - Self.inset, y: director.cursor.y - Self.inset)
             }
+            .frame(width: inner.width, height: inner.height, alignment: .topLeading)
+            .scaleEffect(director.zoom, anchor: .topLeading)
+            .offset(zoomOffset)
             .clipShape(.rect(cornerRadius: 12, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)

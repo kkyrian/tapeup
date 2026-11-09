@@ -78,8 +78,9 @@ struct Journey {
             await take.pause(2.2)
         })
 
-    /// In a call in another app: ⌥⌘R, then pause, resume and stop from the
-    /// floating controls; the saved recording drops from the menu bar.
+    /// In a call in another app: ⌥⌘R, a look at the words arriving in the
+    /// panel, close up, then stop from the floating controls; the saved
+    /// recording drops from the menu bar.
     static let floating = Journey(
         name: "floating", size: CGSize(width: 640, height: 470),
         setUp: { take in
@@ -91,22 +92,40 @@ struct Journey {
             await take.pause(0.5)
             withAnimation(.easeOut(duration: 0.12)) { take.director.keys = "⌥ ⌘ R" }
             await take.pause(0.25)
-            take.startRecording(from: 0) { _ in [said[0]] }
+            var wordsFrom: TimeInterval?
+            take.startRecording(from: 0) { elapsed in
+                // Nothing yet, then a few words at a time once the camera is in.
+                guard let from = wordsFrom else { return [] }
+                let words = said.prefix(3).joined(separator: " ").split(separator: " ")
+                let shown = min(words.count, max(0, Int((elapsed - from) / 0.75) + 1) * 3)
+                return Shots.lastTwoSentences(words.prefix(shown).joined(separator: " "))
+            }
             withAnimation(.easeOut(duration: 0.25)) { take.director.pill = true }
             await take.pause(0.6)
             withAnimation(.easeOut(duration: 0.3)) { take.director.keys = nil }
-            await take.pause(2.0)
-            await take.move(to: take.pauseButton, 0.8)
-            await take.click { take.paused = true }
-            await take.pause(1.4)
-            await take.click { take.paused = false }
-            await take.pause(1.6)
-            await take.move(to: take.stopButton, 0.4)
+            await take.pause(0.6)
+            // Into the panel's Transcript row as the words arrive.
+            await take.openPanel()
+            // Out of the close-up, so the pointer doesn't loom over it.
+            await take.move(to: CGPoint(x: 120, y: 420), 0.5)
+            take.director.zoomFocus = take.at(CGPoint(x: 156, y: Spot.transcript.y))
+            withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.3)) { take.director.zoom = 2.0 }
+            await take.pause(0.9)
+            wordsFrom = take.model.elapsed
+            await take.pause(4.8)
+            withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.3)) { take.director.zoom = 1 }
+            await take.pause(1.0)
+            withAnimation(.easeOut(duration: 0.12)) {
+                take.director.panelOpen = false
+                take.director.itemPressed = false
+            }
+            await take.pause(0.4)
+            await take.move(to: take.stopButton, 0.8)
             await take.click()
             withAnimation(.easeOut(duration: 0.15)) { take.director.pill = false }
             await take.stopRecording(title: "Beta launch plan", showPanel: true)
             await take.move(to: CGPoint(x: 200, y: 400), 0.8)
-            await take.pause(2.2)
+            await take.pause(1.6)
         })
 
     /// Stop a long call, then say how many were there and who.
@@ -239,12 +258,14 @@ struct Journey {
         await take.pause(2.2)
     }
 
-    /// Open a recording, label its speakers, and name two voices.
+    /// Open a recording, label its speakers, play a voice and name it.
     static let speakers = Journey(
         name: "speakers", size: CGSize(width: 420, height: 580),
         setUp: { take in
             if let entry = take.model.recent.first(where: { $0.title == nil }) {
                 writeVoices(in: entry.folder)
+                // Silent: the film only needs the play buttons shown.
+                FileManager.default.createFile(atPath: entry.audio.path, contents: nil)
                 _ = try? RecordingLibrary.save(title: "Beta launch plan", in: entry.folder)
             }
             take.model.reload()
@@ -262,17 +283,40 @@ struct Journey {
             await take.move(toPanel: Spot.labelSpeakers, 0.6)
             await take.click { take.model.labelSpeakers() }
             await take.pause(0.9)
-            for (voice, name) in [(1, "Priya Shah"), (4, "José Ortiz")] {
-                guard let entry = take.model.card?.entry else { break }
+            // Play the first voice: its quote follows each line it said.
+            if let entry = take.model.card?.entry, let result = take.model.speakers.result(for: entry),
+                let lines = TranscriptDocument.lines(in: entry.folder)
+            {
+                let heard = zip(lines, result.assigned).filter { $0.1 == 1 }.map(\.0.text)
+                await take.move(toTarget: "Play voice 1", 0.7)
+                // Close up on the voices, to see the quote follow the sound.
+                // Below the buttons, down to the last voice.
+                take.director.zoomFocus = take.at(CGPoint(x: 156, y: 440))
+                withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.3)) { take.director.zoom = 1.35 }
+                await take.pause(1.0)
+                await take.click { take.model.speakers.player.stage(1, in: entry, line: heard.first) }
+                // Aside, so the Stop it now shows is seen.
+                let cursor = take.director.cursor
+                await take.move(to: CGPoint(x: cursor.x + 34, y: cursor.y + 10), 0.4)
+                for line in heard.dropFirst().prefix(1) {
+                    await take.pause(1.5)
+                    take.model.speakers.player.stage(1, in: entry, line: line)
+                }
+                await take.pause(1.3)
+            }
+            // Name it, and end close up on the name.
+            if let entry = take.model.card?.entry {
                 let others = take.model.suggestions(matching: "", excluding: entry.people.names, limit: 12)
                 let items = entry.people.names + (others.isEmpty ? [] : ["-"] + others)
-                await take.pick(name, from: take.at(Spot.voice(voice)), items: items) {
-                    take.model.speakers.name(voice, name, in: entry)
+                await take.pick("Priya Shah", from: take.at(Spot.voice(1)), items: items) {
+                    take.model.speakers.name(1, "Priya Shah", in: entry)
                 }
-                await take.pause(0.5)
+                await take.pause(0.6)
+                // The voice has played through.
+                take.model.speakers.player.stop()
             }
-            await take.move(to: CGPoint(x: 250, y: 540), 0.8)
-            await take.pause(2.2)
+            await take.move(to: take.at(CGPoint(x: 330, y: Spot.voice(3).y)), 0.6)
+            await take.pause(1.6)
         })
 
     /// Opens on the Import window beside the Finder, so the first frame says

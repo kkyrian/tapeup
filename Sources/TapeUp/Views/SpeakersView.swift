@@ -116,6 +116,7 @@ private struct VoiceRow: View {
                         player.toggle(voice.id, in: entry, result: result)
                     }
                     .disabled(model.phase != .idle)
+                    .clickTarget("Play voice \(voice.id)")
                 }
             }
             Text("\u{201C}\(quote)\u{201D}")
