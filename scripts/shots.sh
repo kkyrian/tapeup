@@ -32,7 +32,8 @@ for movie in tmp/film/*.mov; do
   # width, a little less.
   case "$name" in
     handoff) width=1388 ;;
-    import) width=1300 ;;
+    import) width=1440 ;;
+    import-progress) width=1056 ;;
     floating) width=760 ;;
     *) width=840 ;;
   esac

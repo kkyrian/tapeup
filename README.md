@@ -24,13 +24,15 @@ brew install kkyrian/tap/tapeup
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset=".github/images/record-dark.gif">
-    <img src=".github/images/record.gif" width="357" alt="Clicking the cassette in the menu bar opens TapeUp. The Microphone and Transcript switches are turned on, and Record starts the clock, and the call's words appear in the Transcript row. Stop saves the recording, and it names itself “Beta launch plan”.">
+    <img src=".github/images/record.gif" width="36%" alt="Clicking the cassette in the menu bar opens TapeUp. The Microphone and Transcript switches are turned on, and Record starts the clock, and the call's words appear in the Transcript row. Stop saves the recording, and it names itself “Beta launch plan”.">
   </picture>
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset=".github/images/import-dark.gif">
-    <img src=".github/images/import.gif" width="450" alt="From the ··· menu, Import… opens the Import window. Four recordings are dragged in from a Finder window and listed with their dates, lengths and sizes. Import 4 recordings copies them in, and each is transcribed in turn: a ring fills, the lines spoken pass under its name with the time left, speakers are found, and a check marks it ready. Done closes the window, and the recordings appear in TapeUp's list under the days they were made.">
+    <img src=".github/images/import.gif" width="61%" alt="The Import window is open beside a Finder window. Four recordings are dragged in from the Finder and listed with their dates, lengths and sizes. Import 4 recordings copies them in, and each is transcribed in turn: a ring fills, the lines spoken pass under its name with the time left, speakers are found, and a check marks it ready. Done closes the window, and the recordings appear in TapeUp's list under the days they were made.">
   </picture>
 </p>
+
+<p align="center">Record a call, or bring in recordings you already have.<br>Both are transcribed on your Mac.</p>
 
 <br>
 
@@ -78,6 +80,11 @@ With headphones on, your own lines are marked from the start.
 <br clear="all">
 <br>
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/images/import-progress-dark.gif">
+  <img align="right" width="380" src=".github/images/import-progress.gif" alt="The Import window transcribes four recordings in turn. Each one's ring fills as the lines spoken pass under its name, with the percentage and the time left, and a check marks it ready with its speakers.">
+</picture>
+
 ### Bring in old recordings
 
 Open **Import…** from the ··· menu and drop in files or whole folders,
@@ -85,13 +92,12 @@ or drop them on the menu-bar icon. Each comes in under its own name and
 date, and is transcribed on your Mac, with how far each has come and a
 glimpse of what was said. The originals stay where they are.
 
-
 <br clear="all">
 <br>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset=".github/images/all-recordings-dark.gif">
-  <img align="right" width="380" src=".github/images/all-recordings.gif" alt="Show all, under the recent recordings, opens every recording by month. The No transcript chip lists the ones without a transcript, and Transcribe 25 recordings starts them: the first one's ring fills while the rest wait. Then a search for “thursday” finds the meetings where it was said, each with the words around it.">
+  <img align="left" width="380" src=".github/images/all-recordings.gif" alt="Show all, under the recent recordings, opens every recording by month. The No transcript chip lists the ones without a transcript, and Transcribe 25 recordings starts them: the first one's ring fills while the rest wait. Then a search for “thursday” finds the meetings where it was said, each with the words around it.">
 </picture>
 
 ### Find any meeting

@@ -33,7 +33,8 @@ struct Journey {
     let script: @MainActor (Take) async -> Void
 
     static let all: [Journey] = [
-        record, floating, whoWasThere, handoff, people, settings, speakers, importing, allRecordings, probe,
+        record, floating, whoWasThere, handoff, people, settings, speakers, importing, importProgress, allRecordings,
+        probe,
     ]
 
     static var said: [String] { Shots.said.map(\.1) }
@@ -42,7 +43,7 @@ struct Journey {
     /// words come, stop: saved, then titled. Computer audio stays on, since
     /// one source always is.
     static let record = Journey(
-        name: "record", size: CGSize(width: 420, height: 470),
+        name: "record", size: CGSize(width: 420, height: 520),
         setUp: { take in
             take.hideNewest()
             if take.model.microphoneOn { take.model.toggleMicrophone() }
@@ -274,31 +275,23 @@ struct Journey {
             await take.pause(2.2)
         })
 
-    /// ··· → Import…, drag old recordings in from Finder, import them, and
-    /// find them among the others in Recent.
+    /// Opens on the Import window beside the Finder, so the first frame says
+    /// what it is: drag old recordings in, import them, and find them among
+    /// the others in Recent.
     static let importing = Journey(
-        name: "import", size: CGSize(width: 720, height: 640),
+        name: "import", size: CGSize(width: 720, height: 520),
         setUp: { take in
             let folder = take.root.deletingLastPathComponent().appendingPathComponent("Old recordings")
             // Four spoken files, the copy of one left out.
             take.files = Array(ImportGallery.makeFiles(in: folder).prefix(4))
             take.director.finder = take.files.map(\.lastPathComponent)
             take.director.cursor = CGPoint(x: 360, y: 420)
+            take.director.importing = Imports(model: take.model)
         },
         script: { take in
-            let imports = Imports(model: take.model)
+            guard let imports = take.director.importing else { return }
             imports.close = { withAnimation(.easeOut(duration: 0.15)) { take.director.importing = nil } }
-            await take.pause(0.15)
-            await take.openPanel()
-            await take.pause(0.5)
-            await take.pickFromMore("Import…") {
-                withAnimation(.easeOut(duration: 0.15)) {
-                    take.director.panelOpen = false
-                    take.director.itemPressed = false
-                    take.director.importing = imports
-                }
-            }
-            await take.pause(0.7)
+            await take.pause(1.0)
             await take.move(to: take.finderRow(0), 0.8)
             await take.click { take.director.selected = true }
             await take.pause(0.3)
@@ -316,15 +309,36 @@ struct Journey {
             await take.move(to: take.importButton, 0.8)
             await take.click(imports.start)
             while imports.importing { await take.pause(0.1) }
-            await take.move(to: CGPoint(x: 610, y: 560), 0.6)
+            await take.move(to: CGPoint(x: 610, y: 470), 0.6)
             await transcribe(imports, in: take)
             await take.pause(1.6)
             await take.move(to: take.importButton, 0.6)
             await take.click(imports.close)
             await take.pause(0.4)
             await take.openPanel()
-            await take.move(to: CGPoint(x: 360, y: 560), 0.8)
+            await take.move(to: CGPoint(x: 360, y: 470), 0.8)
             await take.pause(2.4)
+        })
+
+    /// The Import window alone as its recordings are transcribed, for the
+    /// README's section on importing: the film at the top shows the rest.
+    static let importProgress = Journey(
+        name: "import-progress", size: CGSize(width: 528, height: 540),
+        setUp: { take in
+            let folder = take.root.deletingLastPathComponent().appendingPathComponent("Old recordings")
+            take.files = Array(ImportGallery.makeFiles(in: folder).prefix(4))
+            take.director.cursor = CGPoint(x: 470, y: 500)
+            take.director.importing = Imports(model: take.model)
+        },
+        script: { take in
+            guard let imports = take.director.importing else { return }
+            imports.add(take.files)
+            while imports.items.count < take.files.count || imports.reading { await take.pause(0.1) }
+            imports.start()
+            while imports.importing { await take.pause(0.1) }
+            await take.pause(0.6)
+            await transcribe(imports, in: take)
+            await take.pause(2.0)
         })
 
     /// The film's transcripts, one file at a time as the app makes them: the
