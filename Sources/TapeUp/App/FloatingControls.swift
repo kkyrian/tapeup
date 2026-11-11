@@ -109,8 +109,11 @@ struct FloatingControlsView: View {
     /// Sized for the longest time it shows, so it never grows mid-recording.
     static let width: CGFloat = {
         let font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
-        let time = ceil(("0:00:00" as NSString).size(withAttributes: [.font: font]).width)
-        return 10 + 7 + 5 + time + 4 + 22 + 1 + 22 + 4
+        // Ten hours and up: a recording left running overnight still fits.
+        let time = ceil(("00:00:00" as NSString).size(withAttributes: [.font: font]).width)
+        // The dot keeps its 8-point layout width under its scale effect, and
+        // SwiftUI's text can measure a little wider than AppKit's: 2 spare.
+        return 10 + 8 + 5 + time + 2 + 4 + 22 + 1 + 22 + 4
     }()
 
     @Bindable var model: AppModel
@@ -127,6 +130,8 @@ struct FloatingControlsView: View {
             Text(Format.duration(model.elapsed))
                 .font(.system(size: 12, weight: .semibold).monospacedDigit())
                 .foregroundStyle(model.paused ? .secondary : .primary)
+                .lineLimit(1)
+                .fixedSize()
             Spacer(minLength: 4)
             IconButton(
                 symbol: model.paused ? "play.fill" : "pause.fill", help: model.paused ? "Resume" : "Pause", size: 22,
