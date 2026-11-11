@@ -181,7 +181,7 @@ TU-014, TU-019, TU-036).
 ├── people.json          tapeup-people/1: you, and people with optional context
 └── <YYYY>/              one folder per year
     └── <YYYY-MM-DD-HHMM>[ title]/   -2, -3 when two start in the same minute; the title once named
-        ├── audio.m4a        never modified after it is finalized
+        ├── audio.m4a        never modified after it is finalized; the user may remove it and keep the transcript
         ├── meta.json        time, duration, sources, devices, gaps, pauses, status, title, you, who was there
         ├── events.jsonl     what happened while recording
         ├── transcript.md    made on this Mac while recording; never rewritten once finished
@@ -204,7 +204,13 @@ for, its `speaker_labels` (`finding`, `done` or `failed`, how many voices,
 whether that number was estimated, and the names given). After a recording
 stops, the card offers Copy path (`folder: …`, `audio: …`, and `transcript: …`
 once there is one), Copy transcript (spinning while it is made, Try again
-after a failure, Transcribe when there is none) and Show in Finder. Who was there (a count, optional names suggested from past
+after a failure, Transcribe when there is none) and Show in Finder. Once
+the transcript is done, Remove audio beside the trash moves `audio.m4a` to
+the Trash and keeps the rest, with Undo while the card stays open (also
+from a row's right-click menu); the card then says Transcript only, a row
+marks it with a page glyph before its length, Copy path leaves out the
+audio line, and what needs sound (playing a voice, labeling speakers)
+hides (TU-037). Who was there (a count, optional names suggested from past
 recordings) is optional and never delays saving.
 
 ## Design Decisions

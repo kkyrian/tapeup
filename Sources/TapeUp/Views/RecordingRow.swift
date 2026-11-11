@@ -68,9 +68,17 @@ struct RecordingRow: View {
                             .frame(width: 16, height: 16)
                             .hoverHelp("Waiting to transcribe")
                     } else {
-                        Text(Format.length(entry.duration))
-                            .font(.system(size: 11))
-                            .foregroundStyle(.tertiary)
+                        // Audio is the rule; only its absence is marked.
+                        HStack(spacing: 3) {
+                            if !entry.hasAudio, entry.status != "recording" {
+                                Image(systemName: "text.page").font(.system(size: 10))
+                            }
+                            Text(Format.length(entry.duration)).font(.system(size: 11))
+                        }
+                        .foregroundStyle(.tertiary)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel(
+                            Format.length(entry.duration) + (entry.hasAudio ? "" : ", transcript only"))
                     }
                 }
                 .opacity(hovered || copied ? 0 : 1)
@@ -99,6 +107,13 @@ struct RecordingRow: View {
             Button("Show in Finder") { model.reveal(entry) }
             Button("Rename…") { model.open(entry) }
             Divider()
+            if model.canRemoveAudio(entry) {
+                // On its card, where Undo shows.
+                Button("Remove Audio, Keep Transcript") {
+                    model.open(entry)
+                    model.removeAudio(entry)
+                }
+            }
             Button("Move to Trash") { model.trash(entry) }
         }
         .accessibilityElement(children: .contain)

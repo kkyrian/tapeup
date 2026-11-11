@@ -215,6 +215,8 @@ enum Snapshot {
             "started": ISO8601DateFormatter().string(from: Date().addingTimeInterval(-600)),
         ]
         try? JSONSerialization.data(withJSONObject: meta).write(to: folder.appendingPathComponent("meta.json"))
+        // An empty audio file: the rows mark only recordings without one.
+        FileManager.default.createFile(atPath: folder.appendingPathComponent("audio.m4a").path, contents: Data())
         FileManager.default.createFile(atPath: folder.appendingPathComponent("events.jsonl").path, contents: nil)
         try? RecordingLibrary.save(people: .init(count: 3, names: ["Priya Shah", "José Ortiz"]), in: folder)
         try? TranscriptDocument.save(lines: lines, failures: 0, pieces: lines.count, model: .large, in: folder)
@@ -240,6 +242,8 @@ enum Snapshot {
                 "started": ISO8601DateFormatter().string(from: started),
             ]
             try? JSONSerialization.data(withJSONObject: meta).write(to: folder.appendingPathComponent("meta.json"))
+            // An empty audio file: the rows mark only recordings without one.
+            FileManager.default.createFile(atPath: folder.appendingPathComponent("audio.m4a").path, contents: Data())
             try? RecordingLibrary.save(people: people, in: folder)
             if offset == -60 { try? RecordingLibrary.markTranscript("transcribing", in: folder) }
             if offset == -26 * 3600 { _ = try? RecordingLibrary.save(title: "Lab sync", in: folder) }

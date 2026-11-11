@@ -114,6 +114,8 @@ enum RecordingsGallery {
                 "started": ISO8601DateFormatter().string(from: started),
             ]
             try? JSONSerialization.data(withJSONObject: meta).write(to: folder.appendingPathComponent("meta.json"))
+            // An empty audio file: the rows mark only recordings without one.
+            FileManager.default.createFile(atPath: folder.appendingPathComponent("audio.m4a").path, contents: Data())
             try? RecordingLibrary.save(people: people[index % people.count], in: folder)
             // Older ones were made before transcripts; a couple failed.
             if index % 9 == 4 {

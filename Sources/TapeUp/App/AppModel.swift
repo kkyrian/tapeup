@@ -64,7 +64,10 @@ final class AppModel {
         // A voice playing stops with its card, the panel closing included; a rename keeps the stamp.
         didSet {
             let stamp = { (card: Card?) in card.map { RecordingLibrary.stamp(of: $0.entry.folder) } }
-            if stamp(card) != stamp(oldValue) { speakers.player.stop() }
+            if stamp(card) != stamp(oldValue) {
+                speakers.player.stop()
+                removedAudio = nil
+            }
         }
     }
     private(set) var copiedFlash = false
@@ -148,12 +151,16 @@ final class AppModel {
 
     /// The last recording moved to the Trash, until it is put back or the panel closes.
     private(set) var trashed: (entry: RecordingEntry, location: URL)?
+    /// The open recording's audio, just moved to the Trash, until it is put
+    /// back, another recording opens or the panel closes.
+    private(set) var removedAudio: (stamp: String, location: URL)?
 
     var panelVisible = false {
         didSet {
             if !panelVisible {
                 testing = false
                 trashed = nil
+                removedAudio = nil
             }
             updateLevelTimer()
             updatePeopleWatch()
@@ -923,6 +930,55 @@ final class AppModel {
                 }
             }
         }
+    }
+
+    /// Whether a recording's audio can go while its transcript stays: only
+    /// once the transcript is done and nothing is reading the audio.
+    func canRemoveAudio(_ entry: RecordingEntry) -> Bool {
+        let stamp = RecordingLibrary.stamp(of: entry.folder)
+        let labeling = speakers.work[stamp].map { $0 != .failed } ?? false
+        return entry.transcript == .done && entry.hasAudio && entry.folder != activeFolder
+            && !transcription.working.contains(stamp) && !labeling
+    }
+
+    /// Moves the recording's audio to the Trash and keeps everything else.
+    func removeAudio(_ entry: RecordingEntry) {
+        guard canRemoveAudio(entry) else { return }
+        let stamp = RecordingLibrary.stamp(of: entry.folder)
+        speakers.player.stop()
+        do {
+            var location: NSURL?
+            try FileManager.default.trashItem(at: entry.audio, resultingItemURL: &location)
+            EventLog.append("audio removed", in: entry.folder)
+            removedAudio = location.map { (stamp, $0 as URL) }
+            refreshQuietly(stamp)
+        } catch {
+            problem = "Could not move the audio to the Trash: \(error.localizedDescription)"
+        }
+    }
+
+    /// Puts the audio removed last back in its recording.
+    func undoRemoveAudio() {
+        guard let removedAudio, let folder = library.folder(withStamp: removedAudio.stamp),
+            let entry = RecordingLibrary.entry(at: folder)
+        else { return }
+        self.removedAudio = nil
+        do {
+            try FileManager.default.moveItem(at: removedAudio.location, to: entry.audio)
+            EventLog.append("audio restored", in: folder)
+            refreshQuietly(removedAudio.stamp)
+        } catch {
+            problem = "Could not put the audio back: \(error.localizedDescription)"
+        }
+    }
+
+    /// Reloads the list and the open card without asking for a title.
+    private func refreshQuietly(_ stamp: String) {
+        reload()
+        guard let card, RecordingLibrary.stamp(of: card.entry.folder) == stamp,
+            let folder = library.folder(withStamp: stamp), let entry = RecordingLibrary.entry(at: folder)
+        else { return }
+        self.card?.entry = entry
     }
 
     /// Puts the last trashed recording back where it was.

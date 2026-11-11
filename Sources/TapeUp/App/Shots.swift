@@ -486,6 +486,8 @@ enum Shots {
                 "sources": ["microphone", "computer audio"], "output_headphones": true,
             ]
             try? JSONSerialization.data(withJSONObject: meta).write(to: folder.appendingPathComponent("meta.json"))
+            // An empty audio file: the rows mark only recordings without one.
+            FileManager.default.createFile(atPath: folder.appendingPathComponent("audio.m4a").path, contents: Data())
             FileManager.default.createFile(atPath: folder.appendingPathComponent("events.jsonl").path, contents: nil)
             try? RecordingLibrary.save(people: sample.people, in: folder)
             if sample.days == 0 {

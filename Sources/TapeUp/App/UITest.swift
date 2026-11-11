@@ -880,6 +880,8 @@ enum UITest {
                 "started": ISO8601DateFormatter().string(from: started),
             ]
             try? JSONSerialization.data(withJSONObject: meta).write(to: folder.appendingPathComponent("meta.json"))
+            // An empty audio file: the rows mark only recordings without one.
+            FileManager.default.createFile(atPath: folder.appendingPathComponent("audio.m4a").path, contents: Data())
             try? RecordingLibrary.save(people: .init(count: 2, names: ["Nora Quinn"]), in: folder)
             if day == 1 {
                 let lines = [TranscriptLine(start: 0, end: 5, text: "The zebra crossing study starts in March.")]
@@ -933,6 +935,31 @@ enum UITest {
             expect(click("row " + stamp, in: panel), "the row found clicks")
             check("all-recordings-card")
             expect(model.card.map { RecordingLibrary.stamp(of: $0.entry.folder) } == stamp, "and opens its card")
+            if let entry = model.card?.entry {
+                expect(model.canRemoveAudio(entry), "a transcribed recording offers Remove audio")
+                expect(click("Remove audio", in: panel), "Remove audio is beside the trash and clicks")
+                check("card-audio-removed")
+                let after = model.card?.entry
+                expect(
+                    after?.hasAudio == false && after?.transcript == .done && model.removedAudio != nil
+                        && FileManager.default.fileExists(atPath: entry.transcriptFile.path),
+                    "the audio went to the Trash and the transcript stayed")
+                expect(after.map { !model.canRemoveAudio($0) } ?? false, "and the button is gone")
+                model.undoRemoveAudio()
+                check("card-audio-restored")
+                expect(model.card?.entry.hasAudio == true && model.removedAudio == nil, "Undo put the audio back")
+                // Removed again, then opened later: the card says so, and Undo is gone.
+                model.removeAudio(entry)
+                expect(click("Back", in: panel), "Back leaves the card")
+                settle(0.3)
+                expect(model.card == nil, "and closes it")
+                expect(click("row " + stamp, in: panel), "the card reopens")
+                settle(0.3)
+                check("card-transcript-only")
+                expect(
+                    model.card?.entry.hasAudio == false && model.removedAudio == nil,
+                    "a recording without audio opens as transcript only")
+            }
             expect(click("Back", in: panel), "the card's Back clicks")
             check("all-recordings-card-back")
             expect(model.card == nil && model.showingAllRecordings, "a card opened from the page goes back to it")

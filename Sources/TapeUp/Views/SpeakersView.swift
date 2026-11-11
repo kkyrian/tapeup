@@ -62,7 +62,7 @@ struct SpeakersView: View {
         case .failed:
             HStack(spacing: 4) {
                 Text("Speakers could not be labeled.").font(.system(size: 12)).foregroundStyle(.secondary)
-                LinkButton("Try again", action: model.labelSpeakers)
+                if entry.hasAudio { LinkButton("Try again", action: model.labelSpeakers) }
             }
             .frame(height: 22)
         case nil:

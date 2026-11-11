@@ -27,7 +27,10 @@ struct CardView: View {
             .disabled(card.finishing)
             Divider().padding(.vertical, 2)
             WhoWasThereView(model: model, people: card.entry.people)
-            if card.entry.transcript == .done, !card.finishing {
+            // Without its audio, a recording keeps the speakers it already has.
+            if card.entry.transcript == .done, !card.finishing,
+                card.entry.hasAudio || model.speakers.started(card.entry)
+            {
                 SpeakersView(model: model, entry: card.entry)
             }
         }
@@ -41,6 +44,10 @@ struct CardView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
             withAnimation(.easeOut(duration: 0.3)) { savedShown = false }
         }
+    }
+
+    private var removedHere: Bool {
+        model.removedAudio?.stamp == RecordingLibrary.stamp(of: card.entry.folder)
     }
 
     private var header: some View {
@@ -66,8 +73,19 @@ struct CardView: View {
                         }
                         .transition(.opacity)
                     }
-                    Text("\(Format.when(card.entry.started)) · \(Format.length(card.entry.duration))")
+                    if removedHere {
+                        Text("Audio removed, transcript kept ·")
+                        // Laid out at the line's height, so the header never moves.
+                        LinkButton("Undo", action: model.undoRemoveAudio)
+                            .frame(height: 13)
+                            .padding(.leading, -4)
+                    } else {
+                        Text(
+                            "\(Format.when(card.entry.started)) · \(Format.length(card.entry.duration))"
+                                + (card.entry.hasAudio || card.finishing ? "" : " · Transcript only")
+                        )
                         .monospacedDigit()
+                    }
                 }
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
@@ -75,8 +93,17 @@ struct CardView: View {
             }
             .padding(.leading, -6)
             if !card.finishing {
-                IconButton(symbol: "trash", help: "Move to Trash") { model.trash(card.entry) }
+                if model.canRemoveAudio(card.entry) {
+                    IconButton(symbol: "waveform.badge.minus", help: "Remove audio, keep the transcript") {
+                        model.removeAudio(card.entry)
+                    }
+                    .clickTarget("Remove audio")
                     .padding(.leading, 4)
+                }
+                IconButton(symbol: "trash", help: "Move recording and transcript to Trash") {
+                    model.trash(card.entry)
+                }
+                .padding(.leading, 4)
             }
         }
     }

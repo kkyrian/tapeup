@@ -142,6 +142,13 @@ struct TranscriptStateTests {
         FileManager.default.createFile(
             atPath: folder.appendingPathComponent(SpeakerLabels.fileName).path, contents: Data("Sam: Hello.".utf8))
         #expect(entry.clipboardText.hasSuffix("\ntranscript: \(folder.path)/\(SpeakerLabels.fileName)"))
+        // Without its audio, Copy path names only what is there.
+        FileManager.default.createFile(atPath: entry.audio.path, contents: Data())
+        #expect(entry.clipboardText.contains("\naudio: "))
+        try? FileManager.default.removeItem(at: entry.audio)
+        #expect(!entry.hasAudio)
+        #expect(!entry.clipboardText.contains("audio:"))
+        #expect(entry.clipboardText.hasPrefix("folder: \(folder.path)\ntranscript: "))
         let meta = try #require(MetaFile.read(folder))
         #expect(meta["status"] as? String == "transcribed")
         #expect((meta["transcript"] as? [String: Any])?["side_labels"] as? Bool == true)
