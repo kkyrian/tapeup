@@ -58,9 +58,9 @@ It's optional, and it's what a transcript can't know on its own.
 
 ### Know who said what
 
-**Label speakers** finds each voice in the recording, on your Mac. Each
-one comes with a line it said and a button to hear it, so naming it
-takes a second.
+Once the transcript is ready, TapeUp finds each voice in the recording,
+on your Mac. Each one comes with a line it said and a button to hear it,
+so naming it takes a second.
 
 With headphones on, your own lines are marked from the start.
 

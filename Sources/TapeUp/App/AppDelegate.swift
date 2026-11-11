@@ -52,6 +52,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let version {
             let last = Settings.store.string(forKey: "lastVersion")
             if let last, last != version { model.updatedTo = version }
+            // Open at login starts on, once, at the very first launch of an
+            // installed app; turning it off in Settings is then never undone.
+            if last == nil, !Settings.isStaged, Bundle.main.bundlePath.hasPrefix("/Applications/") {
+                model.launchAtLogin = true
+            }
             Settings.store.set(version, forKey: "lastVersion")
         }
         hotKey = HotKey.record { [weak self] in self?.shortcutPressed() }

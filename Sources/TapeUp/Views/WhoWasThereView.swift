@@ -204,8 +204,10 @@ struct WhoWasThereView: View {
         guard !people.names.contains(where: { $0.lowercased() == name.lowercased() }) else { return }
         var updated = people
         updated.names.append(name)
-        // Names plus you: the count is never lower than the people named.
-        if (updated.count ?? 0) < updated.names.count + 1 { updated.count = updated.names.count + 1 }
+        // Never fewer than the people named, plus the user unless they named
+        // themselves (they can still lower it for a meeting they missed).
+        let floor = updated.names.count + (model.isYou(name) || updated.names.contains(where: model.isYou) ? 0 : 1)
+        if (updated.count ?? 0) < floor { updated.count = floor }
         query = ""
         save(updated)
     }

@@ -791,9 +791,13 @@ final class AppModel {
             // The user's agent only for the recording on the card.
             let atCard = card.map { RecordingLibrary.stamp(of: $0.entry.folder) == stamp } ?? false
             titles.suggest(for: entry, agent: atCard)
-            if entry.transcript == .done, RecordingImport.wantsSpeakerLabels(folder), !speakers.started(entry) {
-                // Names for the voices come from the user, after import.
-                speakers.label(entry, count: entry.people.count, askAgent: false)
+            // Speakers are labeled with every transcript, so no one has to ask;
+            // an import follows its own switch, and names its voices after.
+            let imported = RecordingImport.isImported(folder)
+            if entry.transcript == .done, !speakers.started(entry),
+                !imported || RecordingImport.wantsSpeakerLabels(folder)
+            {
+                speakers.label(entry, count: entry.people.count, askAgent: !imported && atCard)
             }
         }
     }
@@ -997,6 +1001,12 @@ final class AppModel {
     }
 
     func knownSpelling(of name: String) -> String? { suggester.knownSpelling(of: name) }
+
+    /// True when a name is the user's own, as set on the People page.
+    func isYou(_ name: String) -> Bool {
+        guard let you = peopleList.you else { return false }
+        return NameSuggester.fold(you) == NameSuggester.fold(name)
+    }
 
     /// True once there is anything to suggest from.
     var hasSuggestionSource: Bool { !peopleList.people.isEmpty || allEntries.contains { !$0.people.names.isEmpty } }

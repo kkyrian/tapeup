@@ -4,7 +4,8 @@ import Foundation
 ///
 /// With nothing typed: people named most often in past recordings first,
 /// then the people list in its own order (most frequent first, as the
-/// assistant was asked). While typing, a forgiving match: the start of the
+/// assistant was asked). The user's own name, when set, comes first: they
+/// are in most of their meetings, though not all. While typing, a forgiving match: the start of the
 /// name, the start of any word, initials ("ps" for Priya Shah), the letters
 /// in order ("prya"), or the context ("advisor").
 public struct NameSuggester: Sendable {
@@ -16,6 +17,7 @@ public struct NameSuggester: Sendable {
         var uses = 0
         var lastUsed = Date.distantPast
         var listOrder = Int.max
+        var isYou = false
     }
 
     private var candidates: [String: Candidate] = [:]
@@ -31,6 +33,9 @@ public struct NameSuggester: Sendable {
         }
         for (index, person) in people.people.enumerated() {
             update(person.name, context: person.context) { $0.listOrder = min($0.listOrder, index) }
+        }
+        if let you = people.you, !you.trimmingCharacters(in: .whitespaces).isEmpty {
+            update(you, context: nil) { $0.isYou = true }
         }
     }
 
@@ -59,6 +64,7 @@ public struct NameSuggester: Sendable {
             }
             .sorted { a, b in
                 if a.1 != b.1 { return a.1 > b.1 }
+                if a.0.isYou != b.0.isYou { return a.0.isYou }
                 if a.0.uses != b.0.uses { return a.0.uses > b.0.uses }
                 if a.0.lastUsed != b.0.lastUsed { return a.0.lastUsed > b.0.lastUsed }
                 if a.0.listOrder != b.0.listOrder { return a.0.listOrder < b.0.listOrder }
@@ -97,7 +103,7 @@ public struct NameSuggester: Sendable {
         return gaps
     }
 
-    static func fold(_ text: String) -> String {
+    public static func fold(_ text: String) -> String {
         text.folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: nil)
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
@@ -109,6 +115,7 @@ extension NameSuggester.Candidate {
         copy.uses = uses
         copy.lastUsed = lastUsed
         copy.listOrder = listOrder
+        copy.isYou = isYou
         return copy
     }
 }

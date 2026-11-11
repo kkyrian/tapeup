@@ -19,9 +19,18 @@ struct NameSuggesterTests {
             people: .init(count: names.count + 1, names: names))
     }
 
-    @Test func withNothingTypedPastRecordingsLeadThenTheList() {
+    @Test func withNothingTypedYouThenPastRecordingsThenTheList() {
         let suggester = NameSuggester(entries: [entry(1, ["Bo"]), entry(2, ["Bo", "Ana"])], people: people)
-        #expect(suggester.suggestions(matching: "", excluding: [], limit: 4) == ["Bo", "Ana", "Priya Shah", "Mei"])
+        #expect(
+            suggester.suggestions(matching: "", excluding: [], limit: 5) == ["Sam", "Bo", "Ana", "Priya Shah", "Mei"])
+    }
+
+    @Test func youCanBeTypedAndLeaveOnceChosen() {
+        let suggester = NameSuggester(entries: [entry(1, ["Bo"])], people: people)
+        #expect(suggester.suggestions(matching: "sa", excluding: []).first == "Sam")
+        #expect(!suggester.suggestions(matching: "", excluding: ["sam"]).contains("Sam"))
+        let unnamed = NameSuggester(entries: [], people: PeopleList(you: nil, people: [.init(name: "Bo")]))
+        #expect(unnamed.suggestions(matching: "", excluding: []) == ["Bo"])
     }
 
     @Test func matchesStartOfAnyWord() {

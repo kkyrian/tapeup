@@ -17,13 +17,13 @@ A very simple Mac recorder: all computer audio plus the default microphone,
 one click, surviving device switches (AirPods in and out, speakers, the laptop
 mic). Each recording becomes a self-describing folder that any agent can be
 handed by path and understand from there. TapeUp transcribes on the Mac
-itself, never in the cloud; speaker labels are a step the user asks for, and
+itself, never in the cloud; speakers are labeled with every transcript, and
 anything an agent does is an optional suggestion the user accepts (TU-013,
-TU-014, TU-019).
+TU-014, TU-019, TU-036).
 
 ## Operating Charter
 
-- **Scope:** a small, finished, polished tool. The core is recording and transcription on the Mac, with speaker labels on request; anything more ships only if it stays simple (TU-013).
+- **Scope:** a small, finished, polished tool. The core is recording and transcription on the Mac, with speaker labels; anything more ships only if it stays simple (TU-013).
 - **Quality bar:** polished and premium, quick to respond, a delight to use,
   and plain about what it is for. Every interface change is pictured in all
   its states and reviewed by a designer before it ships (TU-004, TU-034).
@@ -74,8 +74,11 @@ TU-014, TU-019).
   library ships beside the executable. Engine-free logic (pieces, guards,
   hints, the file format) is in `TapeUpCore` and unit-tested; `TapeUpSpeech`
   only adapts the models. (TU-014, TU-015, TU-016, TU-031)
-- **Speaker labels:** on request, from the card once the transcript is
-  ready. Nemotron 3 Diarization (MLX INT8, 102 MB, downloaded on first use)
+- **Speaker labels:** made as soon as a transcript is done (an import
+  follows its own Label speakers switch); Label speakers on the card starts
+  them for an older recording. The user's own name, set on the People page,
+  is offered first among the names, though they may have missed the meeting
+  (TU-036). Nemotron 3 Diarization (MLX INT8, 102 MB, downloaded on first use)
   finds who spoke when in the saved file, and a WeSpeaker voice print is
   taken for each voice it finds; both run on the shared model queue after
   the speech model is let go if idle. The model splits long talkers into
@@ -127,7 +130,8 @@ TU-014, TU-019).
 - **Panel pages:** the recorder with Recent, a recording's card, People,
   Settings and All recordings, one at a time. ··· (and right-click on the menu-bar icon)
   holds People…, Settings… and Quit. Settings holds the recordings folder,
-  Your AI, and the app switches (floating controls, open at login). (TU-004, TU-008, TU-021)
+  Your AI, and the app switches (floating controls, open at login, which
+  starts on at an installed app's first launch). (TU-004, TU-008, TU-021, TU-036)
 - **All recordings:** reached by Show all under Recent when there are more
   recordings than Recent shows; browse first, search second. Chips for the
   five people named at the most recordings, then No transcript (with one
@@ -181,7 +185,7 @@ TU-014, TU-019).
         ├── meta.json        time, duration, sources, devices, gaps, pauses, status, title, you, who was there
         ├── events.jsonl     what happened while recording
         ├── transcript.md    made on this Mac while recording; never rewritten once finished
-        └── transcript-with-speaker-labels.md   when the user asks for speaker labels; transcript.md stays as it is
+        └── transcript-with-speaker-labels.md   once speakers are labeled; transcript.md stays as it is
 ```
 
 The file starts at the first audio either source delivers, not at the click,

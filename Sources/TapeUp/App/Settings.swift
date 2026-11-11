@@ -15,6 +15,10 @@ enum Settings {
         join()
     }
 
+    /// True in a staged run (pictures, films, the UI test), which must not
+    /// change anything outside its scratch domain.
+    static var isStaged: Bool { ProcessInfo.processInfo.environment[variable] != nil }
+
     /// A command started by a staged run uses the same scratch domain.
     static func join() {
         guard let name = ProcessInfo.processInfo.environment[variable], let suite = UserDefaults(suiteName: name)
