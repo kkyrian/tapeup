@@ -4,6 +4,16 @@
         <title>TapeUp</title>
         <link>https://github.com/kkyrian/tapeup</link>
         <item>
+            <title>TapeUp 0.1.4</title>
+            <pubDate>Wed, 11 Nov 2026 18:39:17 GMT</pubDate>
+            <sparkle:version>0.1.4</sparkle:version>
+            <sparkle:shortVersionString>0.1.4</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[<h3>What's new</h3><ul><li><b>Keep the transcript, drop the audio.</b> Once a recording has a transcript, the new button beside the trash removes only the audio and keeps everything else, with Undo right there. Handy for meetings you only need in writing. Right-click a recording for the same thing.</li><li><b>Transcript-only recordings say so.</b> The card reads "Transcript only", and lists show a small page mark before the length.</li><li><b>The trash says what it takes:</b> the recording and its transcript.</li></ul><h3>Install</h3><p>Download <b>TapeUp.dmg</b> below and drag TapeUp to Applications, or:</p><pre>brew install kkyrian/tap/tapeup
+</pre><p>Already on TapeUp? It updates itself when you're not recording, or use <b>Check for Updates…</b> in the ··· menu.</p>]]></description>
+            <enclosure url="https://github.com/kkyrian/tapeup/releases/download/v0.1.4/TapeUp.dmg" type="application/octet-stream" sparkle:edSignature="YOtMxiIRlFi8BEtVqT4x8c03oXV9ESGNLdPytdkA6oCDSEfy+QgjEaYHL7cAO7APTJ+kXcr/2dr3oWrvlgPdBg==" length="49905588"/>
+        </item>
+        <item>
             <title>TapeUp 0.1.3</title>
             <pubDate>Wed, 11 Nov 2026 17:45:07 GMT</pubDate>
             <sparkle:version>0.1.3</sparkle:version>
