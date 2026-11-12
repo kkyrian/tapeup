@@ -165,8 +165,8 @@ TU-014, TU-019, TU-036).
   request the user's own AI assistant answers by writing the file, or whose
   answer is pasted back. It seeds name suggestions. (TU-012, TU-021)
 - **CLI:** the app's own executable answers `folder`, `import`, `title`,
-  `transcribe`, `speakers`, `voices`, `name`, `people`, `remove-audio`, `keep`
-  and `agent` (`TapeUp help`), for agents and scripts; `AGENTS.md` in the
+  `transcribe`, `speakers`, `voices` (including `voices name`), `people`,
+  `remove-audio`, `keep` and `agent` (`TapeUp help`), for agents and scripts; `AGENTS.md` in the
   recordings folder points to it. Recordings are started only in the app.
   While the app runs, a command is handed to it over a distributed
   notification carrying the recordings folder, so only the app working on
@@ -174,8 +174,13 @@ TU-014, TU-019, TU-036).
   loads; the command then waits by reading `meta.json`. Without the app it
   does the work itself. People changes go through `TapeUp people`, so names
   in recordings and remembered voices follow. Import is fingerprint-idempotent
-  and leaves transcription for a separate command. Voice names require the
-  user's identification; correcting a fill lists earlier similar fills for
+  and ensures transcription and speaker labels, waiting for completion and
+  resuming missing stages on retry. `speakers` leaves completed labels alone
+  unless a different voice count is requested. `latest` resolves the most
+  recent saved recording, excluding active recordings. Successful commands
+  orient agents with a copyable next step, and describe reversal where possible.
+  Staged settings domains always work alone, so tests cannot reach the user's
+  app. Voice names require the user's identification; correcting a fill lists earlier similar fills for
   review and never changes them automatically. Audio removal requires a
   transcript, idle audio and no keep lock. `keep` sets or clears that lock.
   Concurrent file edits use the existing library and recording locks.

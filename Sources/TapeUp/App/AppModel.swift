@@ -1267,10 +1267,78 @@ final class AppModel {
 // MARK: Requests from the command line
 
 extension AppModel {
+    /// Completes an import's missing stages using the app's ordinary queues.
+    private func ensureImport(
+        _ file: URL, title: String?, requestedRoot: URL,
+        progress: @escaping @MainActor @Sendable (String) -> Void
+    ) async throws -> CommandOutcome {
+        var stamp: String?
+        do {
+            guard root.standardizedFileURL == requestedRoot else {
+                throw Refusal(
+                    "folder_changed", "TapeUp switched recordings folders before import began.",
+                    suggestion: "Run TapeUp folder, then import again.", retryable: true)
+            }
+            progress("Inspecting the import…")
+            let candidate = try await RecordingImport.inspect(file)
+            guard root.standardizedFileURL == requestedRoot else {
+                throw Refusal(
+                    "folder_changed", "TapeUp switched recordings folders during inspection.", retryable: true)
+            }
+            progress("Importing…")
+            let copy = try await importRecording(
+                candidate, plan: .init(transcribe: true, labelSpeakers: true, title: title))
+            let id = RecordingLibrary.stamp(of: copy.folder)
+            stamp = id
+            progress("Recording \(id): \(copy.folder.path)")
+            func current() throws -> RecordingEntry {
+                guard root.standardizedFileURL == requestedRoot else {
+                    throw Refusal("folder_changed", "TapeUp switched recordings folders.", retryable: true)
+                }
+                guard let folder = library.folder(withStamp: id), let entry = RecordingLibrary.entry(at: folder) else {
+                    throw Refusal("not_found", "The imported recording is no longer there.")
+                }
+                return entry
+            }
+            var entry = try current()
+            if entry.transcript != .done {
+                progress("Transcribing…")
+                if !transcription.working.contains(id) { makeTranscript(entry) }
+                while entry.transcript != .done || transcription.working.contains(id) {
+                    if entry.transcript == .failed, !transcription.working.contains(id) {
+                        throw Refusal("transcription_failed", "The transcript could not be made.", retryable: true)
+                    }
+                    try await Task.sleep(for: .milliseconds(100))
+                    entry = try current()
+                }
+            }
+            if !CLIWork.labelsCurrent(entry.folder, count: nil) {
+                progress("Labeling speakers…")
+                if !speakers.busy.contains(id) { speakers.label(entry, count: nil) }
+                while !CLIWork.labelsCurrent(entry.folder, count: nil) {
+                    if (MetaFile.read(entry.folder)?["speaker_labels"] as? [String: Any])?["status"] as? String
+                        == "failed", !speakers.busy.contains(id)
+                    {
+                        throw Refusal("labels_failed", "Speakers could not be labeled.", retryable: true)
+                    }
+                    try await Task.sleep(for: .milliseconds(100))
+                    entry = try current()
+                }
+            }
+            return CLIWork.imported(entry.folder, copied: copy.imported)
+        } catch {
+            if let stamp { throw CLIWork.importFailure(error, stamp: stamp, file: file, title: title) }
+            throw error
+        }
+    }
+
     /// Answers a `TapeUp` command sent while the app runs, so the work shows
     /// in the panel and only one model loads. `reply` gets a refusal, or nil
     /// and the folder the command acted on.
-    func handle(_ request: [String: String], reply: @escaping @MainActor @Sendable (Refusal?, URL?, String?) -> Void) {
+    func handle(
+        _ request: [String: String], progress: @escaping @MainActor @Sendable (String) -> Void = { _ in },
+        reply: @escaping @MainActor @Sendable (Refusal?, URL?, String?) -> Void
+    ) {
         func done(_ refusal: Refusal?, _ folder: URL?) { reply(refusal, folder, nil) }
         func failed(_ error: Error) {
             if let refusal = error as? Refusal { return done(refusal, nil) }
@@ -1306,15 +1374,10 @@ extension AppModel {
             let requestedRoot = root.standardizedFileURL
             Task {
                 do {
-                    let candidate = try await RecordingImport.inspect(URL(fileURLWithPath: request["value"] ?? ""))
-                    guard root.standardizedFileURL == requestedRoot else {
-                        throw Refusal(
-                            "folder_changed", "TapeUp switched recordings folders during inspection.",
-                            suggestion: "Run TapeUp folder, then import again.", retryable: true)
-                    }
-                    let copy = try await importRecording(
-                        candidate, plan: .init(transcribe: false, labelSpeakers: false, title: request["title"]))
-                    reply(nil, copy.folder, try CLIWork.imported(copy.folder, copied: copy.imported).encoded())
+                    let outcome = try await ensureImport(
+                        URL(fileURLWithPath: request["value"] ?? ""), title: request["title"],
+                        requestedRoot: requestedRoot, progress: progress)
+                    reply(nil, nil, try outcome.encoded())
                 } catch { failed(error) }
             }
             return
@@ -1353,7 +1416,7 @@ extension AppModel {
         }
         let stamp = RecordingLibrary.stamp(of: folder)
         switch command {
-        case "voices", "name", "remove-audio", "keep":
+        case "voices", "remove-audio", "keep":
             do {
                 let outcome: CommandOutcome = try library.withLock {
                     var held: FolderLock?
@@ -1366,13 +1429,13 @@ extension AppModel {
                         throw Refusal("not_found", "That recording no longer exists.")
                     }
                     let outcome: CommandOutcome
-                    if command == "voices" {
+                    if command == "voices", request["action"] != "name" {
                         outcome = try CLIWork.voices(folder)
                     } else {
                         let needsIdle = command != "keep" && (command != "remove-audio" || entry.hasAudio)
                         try CLIWork.check(entry, busy: busyStamps.contains(stamp), needsIdle: needsIdle)
                         switch command {
-                        case "name":
+                        case "voices":
                             let before = try CLIWork.result(folder)
                             let voice = try CLIWork.voice(request["voice"] ?? "", in: before)
                             let value = (request["value"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1420,6 +1483,11 @@ extension AppModel {
             makeTranscript(entry)
             done(nil, folder)
         case "speakers":
+            let count = request["voices"].flatMap(Int.init)
+            if CLIWork.labelsCurrent(folder, count: count) {
+                reply(nil, folder, try? CLIWork.speakers(folder, labeled: false).encoded())
+                return
+            }
             guard entry.transcript == .done else {
                 done(
                     Refusal(
@@ -1427,7 +1495,7 @@ extension AppModel {
                         suggestion: "Run TapeUp transcribe \(stamp) first."), nil)
                 return
             }
-            speakers.label(entry, count: request["voices"].flatMap(Int.init))
+            speakers.label(entry, count: count)
             done(nil, folder)
         default:
             done(Refusal("usage", "TapeUp does not know the command \(command)."), nil)

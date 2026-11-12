@@ -190,7 +190,7 @@ TapeUp title <recording> <title>
 TapeUp transcribe <recording>
 TapeUp speakers <recording> [--voices N]
 TapeUp voices <recording>
-TapeUp name <recording> <voice> <person>
+TapeUp voices name <recording> <voice> <person>
 TapeUp people
 TapeUp people add <name> [--context C]
 TapeUp people rename <old> <new> [--merge]
@@ -200,24 +200,37 @@ TapeUp keep <recording> [off]
 TapeUp agent [off] [--model M] [--effort E]
 ```
 
-Give a recording's folder, folder name or start time (`2026-11-06-1430`).
-Import copies one audio or video file in, leaves the original, and tells you
-how to transcribe it next; importing the same file again keeps the first copy.
+Give a recording's folder, folder name, start time (`2026-11-06-1430`),
+or `latest` for the most recent saved recording. Import copies one audio or
+video file in, leaves the original, then transcribes and labels its speakers.
+It waits until everything is ready. Running the same import again keeps the
+first copy and finishes any missing work; after a failure, run it again.
+`speakers` keeps existing labels and names unless you ask for a different
+voice count with `--voices`. A changed count can change voice numbers; names
+follow a clear majority of their earlier lines. An ambiguous merge can leave
+a voice unnamed, so review the voices afterward.
+
 `voices` gives each voice's number, name, where the name came from, talk time
 and a quote. Name a voice only when the user said who it is: TapeUp learns
 that person's voice from it. Give `""` to clear a name. Correcting a name
 TapeUp filled in lists similar earlier fills for the user to review; it
-changes none of them by itself.
+changes none of them by itself. Each offered correction includes the exact
+`TapeUp voices name` command; ask the user before running it.
 
 Change people with `TapeUp people`: renames follow through recordings and
-remembered voices, and `--merge` joins two listed people. Removing a person
+remembered voices. A rename prints its reverse command. Ask the user whether
+two listed names are the same person before using `--merge`; merges and
+removals cannot be undone from the command line. Removing a person
 forgets their voice and leaves past recordings' names. `remove-audio` moves
-audio to the Trash once there is a transcript and nothing is using it.
+audio to the Trash once there is a transcript and nothing is using it;
+Finder's Put Back restores it.
 `keep` locks the audio against removal; `keep <recording> off` unlocks it.
 Ask the user before unlocking audio they chose to keep.
 
-Add `--json` for structured results and errors. While the app runs, commands
-go through it so its list and Undo follow along. Recordings start in the app.
+Follow the `Next:` line for the likely next command. Use `--json` when
+branching in code, and plain output when reading or telling the user. JSON
+voice listings contain a `voices` array and a `next` command when a voice
+needs a name. While the app runs, commands go through it so its list and Undo follow along. Recordings start in the app.
 
 ## First launch
 

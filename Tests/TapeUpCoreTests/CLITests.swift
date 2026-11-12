@@ -51,7 +51,7 @@ struct CLIFixture {
                 ?? [:]
         }
         var rows: [[String: Any]] {
-            (try? JSONSerialization.jsonObject(with: Data(out.utf8))) as? [[String: Any]] ?? []
+            object["voices"] as? [[String: Any]] ?? []
         }
     }
 
@@ -82,26 +82,52 @@ struct CLIFixture {
 }
 
 struct CLITests {
-    @Test func importRetriesAndConcurrentImportsKeepOneCopyWithoutTranscribing() throws {
+    @Test func importEnsuresExistingStagesAndCanResumeAfterAFailure() async throws {
         let f = try CLIFixture()
         defer { f.remove() }
         let source = try f.tone()
-        let first = try f.start(["import", source.path, "--title", "Mei interview"])
+        let candidate = try await RecordingImport.inspect(source)
+        let folder = try f.files.recording(names: [1: "Mei"])
+        try MetaFile.update(folder) { $0["imported"] = ["fingerprint": candidate.fingerprint] }
+        let original = try Data(contentsOf: folder.appendingPathComponent(SpeakerLabels.resultFileName))
+        let first = try f.start(["import", source.path, "--title", "Another title"])
         let second = try f.start(["import", source.path])
-        let answers = [f.finish(first), f.finish(second)]
-        #expect(answers.allSatisfy { $0.status == 0 }, "\(answers.map(\.err))")
-        #expect(answers.compactMap { $0.object["imported"] as? Bool }.filter { $0 }.count == 1)
-        #expect(Set(answers.compactMap { $0.object["stamp"] as? String }).count == 1)
-        let retry = try f.run(["import", source.path, "--title", "Another title"])
-        #expect(retry.status == 0 && retry.object["imported"] as? Bool == false)
-        let folders = RecordingLibrary(root: f.files.root).recordingFolders()
-        #expect(folders.count == 1)
-        let folder = try #require(folders.first)
-        #expect(RecordingLibrary.entry(at: folder)?.transcript == .none)
-        #expect(!RecordingImport.wantsSpeakerLabels(folder))
+        for reply in [f.finish(first), f.finish(second)] {
+            #expect(reply.status == 0 && reply.object["imported"] as? Bool == false, "\(reply.err)")
+            #expect(reply.object["next"] as? String == "TapeUp voices \(RecordingLibrary.stamp(of: folder))")
+        }
+        #expect(try Data(contentsOf: folder.appendingPathComponent(SpeakerLabels.resultFileName)) == original)
+        // Missing labels resume from the saved voice prints without a speech model.
+        try FileManager.default.removeItem(at: folder.appendingPathComponent(SpeakerLabels.resultFileName))
+        let held = try #require(FolderLock(folder: folder))
+        let failed = try f.run(["import", source.path])
+        held.release()
+        #expect(failed.status == 1 && failed.object["error"] as? String == "busy")
+        #expect(failed.object["stamp"] as? String == RecordingLibrary.stamp(of: folder))
+        #expect(failed.object["suggestion"] as? String == "Run the same import again: TapeUp import \"\(source.path)\"")
+        let retry = try f.run(["import", source.path])
+        #expect(retry.status == 0 && retry.object["imported"] as? Bool == false, "\(retry.err)")
+        #expect(SpeakerLabels.result(in: folder) != nil)
+        #expect(RecordingLibrary(root: f.files.root).recordingFolders().count == 1)
         #expect(FileManager.default.fileExists(atPath: source.path))
-        let stamp = RecordingLibrary.stamp(of: folder)
-        #expect(retry.object["next"] as? String == "TapeUp transcribe \(stamp)")
+    }
+
+    @Test func failedTranscriptWithOlderLabelsIsNotACompleteImport() async throws {
+        let f = try CLIFixture()
+        defer { f.remove() }
+        let source = try f.tone()
+        let candidate = try await RecordingImport.inspect(source)
+        let folder = try f.files.recording(names: [1: "Mei"])
+        try MetaFile.update(folder) { $0["imported"] = ["fingerprint": candidate.fingerprint] }
+        try TranscriptDocument.save(lines: [], failures: 1, pieces: 1, model: .large, in: folder)
+        #expect(RecordingLibrary.entry(at: folder)?.transcript == .failed)
+        #expect(SpeakerLabels.result(in: folder)?.names[1] == "Mei")
+        let held = try #require(FolderLock(folder: folder))
+        defer { held.release() }
+        let reply = try f.run(["import", source.path])
+        #expect(reply.status == 1 && reply.object["error"] as? String == "busy")
+        #expect(reply.object["stamp"] as? String == RecordingLibrary.stamp(of: folder))
+        #expect(reply.object["suggestion"] as? String == "Run the same import again: TapeUp import \"\(source.path)\"")
     }
 
     @Test func importRejectsUnreadableAndUnsupportedFiles() throws {
@@ -129,22 +155,23 @@ struct CLITests {
         #expect(voices.rows.first?["provenance"] as? String == "filled")
         #expect(voices.rows.first?["seconds"] as? Double == 100)
         #expect(voices.rows.first?["quote"] as? String == "A quoted line from voice 1.")
-        let named = try f.run(["name", stamp, "mei", "Ana"])
+        let named = try f.run(["voices", "name", stamp, "mei", "Ana"])
         #expect(named.status == 0)
         let hits = named.object["past_fills"] as? [[String: Any]]
         #expect(hits?.count == 1)
         #expect(hits?.first?["stamp"] as? String == "2026-01-01-1200")
         #expect(hits?.first?["voice"] as? Int == 1)
+        #expect(hits?.first?["command"] as? String == "TapeUp voices name 2026-01-01-1200 1 \"Ana\"")
         #expect(
-            named.object["suggestion"] as? String == "Ask the user, then run TapeUp name for each one to change it.")
+            named.object["suggestion"] as? String == "Ask the user first before changing any earlier fill.")
         #expect(SpeakerLabels.result(in: earlier)?.names[1] == "Mei")
         #expect(VoiceStore.load(from: f.files.root).people["Mei"]?.negatives.count == 1)
-        #expect(try f.run(["name", stamp, "1", ""]).status == 0)
+        #expect(try f.run(["voices", "name", stamp, "1", ""]).status == 0)
         #expect(SpeakerLabels.result(in: folder)?.names[1] == nil)
         #expect(try f.run(["voices", stamp]).rows.first?["name"] is NSNull)
-        #expect(try f.run(["name", "2026-01-01-1200", "1", "Mei"]).status == 0)
+        #expect(try f.run(["voices", "name", "2026-01-01-1200", "1", "Mei"]).status == 0)
         #expect(SpeakerLabels.result(in: earlier)?.provenance(for: 1).origin == .confirmed)
-        #expect(try f.run(["name", stamp, "99", "Ana"]).object["error"] as? String == "not_found")
+        #expect(try f.run(["voices", "name", stamp, "99", "Ana"]).object["error"] as? String == "not_found")
         try FileManager.default.removeItem(at: folder.appendingPathComponent(SpeakerLabels.resultFileName))
         let absent = try f.run(["voices", stamp])
         #expect(absent.object["error"] as? String == "no_speakers")
@@ -169,7 +196,9 @@ struct CLITests {
         #expect(try f.run(["people", "add", "Ana"]).status == 0)
         let taken = try f.run(["people", "rename", "Mei", "ana"])
         #expect(taken.object["error"] as? String == "name_taken")
-        #expect(taken.object["suggestion"] as? String == "Add --merge to merge these people.")
+        #expect(
+            taken.object["suggestion"] as? String
+                == "Ask the user whether they are the same person before adding --merge.")
         let rename = try f.run(["people", "rename", "mei", "ana", "--merge"])
         #expect(rename.status == 0 && rename.object["recordings_changed"] as? Int == 1)
         #expect(SpeakerLabels.result(in: folder)?.names[1] == "Ana")
@@ -209,7 +238,7 @@ struct CLITests {
         #expect(try f.run(["remove-audio", stamp], json: false).out.contains("already has no audio"))
         #expect(FileManager.default.fileExists(atPath: folder.appendingPathComponent(TranscriptDocument.fileName).path))
         try MetaFile.update(folder) { $0["status"] = "recording" }
-        #expect(try f.run(["name", stamp, "1", "Mei"]).object["error"] as? String == "recording")
+        #expect(try f.run(["voices", "name", stamp, "1", "Mei"]).object["error"] as? String == "recording")
     }
 
     @Test func aPartialRenameCanBeRetriedWithoutMerging() throws {
@@ -238,8 +267,8 @@ struct CLITests {
         let held = try #require(FolderLock(folder: folder))
         defer { held.release() }
         let stamp = RecordingLibrary.stamp(of: folder)
-        for command in ["transcribe", "speakers", "keep", "name"] {
-            let words = [command, stamp] + (command == "name" ? ["1", "Mei"] : [])
+        for command in ["transcribe", "keep", "voices"] {
+            let words = command == "voices" ? [command, "name", stamp, "1", "Mei"] : [command, stamp]
             let reply = try f.run(words)
             #expect(reply.status == 1 && reply.object["error"] as? String == "busy")
             #expect(reply.object["retryable"] as? Bool == true)
@@ -282,11 +311,66 @@ struct CLITests {
         #expect(try f.run(["keep", stamp, "off"]).status == 0)
     }
 
+    @Test func speakersEnsurePreservesNamedBytesAndRecountsOnlyWhenRequested() throws {
+        let f = try CLIFixture()
+        defer { f.remove() }
+        let folder = try f.files.recording(
+            prints: [1: voicePrint(), 2: voicePrint(0, 1)], names: [1: "Mei", 2: "Ana"])
+        let stamp = RecordingLibrary.stamp(of: folder)
+        let original = try Data(contentsOf: folder.appendingPathComponent(SpeakerLabels.resultFileName))
+        let before = try f.files.bytes()
+        for words in [["speakers", stamp], ["speakers", stamp, "--voices", "2"]] {
+            let reply = try f.run(words)
+            #expect(reply.status == 0 && reply.object["labeled"] as? Bool == false)
+            #expect(reply.object["next"] as? String == "TapeUp voices \(stamp)")
+        }
+        #expect(try f.files.bytes() == before)
+        let changed = try f.run(["speakers", stamp, "--voices", "1"])
+        #expect(changed.status == 0 && changed.object["labeled"] as? Bool == true, "\(changed.err)")
+        #expect(SpeakerLabels.result(in: folder)?.voices.count == 1)
+        // Neither name owns a strict majority after an equal two-way merge.
+        #expect(SpeakerLabels.result(in: folder)?.names.isEmpty == true)
+        let lines = [
+            TranscriptLine(start: 0, end: 100, text: "Mei speaks longer."),
+            TranscriptLine(start: 100, end: 140, text: "Ana replies."),
+        ]
+        try JSONEncoder().encode(lines).write(to: folder.appendingPathComponent(TranscriptDocument.linesFileName))
+        try original.write(to: folder.appendingPathComponent(SpeakerLabels.resultFileName))
+        #expect(try f.run(["speakers", stamp, "--voices", "1"]).object["labeled"] as? Bool == true)
+        #expect(SpeakerLabels.result(in: folder)?.names[1] == "Mei")
+    }
+
+    @Test func latestExcludesActiveRecordingsAndNextCommandsAreCopyable() throws {
+        let f = try CLIFixture()
+        defer { f.remove() }
+        let saved = try f.files.recording("2026-01-02-1200")
+        let active = try f.files.recording("2026-01-03-1200")
+        try MetaFile.update(active) {
+            $0["status"] = "recording"
+            $0["started"] = "2026-01-03T12:00:00Z"
+        }
+        let voices = try f.run(["voices", "latest"])
+        #expect(voices.status == 0)
+        #expect(voices.object["next"] as? String == "TapeUp voices name 2026-01-02-1200 1 \"<person>\"")
+        let plain = try f.run(["voices", "latest"], json: false)
+        #expect(plain.out.hasSuffix("Next: TapeUp voices name 2026-01-02-1200 1 \"<person>\"\n"))
+        #expect(try f.run(["voices", "name", "latest", "1", "Mei"]).status == 0)
+        #expect(SpeakerLabels.result(in: saved)?.names[1] == "Mei")
+        #expect(SpeakerLabels.result(in: active)?.names.isEmpty == true)
+        let renamed = try f.run(["people", "rename", "Mei", "Nora Quinn"])
+        #expect(renamed.object["undo"] as? String == "TapeUp people rename \"Nora Quinn\" \"Mei\"")
+        #expect(renamed.object["next"] as? String == "TapeUp people")
+        let removed = try f.run(["people", "remove", "Nora Quinn"], json: false)
+        #expect(removed.out.contains("cannot be undone from the command line"))
+        #expect(removed.out.hasSuffix("Next: TapeUp people\n"))
+    }
+
     @Test func malformedCommandsAreUsageErrorsAndMissingRecordingsAreNotFound() throws {
         let f = try CLIFixture()
         defer { f.remove() }
         for words in [
-            ["import"], ["import", "x", "--title"], ["voices"], ["name", "x", "1"],
+            ["import"], ["import", "x", "--title"], ["voices"], ["voices", "name", "x", "1"],
+            ["name", "x", "1", "Mei"],
             ["people", "add", ""], ["people", "rename", "Ana"], ["people", "add", "Ana", "--merge"],
             ["people", "--context", "x"], ["remove-audio"], ["keep", "x", "yes"], ["voices", "x", "--bad"],
         ] {

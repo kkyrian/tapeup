@@ -553,80 +553,81 @@ enum UITest {
             model.agents.refreshNow()
         }
 
-        // The command line, answered by this running model.
-        let link = CommandLink.listen(model)
-        func command(_ words: [String]) -> (status: Int32, out: String) {
-            let process = Process()
-            process.executableURL = Bundle.main.executableURL
-            process.arguments = words + ["--json"]
-            let pipe = Pipe()
-            process.standardOutput = pipe
-            process.standardError = pipe
-            try? process.run()
-            // A command that started a second app instead would never end.
-            let deadline = Date().addingTimeInterval(60)
-            while process.isRunning && Date() < deadline { settle(0.1) }
-            if process.isRunning { process.terminate() }
-            return (
-                process.terminationStatus,
-                String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-            )
+        // Exercise app-routed requests directly. Staged CLI subprocesses must
+        // always work alone, so they cannot contact the user's running app.
+        func command(_ request: [String: String]) -> (status: Int32, out: String) {
+            var finished = false
+            var refusal: Refusal?
+            var folder: URL?
+            var output: String?
+            model.handle(request) { error, target, result in
+                refusal = error
+                folder = target
+                output = result
+                finished = true
+            }
+            let deadline = Date().addingTimeInterval(120)
+            while !finished && Date() < deadline { settle(0.1) }
+            guard finished else { return (1, "app request timed out") }
+            if output == nil, refusal == nil, let folder, request["command"] == "transcribe" {
+                while RecordingLibrary.entry(at: folder)?.transcript == .pending && Date() < deadline { settle(0.1) }
+                if RecordingLibrary.entry(at: folder)?.transcript == .failed { return (1, "transcription_failed") }
+            }
+            if let refusal { return (1, refusal.code + ": " + refusal.message) }
+            return (0, output ?? folder?.path ?? "")
         }
         if let target = model.recent.first(where: { $0.title == nil && $0.transcript == .none }) {
             let stamp = RecordingLibrary.stamp(of: target.folder)
-            let named = command(["title", stamp, "Budget", "review"])
+            let named = command(["command": "title", "recording": stamp, "value": "Budget review"])
             expect(
-                named.status == 0 && named.out.contains("Budget review"),
-                "TapeUp title names a recording (\(named.out))")
+                named.status == 0 && model.recent.contains { $0.title == "Budget review" },
+                "app-routed title refreshes the list")
+            let absent = command(["command": "speakers", "recording": stamp])
             expect(
-                model.recent.contains { $0.title == "Budget review" }, "the app's list shows the name at once")
-            let speakers = command(["speakers", stamp])
-            expect(
-                speakers.status == 1 && speakers.out.contains("no_transcript"),
-                "TapeUp speakers explains a missing transcript (\(speakers.out))")
-            let transcribed = command(["transcribe", stamp])
+                absent.status == 1 && absent.out.contains("no_transcript"), "app-routed speakers requires a transcript")
+            let transcribed = command(["command": "transcribe", "recording": stamp])
             expect(
                 transcribed.status == 1 && transcribed.out.contains("transcription_failed"),
-                "TapeUp transcribe waits for the app and reports a recording with no audio (\(transcribed.out))")
-            let missing = command(["title", "1999-01-01-0000", "x"])
-            expect(
-                missing.status == 1 && missing.out.contains("not_found"), "an unknown recording is named in the error")
-            let folder = command(["folder"])
-            let seesThisFolder = folder.out.replacingOccurrences(of: "\\/", with: "/").contains(model.root.path)
-            expect(seesThisFolder, "TapeUp folder shows this folder (\(folder.out))")
-            for words in [["lists"], ["--version"], ["title", stamp]] {
-                let wrong = command(words)
-                expect(
-                    wrong.status == 2 && wrong.out.contains("usage"),
-                    "TapeUp \(words.joined(separator: " ")) is a usage error, not a second app (\(wrong.out))")
-            }
-            // A command that sees another folder would move the installed app's recordings.
+                "app-routed transcription reports missing audio")
             let home = model.root
             let away = home.deletingLastPathComponent().appendingPathComponent("moved-by-command")
-            if seesThisFolder {
-                let moved = command(["folder", away.path, "--move"])
-                expect(
-                    moved.status == 0 && model.root.standardizedFileURL == away.standardizedFileURL
-                        && model.recent.contains { $0.title == "Budget review" },
-                    "TapeUp folder --move moves the recordings through the app (\(moved.out))")
-                let back = command(["folder", home.path, "--move"])
-                expect(
-                    back.status == 0 && model.root.standardizedFileURL == home.standardizedFileURL,
-                    "and back (\(back.out))")
-            }
+            let moved = command(["command": "folder", "value": away.path, "move": "1"])
+            expect(
+                moved.status == 0 && model.root.standardizedFileURL == away.standardizedFileURL,
+                "app-routed folder moves recordings")
+            let back = command(["command": "folder", "value": home.path, "move": "1"])
+            expect(
+                back.status == 0 && model.root.standardizedFileURL == home.standardizedFileURL,
+                "app-routed folder moves them back")
         }
-        // The saved-recording commands share the app's list, labels and Undo.
+        // Accepting the request binds its root before its async task starts.
+        let acceptedRoot = model.root
+        var switchedDone = false
+        var switchedCode: String?
+        model.handle(["command": "import", "value": base.appendingPathComponent("not-opened.wav").path]) {
+            refusal, _, _ in
+            switchedCode = refusal?.code
+            switchedDone = true
+        }
+        model.changeRoot(to: base.appendingPathComponent("import-root-switch"), moving: false)
+        for _ in 0..<50 where !switchedDone { settle(0.1) }
+        expect(
+            switchedDone && switchedCode == "folder_changed",
+            "an accepted import cannot switch roots before its task starts")
+        model.changeRoot(to: acceptedRoot, moving: false)
         let cliSource = base.appendingPathComponent("cli-import.m4a")
         writeSilence(seconds: 1, to: cliSource)
-        let imported = command(["import", cliSource.path, "--title", "Mei interview"])
-        expect(imported.status == 0 && imported.out.contains("true"), "CLI imports through the app (\(imported.out))")
+        let imported = command(["command": "import", "value": cliSource.path, "title": "Mei interview"])
+        expect(
+            imported.status == 0 && imported.out.contains("true"),
+            "app-routed import completes all stages (\(imported.out))")
         if let entry = model.allEntries.first(where: { $0.title == "Mei interview" }) {
             let stamp = RecordingLibrary.stamp(of: entry.folder)
-            expect(entry.transcript == .none, "CLI import leaves transcription for the next command")
-            let again = command(["import", cliSource.path])
-            expect(again.status == 0 && again.out.contains("false"), "CLI import retry keeps the existing recording")
-            let missing = command(["voices", stamp])
-            expect(missing.status == 1 && missing.out.contains("no_speakers"), "CLI voices explains missing labels")
+            expect(
+                entry.transcript == .done && CLIWork.labelsCurrent(entry.folder, count: nil),
+                "import ensures transcript and labels")
+            let again = command(["command": "import", "value": cliSource.path])
+            expect(again.status == 0 && again.out.contains("false"), "app-routed import retry reuses the recording")
             let lines = [TranscriptLine(start: 0, end: 1, text: "A short interview.")]
             try? TranscriptDocument.render(lines: lines, labeled: false, model: "test").write(
                 to: entry.folder.appendingPathComponent(TranscriptDocument.fileName), atomically: true, encoding: .utf8)
@@ -635,56 +636,64 @@ enum UITest {
             let heard = VoicePrints(turns: [.init(start: 0, end: 1, voice: 1)], prints: [:])
             try? SpeakerLabels.save(
                 SpeakerLabels.label(lines: lines, heard: heard, count: 1), lines: lines, in: entry.folder)
-            try? RecordingLibrary.markTranscript("done", in: entry.folder)
-            let listed = command(["voices", stamp])
-            expect(listed.status == 0 && listed.out.contains("A short interview."), "CLI lists a voice and its quote")
-            let named = command(["name", stamp, "1", "José Ortiz"])
-            expect(named.status == 0 && model.peopleList.contains("José Ortiz"), "CLI voice naming updates People")
-            expect(SpeakerLabels.result(in: entry.folder)?.names[1] == "José Ortiz", "CLI voice naming updates labels")
-            let cleared = command(["name", stamp, "José Ortiz", ""])
+            let listed = command(["command": "voices", "recording": stamp])
+            expect(listed.status == 0 && listed.out.contains("A short interview."), "app route lists voices")
+            let named = command([
+                "command": "voices", "action": "name", "recording": stamp, "voice": "1", "value": "José Ortiz",
+            ])
+            expect(
+                named.status == 0 && model.peopleList.contains("José Ortiz"), "app-routed voice naming refreshes People"
+            )
+            let labels = command(["command": "speakers", "recording": stamp])
+            expect(
+                labels.status == 0 && labels.out.contains("false")
+                    && SpeakerLabels.result(in: entry.folder)?.names[1] == "José Ortiz",
+                "app-routed speakers preserves a named voice")
+            let cleared = command([
+                "command": "voices", "action": "name", "recording": stamp, "voice": "José Ortiz", "value": "",
+            ])
             expect(
                 cleared.status == 0 && SpeakerLabels.result(in: entry.folder)?.names[1] == nil,
-                "CLI clears a voice name")
-            let added = command(["people", "add", "Ana", "--context", "lab mate"])
-            expect(added.status == 0 && model.peopleList.contains("Ana"), "CLI adds to the app's People list")
-            let people = command(["people"])
-            expect(people.status == 0 && people.out.contains("lab mate"), "CLI lists people with context")
-            let renamed = command(["people", "rename", "Ana", "Nora Quinn", "--merge"])
-            expect(renamed.status == 0 && !model.peopleList.contains("Ana"), "CLI renames through People")
+                "app route clears a voice name")
+            let added = command(["command": "people", "action": "add", "value": "Ana", "context": "lab mate"])
+            expect(added.status == 0 && model.peopleList.contains("Ana"), "app route adds people")
+            let renamed = command([
+                "command": "people", "action": "rename", "value": "Ana", "new": "Nora Quinn", "merge": "1",
+            ])
+            expect(renamed.status == 0 && !model.peopleList.contains("Ana"), "app route renames people")
             model.undoRename()
-            expect(model.peopleList.contains("Ana"), "the app can Undo a CLI person rename")
-            let removed = command(["people", "remove", "Ana"])
-            expect(removed.status == 0 && !model.peopleList.contains("Ana"), "CLI removes a person from the app's list")
-            let locked = command(["keep", stamp])
+            expect(model.peopleList.contains("Ana"), "the app can Undo its CLI-requested rename")
+            let removed = command(["command": "people", "action": "remove", "value": "Ana"])
+            expect(removed.status == 0 && !model.peopleList.contains("Ana"), "app route removes people")
+            let locked = command(["command": "keep", "recording": stamp, "value": "on"])
             expect(
                 locked.status == 0
                     && model.allEntries.first(where: { RecordingLibrary.stamp(of: $0.folder) == stamp })?.keepAudio
                         == true,
-                "CLI keep refreshes the app's list")
-            let refused = command(["remove-audio", stamp])
-            expect(refused.status == 1 && refused.out.contains("kept"), "CLI respects locked audio")
-            let unlocked = command(["keep", stamp, "off"])
-            expect(unlocked.status == 0, "CLI unlocks audio")
+                "app route refreshes keep state")
+            let refused = command(["command": "remove-audio", "recording": stamp])
+            expect(refused.status == 1 && refused.out.contains("kept"), "app route respects kept audio")
+            let unlocked = command(["command": "keep", "recording": stamp, "value": "off"])
+            expect(unlocked.status == 0, "app route unlocks audio")
             if let held = FolderLock(folder: entry.folder) {
-                let busy = command(["remove-audio", stamp])
+                let busy = command(["command": "remove-audio", "recording": stamp])
                 expect(
                     busy.status == 1 && busy.out.contains("busy") && entry.hasAudio,
-                    "CLI app route respects another process's folder lock")
+                    "app route respects the folder lock")
                 held.release()
             } else {
-                expect(false, "CLI fixture can be locked")
+                expect(false, "the CLI fixture can be locked")
             }
-            let audio = command(["remove-audio", stamp])
-            expect(audio.status == 0 && !entry.hasAudio, "CLI moves audio to the Trash through the app")
-            let noAudio = command(["remove-audio", stamp])
-            expect(noAudio.status == 0 && noAudio.out.contains("false"), "CLI removing audio twice succeeds")
+            let audio = command(["command": "remove-audio", "recording": stamp])
+            expect(audio.status == 0 && !entry.hasAudio, "app route moves audio to the Trash")
+            let noAudio = command(["command": "remove-audio", "recording": stamp])
+            expect(noAudio.status == 0 && noAudio.out.contains("false"), "app route audio removal is idempotent")
             model.undoRemoveAudio()
-            expect(entry.hasAudio, "the app can Undo CLI audio removal")
+            expect(entry.hasAudio, "the app can Undo CLI-requested audio removal")
             check("cli-saved-recording")
         } else {
-            expect(false, "CLI import updates the app's list")
+            expect(false, "app-routed import refreshes the list")
         }
-        DistributedNotificationCenter.default().removeObserver(link)
 
         let victim = model.recent[2]
         model.trash(victim)

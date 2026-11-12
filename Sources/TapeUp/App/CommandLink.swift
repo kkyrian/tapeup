@@ -18,9 +18,15 @@ enum CommandLink {
                 guard request["root"] == model.root.standardizedFileURL.path else { return }
                 // Moving recordings can take minutes; the command waits once it knows.
                 send(["id": id, "taken": "1"])
-                model.handle(request) { refusal, folder, output in
+                model.handle(
+                    request,
+                    progress: { progress in
+                        send(["id": id, "progress": progress])
+                    }
+                ) { refusal, folder, output in
                     var answer = ["id": id]
                     if let refusal {
+                        answer["stamp"] = refusal.stamp
                         answer["error"] = refusal.code
                         answer["message"] = refusal.message
                         answer["suggestion"] = refusal.suggestion
@@ -46,8 +52,10 @@ struct Refusal: Error, Sendable {
     var message: String
     var suggestion: String?
     var retryable = false
+    var stamp: String?
 
-    init(_ code: String, _ message: String, suggestion: String? = nil, retryable: Bool = false) {
+    init(_ code: String, _ message: String, suggestion: String? = nil, retryable: Bool = false, stamp: String? = nil) {
+        self.stamp = stamp
         self.code = code
         self.message = message
         self.suggestion = suggestion
