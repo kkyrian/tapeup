@@ -369,8 +369,111 @@ enum UITest {
                 settle(0.2)
                 expect(player.playing != nil, "a voice plays before the card closes")
             }
+            let sourceStamp = RecordingLibrary.stamp(of: current().folder)
             model.closeCard()
             expect(player.playing == nil, "closing the card stops the voice")
+
+            // Remembered voices: two later copies of this meeting fill in the
+            // name given here; correcting the later one offers the earlier one.
+            // A made title renamed the folder: find it by its stamp.
+            let source =
+                RecordingLibrary(root: model.root).folder(withStamp: sourceStamp).flatMap(RecordingLibrary.entry(at:))
+                ?? labeled
+            func copy(after hours: Double) -> URL? {
+                let library = RecordingLibrary(root: model.root)
+                guard let folder = try? library.newFolder(at: source.started.addingTimeInterval(hours * 3600))
+                else { return nil }
+                let skip: Set<String> = [
+                    "meta.json", ".speakers.json", SpeakerLabels.fileName, "events.jsonl",
+                ]
+                for name in (try? FileManager.default.contentsOfDirectory(atPath: source.folder.path)) ?? []
+                where !skip.contains(name) {
+                    try? FileManager.default.copyItem(
+                        at: source.folder.appendingPathComponent(name), to: folder.appendingPathComponent(name))
+                }
+                var meta = MetaFile.read(source.folder) ?? [:]
+                for key in ["title", "title_suggestion", "who_was_there", "speaker_labels", "keep_audio"] {
+                    meta[key] = nil
+                }
+                meta["started"] = ISO8601DateFormatter().string(from: source.started.addingTimeInterval(hours * 3600))
+                try? MetaFile.update(folder) { $0 = meta }
+                return folder
+            }
+            let named = model.speakers.result(for: source)?.names ?? [:]
+            expect(named.values.contains("Priya Shah"), "the meeting has a named voice to remember (\(named))")
+            let peopleBefore = model.peopleList
+            var later: [String] = []
+            for hours in [1.0, 2.0] {
+                guard let folder = copy(after: hours) else { continue }
+                let stamp = RecordingLibrary.stamp(of: folder)
+                later.append(stamp)
+                model.reload()
+                guard let entry = model.allEntries.first(where: { RecordingLibrary.stamp(of: $0.folder) == stamp })
+                else { continue }
+                model.open(entry)
+                model.labelSpeakers()
+                for _ in 0..<40 where model.speakers.result(for: model.card?.entry ?? entry) == nil { settle(0.1) }
+                let result = model.speakers.result(for: model.card?.entry ?? entry)
+                let voice = named.first { $0.value == "Priya Shah" }?.key ?? -1
+                expect(
+                    result?.names[voice] == "Priya Shah" && result?.provenance(for: voice).origin == .filled,
+                    "a later meeting fills in the remembered voice (\(result?.names ?? [:]))")
+                expect(
+                    model.card?.entry.people.names.contains("Priya Shah") == true,
+                    "and puts them in who was there")
+                model.closeCard()
+            }
+            expect(model.peopleList == peopleBefore, "filling in names adds no one to the people list")
+            if later.count == 2, let folder = RecordingLibrary(root: model.root).folder(withStamp: later[1]),
+                let entry = RecordingLibrary.entry(at: folder),
+                let voice = named.first(where: { $0.value == "Priya Shah" })?.key
+            {
+                model.open(entry)
+                settle(0.3)
+                model.nameVoice(voice, "Nora Quinn", in: entry)
+                settle(0.3)
+                check("card-past-fills")
+                let offer = model.speakers.offer
+                expect(
+                    offer?.from == "Priya Shah" && offer?.hits.map(\.stamp) == [later[0]],
+                    "correcting a fill offers the earlier unchecked one (\(offer?.hits.map(\.stamp) ?? []))")
+                expect(
+                    model.card?.entry.people.names.contains("Priya Shah") == false,
+                    "the wrong name leaves who was there")
+                expect(click("Change all past fills", in: panel), "Change all clicks")
+                settle(0.3)
+                check("card-past-fills-changed")
+                let earlier = RecordingLibrary(root: model.root).folder(withStamp: later[0])
+                expect(
+                    earlier.flatMap { SpeakerLabels.result(in: $0)?.names[voice] } == "Nora Quinn",
+                    "and changes it too")
+                model.speakers.undoOffer()
+                expect(
+                    earlier.flatMap { SpeakerLabels.result(in: $0)?.names[voice] } == "Priya Shah",
+                    "Undo puts the earlier name back")
+                model.closeCard()
+
+                // Renaming a person rewrites every recording, with Undo.
+                expect(model.updatePerson("Nora Quinn", to: "Nora Quinn-Lee", note: nil), "a person is renamed")
+                let renamedFolder = RecordingLibrary(root: model.root).folder(withStamp: later[1]) ?? folder
+                let renamedText =
+                    (try? String(
+                        contentsOf: renamedFolder.appendingPathComponent(SpeakerLabels.fileName), encoding: .utf8))
+                    ?? ""
+                expect(
+                    renamedText.contains("Nora Quinn-Lee:") && (model.lastRename?.recordings ?? 0) >= 1,
+                    "the rename reaches the labeled transcripts (\(model.lastRename?.recordings ?? 0))")
+                model.undoRename()
+                expect(model.peopleList.contains("Nora Quinn"), "Undo puts the old name back")
+                // A name already listed asks to merge, then merges.
+                _ = model.addPerson("Priya Sha", note: nil)
+                expect(!model.updatePerson("Priya Sha", to: "priya shah", note: nil), "a listed name asks first")
+                expect(model.mergeAsk?.into == "Priya Shah", "to merge into the one listed")
+                model.confirmMerge()
+                expect(!model.peopleList.contains("Priya Sha"), "merging leaves one of them")
+            } else {
+                expect(false, "two later meetings were made from the labeled one")
+            }
         } else {
             expect(false, "a seeded recording has voices to label")
         }
@@ -397,27 +500,6 @@ enum UITest {
                 // Named, the recording's folder carries its title.
                 let entry = model.card?.entry ?? entry
                 model.agents.testingModel = nil
-                let asked = Date()
-                model.labelSpeakers()
-                for _ in 0..<600 where model.speakers.result(for: entry)?.suggested.isEmpty != false { settle(0.25) }
-                check("card-agent-names")
-                let result = model.speakers.result(for: entry)
-                let lines = TranscriptDocument.lines(in: entry.folder) ?? []
-                func voice(saying text: String) -> Int? {
-                    lines.firstIndex { $0.text == text }.flatMap { result?.assigned[$0] }
-                }
-                var expected: [Int: String] = [:]
-                for (index, name) in ["Priya Shah", "José Ortiz", "Mei"].enumerated() {
-                    if let voice = voice(saying: Snapshot.namesSaidAloud[index]) { expected[voice] = name }
-                }
-                expect(
-                    result?.suggested == expected,
-                    "\(agent.name) suggests each voice's name (\(result?.suggested ?? [:]), \(Int(Date().timeIntervalSince(asked))) s)"
-                )
-                expect(result?.names.isEmpty == true, "suggested names wait for the user")
-                model.speakers.acceptSuggestedNames(in: entry)
-                check("card-agent-names-used")
-                expect(model.speakers.result(for: entry)?.names == expected, "Use names every voice")
                 let events =
                     (try? String(contentsOf: entry.folder.appendingPathComponent("events.jsonl"), encoding: .utf8))
                     ?? ""
@@ -452,12 +534,10 @@ enum UITest {
                             separatedBy: "agent failed"
                         ).count - 1
                     }
-                    for _ in 0..<120 where failures() < 2 { settle(0.25) }
+                    for _ in 0..<120 where failures() < 1 { settle(0.25) }
                     model.closeCard()
                     check("list-agent-signed-out")
-                    expect(failures() == 2, "a failing agent is logged once per suggestion (\(failures()))")
-                    expect(
-                        model.speakers.result(for: current())?.suggested.isEmpty == true, "and suggests no names")
+                    expect(failures() == 1, "a failing agent is logged once, for the title (\(failures()))")
                     expect(model.agents.needsAttention, "a signed-out agent puts a dot on ···")
                     expect(
                         model.agents.settingsTitle == "Settings… · \(agent.name) Signed Out",

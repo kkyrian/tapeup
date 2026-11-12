@@ -104,7 +104,7 @@ extension AppModel {
     /// Labels the speakers of each, one after another, without the user's agent.
     func labelSpeakers(_ entries: [RecordingEntry]) {
         for entry in entries where speakers.work(on: entry) == nil || speakers.work(on: entry) == .failed {
-            speakers.label(entry, count: entry.people.count, askAgent: false)
+            speakers.label(entry, count: entry.people.count)
         }
     }
 

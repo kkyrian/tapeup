@@ -5,6 +5,7 @@ import TapeUpCore
 /// says how it stands in words; nothing is greyed out without a reason.
 struct SettingsView: View {
     @Bindable var model: AppModel
+    @State private var forgetting = false
 
     private var agents: Agents { model.agents }
 
@@ -24,6 +25,7 @@ struct SettingsView: View {
                     .opacity(canMoveFolder ? 1 : 0.4)
             }
             .hoverHelp(canMoveFolder ? "Choose another folder" : "Stop recording first")
+            voicesRow
 
             section("Your AI")
             Text(Agents.caption)
@@ -60,6 +62,32 @@ struct SettingsView: View {
         }
         .padding(Style.inset)
         .task(id: agents.waiting) { await agents.followTerminal() }
+    }
+
+    /// How many people's voices TapeUp knows, to fill their names in, and
+    /// a way to forget them, asked once in place.
+    private var voicesRow: some View {
+        let count = model.voicesRemembered
+        return SettingRow(
+            symbol: "person.wave.2", title: "Voices remembered",
+            subtitle: forgetting
+                ? "Forget every voice? Names stay."
+                : count == 1 ? "1 person, on this Mac only" : "\(count) people, on this Mac only"
+        ) {
+            if forgetting {
+                HStack(spacing: 8) {
+                    LinkButton("Forget") {
+                        model.forgetAllVoices()
+                        forgetting = false
+                    }
+                    LinkButton("Cancel") { forgetting = false }
+                }
+                .padding(.trailing, -6)
+            } else if count > 0 {
+                LinkButton("Forget all") { forgetting = true }.padding(.trailing, -6)
+            }
+        }
+        .hoverHelp("Names you give voices teach TapeUp to fill them in next time")
     }
 
     private var canMoveFolder: Bool { model.phase == .idle && !model.movingRecordings }

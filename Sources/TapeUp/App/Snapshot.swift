@@ -183,9 +183,10 @@ enum Snapshot {
             lines.append(TranscriptLine(start: start, end: start + 120, text: text))
             turns.append(VoiceTurn(start: start, end: start + 120, voice: voices[index]))
         }
+        // Voice prints have 256 numbers; the rest are zero.
         let prints: [Int: [Float]] = [
             0: [1, 0, 0, 0], 1: [0, 1, 0, 0], 2: [0, 0, 1, 0], 3: [0.8, 0, 0, 0.6],
-        ]
+        ].mapValues { $0 + Array(repeating: 0, count: 252) }
         try? TranscriptDocument.save(lines: lines, failures: 0, pieces: lines.count, model: .large, in: folder)
         try? VoicePrints(turns: turns, prints: prints).save(in: folder)
     }
@@ -220,7 +221,10 @@ enum Snapshot {
         FileManager.default.createFile(atPath: folder.appendingPathComponent("events.jsonl").path, contents: nil)
         try? RecordingLibrary.save(people: .init(count: 3, names: ["Priya Shah", "José Ortiz"]), in: folder)
         try? TranscriptDocument.save(lines: lines, failures: 0, pieces: lines.count, model: .large, in: folder)
-        try? VoicePrints(turns: turns, prints: [0: [1, 0, 0], 1: [0, 1, 0], 2: [0, 0, 1]]).save(in: folder)
+        try? VoicePrints(
+            turns: turns,
+            prints: [0: [1, 0, 0], 1: [0, 1, 0], 2: [0, 0, 1]].mapValues { $0 + Array(repeating: 0, count: 253) }
+        ).save(in: folder)
     }
 
     static func seed(_ root: URL) {

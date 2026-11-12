@@ -20,11 +20,24 @@ final class Speakers {
     /// Frees the speech model before the speaker model loads; false while a
     /// transcript needs it.
     var makeRoom: () -> Bool = { true }
-    /// The user's agent, asked to suggest names once voices are found.
-    var agents: Agents?
-    /// The names a voice may be given: this recording's people, then the
-    /// people list. With none, no names are suggested.
-    var knownNames: (RecordingEntry) -> [String] = { $0.people.names }
+    /// Remembered voices: fills names in after labeling and learns from the
+    /// names people choose.
+    var voices: VoiceLibrary { VoiceLibrary(root: library.root) }
+    /// Called after a name changes on disk, so who was there and the people list follow.
+    var namesChanged: (String) -> Void = { _ in }
+    /// After a filled name is corrected: earlier meetings where the same
+    /// wrong name was filled in for a voice like this one, unchecked.
+    private(set) var offer: PastFillOffer?
+    /// What the last Change all did, until Undo or the card changes.
+    private(set) var offerDone: (stamp: String, count: Int, undo: VoiceFileUndo)?
+
+    struct PastFillOffer {
+        var stamp: String
+        var voice: Int
+        var from: String
+        var to: String
+        var hits: [VoiceLibrary.PastFill]
+    }
     /// Plays a voice to name it, from the card's speaker rows.
     let player = VoicePlayer()
 
@@ -35,7 +48,6 @@ final class Speakers {
     /// The count each recording's labels should have, updated while a listen runs.
     private var wanted: [String: Int?] = [:]
     private var listening: Task<Void, Never>?
-    private var agentWanted: Set<String> = []
 
     init(library: RecordingLibrary) { self.library = library }
 
@@ -59,12 +71,9 @@ final class Speakers {
     }
 
     /// Labels a transcribed recording with `count` voices, or the estimate.
-    /// `askAgent` is false for work the user did not start in the panel, so
-    /// the user's agent is never called in bulk.
-    func label(_ entry: RecordingEntry, count: Int?, askAgent: Bool = true) {
+    func label(_ entry: RecordingEntry, count: Int?) {
         let stamp = RecordingLibrary.stamp(of: entry.folder)
         wanted[stamp] = .some(count)
-        if askAgent { agentWanted.insert(stamp) } else { agentWanted.remove(stamp) }
         if let current = work[stamp], current != .failed { return }
         if let heard = VoicePrints.read(in: entry.folder) {
             save(stamp: stamp, heard: heard)
@@ -100,11 +109,87 @@ final class Speakers {
         }
     }
 
-    /// Names a voice, or takes its name away.
+    /// Names a voice, or takes its name away. Changing a name TapeUp filled
+    /// in is a correction: the voice is remembered as not that person, and
+    /// earlier unchecked fills like it are offered for the same fix.
     func name(_ voice: Int, _ name: String?, in entry: RecordingEntry) {
-        try? SpeakerLabels.name(voice, name, in: entry.folder)
+        let stamp = RecordingLibrary.stamp(of: entry.folder)
+        guard let folder = library.folder(withStamp: stamp) else { return }
+        let before = SpeakerLabels.result(in: folder)
+        let old = before?.names[voice]
+        let filled = before.map { $0.provenance(for: voice).origin != .person } ?? false
+        offer = nil
+        offerDone = nil
+        do {
+            if let name {
+                if let old, old != name, filled {
+                    try voices.correct(voice, to: name, in: folder)
+                    let hits = (try? voices.pastFills(afterCorrecting: voice, from: old, in: folder, busy: busy)) ?? []
+                    if !hits.isEmpty {
+                        offer = PastFillOffer(stamp: stamp, voice: voice, from: old, to: name, hits: hits)
+                    }
+                } else {
+                    try voices.name(voice, name, in: folder)
+                }
+            } else {
+                try voices.unname(voice, in: folder)
+            }
+        } catch {
+            // A file TapeUp cannot read is left as it is; the name still goes on the voice.
+            try? SpeakerLabels.name(voice, name, in: folder)
+        }
+        version += 1
+        namesChanged(stamp)
+    }
+
+    /// Playing a voice and leaving its name is the strongest check of a fill.
+    func confirm(_ voice: Int, in entry: RecordingEntry) {
+        guard let folder = library.folder(withStamp: RecordingLibrary.stamp(of: entry.folder)),
+            let result = SpeakerLabels.result(in: folder), result.names[voice] != nil,
+            result.provenance(for: voice).origin == .filled
+        else { return }
+        _ = try? voices.confirm(voice, in: folder)
         version += 1
     }
+
+    /// Changes every offered earlier fill, or just one, to the corrected name.
+    func applyOffer(only hit: VoiceLibrary.PastFill? = nil) {
+        guard let offer else { return }
+        // A made title may have renamed a folder since the offer was made.
+        let hits = (hit.map { [$0] } ?? offer.hits).map { hit in
+            var hit = hit
+            if let folder = library.folder(withStamp: hit.stamp) { hit.recording = folder }
+            return hit
+        }
+        guard let result = try? voices.applyPastFills(hits, to: offer.to, busy: busy) else { return }
+        let changed = Set(result.changed.map { "\($0.stamp)/\($0.voice)" })
+        let left = offer.hits.filter { !changed.contains("\($0.stamp)/\($0.voice)") && $0 != hit }
+        self.offer =
+            left.isEmpty || hit == nil
+            ? nil : PastFillOffer(stamp: offer.stamp, voice: offer.voice, from: offer.from, to: offer.to, hits: left)
+        offerDone = (offer.stamp, result.changed.count + (offerDone?.count ?? 0), result.undo)
+        version += 1
+        for stamp in changed.map({ String($0.split(separator: "/")[0]) }) { namesChanged(stamp) }
+    }
+
+    func leaveOffer() { offer = nil }
+
+    func undoOffer() {
+        guard let done = offerDone else { return }
+        offerDone = nil
+        try? done.undo.restore()
+        version += 1
+        namesChanged(done.stamp)
+    }
+
+    /// Forgets the offer when another recording's card opens.
+    func clearOffer() {
+        offer = nil
+        offerDone = nil
+    }
+
+    /// Recordings being listened to right now, which renames and fixes skip.
+    var busy: Set<String> { Set(work.compactMap { $0.value == .failed ? nil : $0.key }) }
 
     /// A quit while finding voices leaves `finding` in meta.json; nothing is
     /// finding them after a launch.
@@ -129,84 +214,17 @@ final class Speakers {
             let result = try SpeakerLabels.relabel(heard, count: wanted[stamp] ?? nil, in: folder)
             work[stamp] = nil
             wanted[stamp] = nil
+            // Remembered voices fill in the names they clearly match.
+            if !result.voices.isEmpty, let fills = try? voices.fill(in: folder), !fills.isEmpty {
+                namesChanged(stamp)
+            }
             version += 1
-            if agentWanted.remove(stamp) != nil { suggestNames(stamp: stamp, result: result) }
         } catch {
             failed(stamp, error)
         }
     }
 
-    /// Asks the user's agent which known person each unnamed voice is. The
-    /// answer can only be a known name or none; it shows as a suggestion.
-    private func suggestNames(stamp: String, result: SpeakerResult) {
-        guard let agents, agents.chosen != nil, let folder = library.folder(withStamp: stamp),
-            let entry = RecordingLibrary.entry(at: folder), let lines = TranscriptDocument.lines(in: folder)
-        else { return }
-        let known = knownNames(entry)
-        let unnamed = result.voices.filter { result.names[$0.id] == nil }
-        guard !known.isEmpty, !unnamed.isEmpty else { return }
-        let labeled = zip(lines, result.assigned).map { line, voice in
-            TranscriptLine(
-                start: line.start, end: line.end,
-                text: "\(voice.map { result.names[$0] ?? "Voice \($0)" } ?? "Unknown"): \(line.text)")
-        }
-        let prompt = """
-            Lines from a transcript, each starting with the voice that said it. For each voice listed below, \
-            say which of the known people it is, only when the lines make it clear (someone addressed by \
-            name, introducing themselves, or named by others). Otherwise give an empty name. Never guess.
-            Voices to name: \(unnamed.map { "Voice \($0.id)" }.joined(separator: ", "))
-            Known people: \(known.joined(separator: ", "))
-
-            Transcript lines:
-            \(TitleExcerpt.make(lines: labeled))
-            """
-        let schema: [String: Any] = [
-            "type": "object",
-            "properties": [
-                "voices": [
-                    "type": "array",
-                    "items": [
-                        "type": "object",
-                        "properties": [
-                            "voice": ["type": "integer"], "name": ["type": "string", "enum": known + [""]],
-                        ],
-                        "required": ["voice", "name"], "additionalProperties": false,
-                    ],
-                ]
-            ],
-            "required": ["voices"], "additionalProperties": false,
-        ]
-        Task { [weak self] in
-            struct Answer: Decodable {
-                struct Pick: Decodable {
-                    var voice: Int
-                    var name: String
-                }
-                var voices: [Pick]
-            }
-            guard let self,
-                let data = await agents.ask("names", prompt: prompt, schema: schema, stamp: stamp, in: library),
-                let answer = try? JSONDecoder().decode(Answer.self, from: data),
-                let folder = library.folder(withStamp: stamp),
-                // A recount or a name given meanwhile changed what was asked about.
-                SpeakerLabels.result(in: folder)?.assigned == result.assigned
-            else { return }
-            var picks: [Int: String] = [:]
-            for pick in answer.voices where known.contains(pick.name) { picks[pick.voice] = pick.name }
-            guard !picks.isEmpty else { return }
-            try? SpeakerLabels.suggest(picks, in: folder)
-            version += 1
-        }
-    }
-
-    /// Takes every suggested name.
-    func acceptSuggestedNames(in entry: RecordingEntry) {
-        try? SpeakerLabels.acceptSuggested(in: entry.folder)
-        version += 1
-    }
-
     private func failed(_ stamp: String, _ error: Error) {
-        agentWanted.remove(stamp)
         work[stamp] = .failed
         wanted[stamp] = nil
         if let folder = library.folder(withStamp: stamp) {

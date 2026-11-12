@@ -77,6 +77,7 @@ final class AppModel {
             let stamp = { (card: Card?) in card.map { RecordingLibrary.stamp(of: $0.entry.folder) } }
             if stamp(card) != stamp(oldValue) {
                 speakers.player.stop()
+                speakers.clearOffer()
                 removedAudio = nil
             }
         }
@@ -245,11 +246,10 @@ final class AppModel {
         speakers.makeRoom = { [weak self] in self?.transcription.releaseIfIdle() ?? true }
         titles.named = { [weak self] stamp, title in self?.nameIfUnnamed(stamp, title) }
         titles.agents = agents
-        speakers.agents = agents
-        speakers.knownNames = { [weak self] entry in
-            var names = entry.people.names
-            for name in self?.peopleList.allNames ?? [] where !names.contains(name) { names.append(name) }
-            return names
+        speakers.namesChanged = { [weak self] stamp in
+            // Who was there and the people list were written with the name.
+            self?.loadPeople()
+            self?.refreshQuietly(stamp)
         }
     }
 
@@ -532,6 +532,8 @@ final class AppModel {
     // MARK: - Library
 
     func reload() {
+        // A rename that skipped a busy recording finishes once it is free.
+        catchUpRenames()
         allEntries = library.entries().filter { $0.folder != activeFolder }
         recent = Array(allEntries.prefix(5))
         loadPeople()
@@ -608,11 +610,120 @@ final class AppModel {
         }
     }
 
+    /// Takes a person off the list; their remembered voice goes with them.
+    /// Past recordings keep their name: they were there.
     func removePerson(_ name: String) {
         changePeople { list in
             list.remove(name)
             return true
         }
+        var voices = VoiceStore.load(from: root)
+        guard voices.people.keys.contains(where: { $0.caseInsensitiveCompare(name) == .orderedSame }) else { return }
+        voices.forgetPerson(name)
+        try? voices.save(to: root)
+    }
+
+    /// Bumped when the remembered voices are forgotten, so Settings redraws.
+    private var voicesRevision = 0
+
+    /// How many people's voices are remembered.
+    var voicesRemembered: Int {
+        _ = voicesRevision
+        return VoiceStore.load(from: root).count
+    }
+
+    /// Forgets every remembered voice; names already given stay.
+    func forgetAllVoices() {
+        var voices = VoiceStore.load(from: root)
+        voices.forgetAll()
+        do {
+            try voices.save(to: root)
+        } catch {
+            problem = "Could not forget the voices: \(error.localizedDescription)"
+        }
+        voicesRevision += 1
+    }
+
+    /// The last rename everywhere, until Undo or the People page closes.
+    private(set) var lastRename: (from: String, to: String, recordings: Int, undo: VoiceFileUndo)?
+    /// A rename onto a name already listed, waiting for Merge or Cancel.
+    private(set) var mergeAsk: (from: String, into: String, note: String?)?
+    /// Renames that skipped recordings busy at the time, to catch up later.
+    private var renamesBehind: [(from: String, to: String, folders: [URL])] = []
+
+    /// Recordings being written, transcribed or labeled right now.
+    private var busyStamps: Set<String> {
+        var busy = transcription.working.union(speakers.busy)
+        if let activeFolder { busy.insert(RecordingLibrary.stamp(of: activeFolder)) }
+        return busy
+    }
+
+    /// Renames a person in the list and every recording at once. False,
+    /// with the reason on the recorder page, when it could not.
+    private func renameEverywhere(_ old: String, to new: String) -> Bool {
+        do {
+            let result = try VoiceLibrary(root: root).renamePerson(old, to: new, busy: busyStamps)
+            lastRename = (old, new, result.changedRecordings.count, result.undo)
+            if !result.skipped.isEmpty { renamesBehind.append((old, new, result.skipped)) }
+            loadPeople()
+            reload()
+            if let card { refreshQuietly(RecordingLibrary.stamp(of: card.entry.folder)) }
+            return true
+        } catch {
+            problem = "Could not rename \(old): \(error.localizedDescription)"
+            return false
+        }
+    }
+
+    /// Renames the recordings a rename skipped while they were busy.
+    func catchUpRenames() {
+        guard !renamesBehind.isEmpty else { return }
+        let busy = busyStamps
+        var still: [(from: String, to: String, folders: [URL])] = []
+        for rename in renamesBehind {
+            let ready = rename.folders.filter { !busy.contains(RecordingLibrary.stamp(of: $0)) }
+            let waiting = rename.folders.filter { busy.contains(RecordingLibrary.stamp(of: $0)) }
+            if !ready.isEmpty {
+                _ = try? VoiceLibrary(root: root).renamePerson(rename.from, to: rename.to, busy: busy, only: ready)
+            }
+            if !waiting.isEmpty { still.append((rename.from, rename.to, waiting)) }
+        }
+        renamesBehind = still
+    }
+
+    func undoRename() {
+        guard let lastRename else { return }
+        self.lastRename = nil
+        do {
+            try lastRename.undo.restore()
+        } catch {
+            problem = "Could not undo the rename: \(error.localizedDescription)"
+        }
+        loadPeople()
+        reload()
+        if let card { refreshQuietly(RecordingLibrary.stamp(of: card.entry.folder)) }
+    }
+
+    /// Merges the person being renamed into the one already listed.
+    func confirmMerge() {
+        guard let ask = mergeAsk else { return }
+        mergeAsk = nil
+        guard renameEverywhere(ask.from, to: ask.into) else { return }
+        if let note = ask.note, !note.isEmpty {
+            changePeople { list in
+                guard let person = list.people.first(where: { $0.name == ask.into }), person.context == nil else {
+                    return true
+                }
+                return list.update(ask.into, to: .init(name: ask.into, context: note))
+            }
+        }
+    }
+
+    func cancelMerge() { mergeAsk = nil }
+
+    func clearRenameNotice() {
+        lastRename = nil
+        mergeAsk = nil
     }
 
     /// Adds a person typed by hand. False when the name is already listed.
@@ -630,25 +741,45 @@ final class AppModel {
     }
 
     /// Renames a person or changes their note; an empty name keeps the old
-    /// one. False when the new name is someone else's. A person no longer
-    /// in the file (an assistant rewrote it) ends the edit with nothing saved.
+    /// one. A new name is written everywhere the person appears, with Undo;
+    /// a name someone else has asks to merge them first, and returns false
+    /// until then. A person no longer in the file (an assistant rewrote it)
+    /// ends the edit with nothing saved.
     @discardableResult
     func updatePerson(_ name: String, to newName: String, note: String?) -> Bool {
         var trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty { trimmed = name }
-        var taken = false
-        changePeople { list in
-            guard list.people.contains(where: { $0.name == name }) else { return false }
-            taken = !list.update(name, to: .init(name: trimmed, context: note))
-            return !taken
+        let list = currentPeopleFile()
+        guard let person = list.people.first(where: { $0.name == name }) else {
+            loadPeople()
+            return true
         }
-        if taken { peopleNotice = .taken(trimmed) }
-        return !taken
+        if trimmed != name {
+            if let existing = list.allNames.first(where: {
+                $0 != name && $0.caseInsensitiveCompare(trimmed) == .orderedSame
+            }) {
+                mergeAsk = (name, existing, note)
+                return false
+            }
+            guard renameEverywhere(name, to: trimmed) else { return false }
+        }
+        if (note ?? "") != (person.context ?? "") {
+            changePeople { $0.update(trimmed, to: .init(name: trimmed, context: note)) }
+        }
+        return true
     }
 
     /// Sets the user's own name; empty clears it.
     @discardableResult
     func setYou(_ name: String) -> Bool {
+        // A new spelling of you is a rename, everywhere you appear.
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let list = currentPeopleFile()
+        if let you = list.you, !trimmed.isEmpty, trimmed != you,
+            !list.allNames.contains(where: { $0 != you && $0.caseInsensitiveCompare(trimmed) == .orderedSame })
+        {
+            return renameEverywhere(you, to: trimmed)
+        }
         let set = changePeople { $0.setYou(name) }
         if !set { peopleNotice = .taken(name.trimmingCharacters(in: .whitespacesAndNewlines)) }
         return set
@@ -728,6 +859,7 @@ final class AppModel {
     func closePeople() {
         showingPeople = false
         peopleNotice = nil
+        clearRenameNotice()
     }
 
     /// Finishes recordings a crash left behind, then refreshes the list.
@@ -820,7 +952,7 @@ final class AppModel {
             if entry.transcript == .done, !speakers.started(entry),
                 !imported || RecordingImport.wantsSpeakerLabels(folder)
             {
-                speakers.label(entry, count: entry.people.count, askAgent: !imported && atCard)
+                speakers.label(entry, count: entry.people.count)
             }
         }
     }
@@ -1059,25 +1191,9 @@ final class AppModel {
 
     /// Names a voice, and adds the name to who was there, so naming a
     /// speaker never has to be done twice.
+    /// Names a voice; the person joins who was there and the people list.
     func nameVoice(_ voice: Int, _ name: String?, in entry: RecordingEntry) {
         speakers.name(voice, name, in: entry)
-        if let name { addToWhoWasThere([name], in: entry) }
-    }
-
-    func acceptSuggestedNames(in entry: RecordingEntry) {
-        speakers.acceptSuggestedNames(in: entry)
-        addToWhoWasThere(speakers.result(for: entry).map { Array($0.names.values) } ?? [], in: entry)
-    }
-
-    /// Adds names to the open recording's who was there, leaving the count
-    /// alone: changing it would fold the voices again.
-    private func addToWhoWasThere(_ names: [String], in entry: RecordingEntry) {
-        guard let card, card.entry.folder == entry.folder else { return }
-        var people = card.entry.people
-        for name in names.sorted() where !people.names.contains(where: { $0.lowercased() == name.lowercased() }) {
-            people.names.append(name)
-        }
-        if people != card.entry.people { setPeople(people) }
     }
 
     /// Names the open recording; the folder keeps its dated name.
@@ -1201,7 +1317,7 @@ extension AppModel {
                         suggestion: "Run TapeUp transcribe \(stamp) first."), nil)
                 return
             }
-            speakers.label(entry, count: request["voices"].flatMap(Int.init), askAgent: false)
+            speakers.label(entry, count: request["voices"].flatMap(Int.init))
             reply(nil, folder)
         default:
             reply(Refusal("usage", "TapeUp does not know the command \(command)."), nil)

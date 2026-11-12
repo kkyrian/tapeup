@@ -31,6 +31,20 @@ struct PeopleView: View {
                     .padding(.trailing, -6)
                     .hoverHelp(filling ? "Hide the steps" : "Have your AI assistant write the list")
             }
+            if let rename = model.lastRename {
+                HStack(spacing: 2) {
+                    Text(
+                        rename.recordings == 0
+                            ? "Renamed to \(rename.to)"
+                            : "Also renamed in \(rename.recordings) recording\(rename.recordings == 1 ? "" : "s")"
+                    )
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    LinkButton("Undo", action: model.undoRename).frame(height: 13)
+                }
+                .padding(.top, -6)
+            }
             if filling {
                 fillSteps
                 Divider()
@@ -283,6 +297,28 @@ private struct PersonRow: View {
     @FocusState private var focused: Bool
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            row
+            if editing, let ask = model.mergeAsk, ask.from == person.name {
+                HStack(spacing: 8) {
+                    Text("\(ask.into) is already on the list. Merge them?")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                    LinkButton("Merge") {
+                        model.confirmMerge()
+                        finish()
+                    }
+                    .clickTarget("Merge people")
+                    LinkButton("Cancel", action: model.cancelMerge)
+                }
+                .padding(.leading, Style.textEdge - Style.inset)
+            }
+        }
+    }
+
+    private var row: some View {
         HStack(spacing: 6) {
             RowMark(symbol: nil).padding(.trailing, -6)
             if editing {
@@ -333,10 +369,11 @@ private struct PersonRow: View {
     private func finish() {
         editing = false
         model.renaming = false
+        if model.mergeAsk?.from == person.name { model.cancelMerge() }
     }
 
     /// An emptied name keeps the old one; a name someone else has stays in
-    /// the field, with a notice, until it is changed or Escape is pressed.
+    /// the field and asks to merge, until Merge, a change or Escape.
     private func commit() {
         guard editing else { return }
         let newName = name.trimmingCharacters(in: .whitespacesAndNewlines)
