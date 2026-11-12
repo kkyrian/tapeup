@@ -14,11 +14,14 @@ public struct RecordingEntry: Sendable, Identifiable, Equatable {
     /// A title made from the transcript, shown until the user names it.
     public var titleSuggestion: String?
     public var transcript: Transcript
+    /// Kept: Free up space never removes its audio.
+    public var keepAudio: Bool
 
     public init(
         folder: URL, started: Date, duration: Double, audio: URL, status: String, people: People,
-        title: String? = nil, titleSuggestion: String? = nil, transcript: Transcript = .none
+        title: String? = nil, titleSuggestion: String? = nil, transcript: Transcript = .none, keepAudio: Bool = false
     ) {
+        self.keepAudio = keepAudio
         self.title = title
         self.titleSuggestion = titleSuggestion
         self.transcript = transcript
@@ -200,7 +203,12 @@ public struct RecordingLibrary: Sendable {
             audio: folder.appendingPathComponent(audioName), status: meta["status"] as? String ?? "recording",
             people: people, title: (meta["title"] as? String).flatMap { $0.isEmpty ? nil : $0 },
             titleSuggestion: (meta["title_suggestion"] as? String).flatMap { $0.isEmpty ? nil : $0 },
-            transcript: transcriptState(meta, folder: folder))
+            transcript: transcriptState(meta, folder: folder), keepAudio: meta["keep_audio"] as? Bool ?? false)
+    }
+
+    /// Marks a recording as kept, or not, in `meta.json`.
+    public static func save(keepAudio: Bool, in folder: URL) throws {
+        try MetaFile.update(folder) { $0["keep_audio"] = keepAudio ? true : nil }
     }
 
     static func transcriptState(_ meta: [String: Any], folder: URL) -> RecordingEntry.Transcript {

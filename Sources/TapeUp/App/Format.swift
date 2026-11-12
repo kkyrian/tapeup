@@ -103,6 +103,14 @@ enum Format {
     }
 
     /// "2.5 GB".
+    /// A file's size as Finder writes it: 48 MB, 2.4 GB.
+    static func size(_ bytes: Int64) -> String {
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+        formatter.allowsNonnumericFormatting = false
+        return formatter.string(fromByteCount: bytes)
+    }
+
     static func gigabytes(_ bytes: Int64) -> String { "\(gigabytes(bytes, of: bytes)) GB" }
 
     /// The number alone, "0.8", for "0.8 of 2.5 GB".

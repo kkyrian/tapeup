@@ -74,6 +74,7 @@ struct MoreMenu: View {
         MoreButton(help: "TapeUp", badge: model.agents.needsAttention) {
             Button("Import…") { model.openImport([]) }
             Button("People…") { model.openPeople() }
+            Button("Free Up Space…") { model.openFreeUpSpace() }
             Button(model.agents.settingsTitle, action: model.openSettings)
             Divider()
             Button("Check for Updates…") { model.checkForUpdates?() }

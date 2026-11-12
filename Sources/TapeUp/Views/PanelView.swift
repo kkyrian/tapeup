@@ -40,6 +40,8 @@ struct PanelView: View {
         } else if let card = model.card {
             // Opened from All recordings, the card's back returns there.
             CardView(model: model, card: card)
+        } else if model.showingFreeUpSpace {
+            FreeUpSpaceView(model: model)
         } else if model.showingAllRecordings {
             AllRecordingsView(model: model)
         } else {

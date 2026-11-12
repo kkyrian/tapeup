@@ -1005,6 +1005,54 @@ enum UITest {
         check("all-recordings-back")
         expect(!model.showingAllRecordings, "Back returns to Recent")
         expect(abs(panel.window.frame.height - recentHeight) <= 1, "at the height it had")
+
+        // Free up space: a kept recording is left out; the rest that are
+        // ready lose their audio after one confirming click, and Undo puts it back.
+        let withAudio = model.spaceCandidates
+        expect(!withAudio.isEmpty, "some recordings still hold audio (\(withAudio.count))")
+        if let keep = withAudio.first {
+            model.open(keep)
+            settle(1.0)
+            expect(click("Keep audio", in: panel), "the card's Keep lock clicks")
+            settle(0.2)
+            check("card-kept")
+            expect(
+                model.card?.entry.keepAudio == true,
+                "and keeps the recording's audio (\(model.problem ?? "no problem"), meta \(MetaFile.read(model.card?.entry.folder ?? keep.folder)?["keep_audio"] ?? "none"))"
+            )
+            model.closeCard()
+        }
+        model.openFreeUpSpace()
+        settle(0.3)
+        check("free-up-space")
+        let spaceHeight = panel.window.frame.height
+        let kept = model.spaceCandidates.filter(\.keepAudio)
+        let ready = model.spaceCandidates.filter {
+            !$0.keepAudio && model.spaceGroup($0) == .ready && model.canRemoveAudio($0)
+        }
+        expect(kept.count == 1, "the kept recording is counted apart (\(kept.count))")
+        expect(!ready.isEmpty, "a labeled recording is ready (\(ready.count))")
+        expect(click("Remove audio from ready", in: panel), "the footer action clicks")
+        settle(0.2)
+        check("free-up-space-confirm")
+        expect(abs(panel.window.frame.height - spaceHeight) <= 1, "confirming keeps the page's height")
+        expect(click("Confirm remove audio", in: panel), "Remove audio confirms")
+        settle(0.3)
+        check("free-up-space-removed")
+        let gone = ready.allSatisfy { !$0.hasAudio && FileManager.default.fileExists(atPath: $0.transcriptFile.path) }
+        expect(gone, "the ready ones lost their audio and kept their transcripts")
+        expect(kept.allSatisfy(\.hasAudio), "the kept one still has its audio")
+        expect(model.freedAudio?.count == ready.count, "Undo is offered for all of them")
+        model.undoFreeAudio()
+        settle(0.2)
+        expect(ready.allSatisfy(\.hasAudio), "Undo put every file back")
+        model.spaceFilter.kept = true
+        settle(0.2)
+        check("free-up-space-kept")
+        expect(abs(panel.window.frame.height - spaceHeight) <= 1, "the Kept chip keeps the page's height")
+        for entry in kept { model.setKeep(entry, false) }
+        expect(click("Back", in: panel), "Free up space's Back clicks")
+        expect(!model.showingFreeUpSpace, "and returns to Recent")
     }
 
     /// The panel content's own height, measured apart from the window.

@@ -53,6 +53,46 @@ enum RecordingsGallery {
         shoot("08-search-nothing")
         model.recordingsFilter = RecordingFilter(noNames: true)
         shoot("09-no-names")
+
+        // Free up space: sizes as the audio would weigh, speakers labeled on
+        // most transcribed ones, two kept.
+        for (index, entry) in model.allEntries.enumerated() {
+            if let handle = try? FileHandle(forWritingTo: entry.audio) {
+                try? handle.truncate(atOffset: UInt64(entry.duration * 16_000))
+                try? handle.close()
+            }
+            if entry.transcript == .done, index % 4 != 1 {
+                let lines = TranscriptDocument.lines(in: entry.folder) ?? []
+                var result = SpeakerResult(
+                    count: 2, estimated: false,
+                    voices: [.init(id: 0, seconds: 600, quote: "Hi"), .init(id: 1, seconds: 300, quote: "Hello")],
+                    assigned: lines.map { _ in 0 })
+                result.names = index % 3 == 0 ? [0: "Sam"] : [0: "Sam", 1: "Priya Shah"]
+                try? SpeakerLabels.save(result, lines: lines, in: entry.folder)
+            }
+            if index == 6 || index == 20 { try? RecordingLibrary.save(keepAudio: true, in: entry.folder) }
+        }
+        model.reload()
+        model.openFreeUpSpace()
+        shoot("s1-space")
+        model.spaceFilter.age = .threeMonths
+        shoot("s2-space-older")
+        model.spaceFilter = SpaceFilter(age: .all, kept: true)
+        shoot("s3-space-kept")
+        model.spaceFilter = SpaceFilter()
+        FreeUpSpaceView.staged = .removeAudio
+        shoot("s4-space-confirm")
+        FreeUpSpaceView.staged = .trashUntranscribed
+        shoot("s5-space-confirm-trash")
+        FreeUpSpaceView.staged = nil
+        model.freeAudio(model.spaceCandidates)
+        shoot("s6-space-removed")
+        model.undoFreeAudio()
+        if let kept = model.allEntries.first(where: \.keepAudio) { model.open(kept) }
+        shoot("s7-card-kept")
+        model.closeCard()
+        model.closeFreeUpSpace()
+        model.openAllRecordings()
         model.recordingsFilter = RecordingFilter(noTranscript: true)
         // The action, clicked: the first one being made, the rest waiting their turn.
         let waiting = model.allEntries.filter(RecordingSearch.needsTranscript)

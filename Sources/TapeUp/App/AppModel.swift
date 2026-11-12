@@ -30,6 +30,9 @@ final class AppModel {
     private(set) var recent: [RecordingEntry] = []
     private(set) var allEntries: [RecordingEntry] = []
     private(set) var problem: String?
+
+    /// Puts a line on the recorder page that the user dismisses.
+    func show(problem text: String) { problem = text }
     private(set) var peopleList = PeopleList()
     private var suggester = NameSuggester(entries: [], people: PeopleList())
     private var peopleModified: Date?
@@ -44,6 +47,14 @@ final class AppModel {
     var showingAllRecordings = false
     /// What that page is narrowed to, kept while a card opened from it is up.
     var recordingsFilter = RecordingFilter()
+    /// The page in place of the recorder: recordings that still hold audio, to clear it.
+    var showingFreeUpSpace = false
+    /// What Free up space shows: an age, or the kept recordings.
+    var spaceFilter = SpaceFilter()
+    /// Audio Free up space just moved to the Trash, by stamp, until Undo or the panel closes.
+    var freedAudio: [String: URL]?
+    /// Recordings with no transcript Free up space just moved to the Trash.
+    var freedRecordings: [(entry: RecordingEntry, location: URL)]?
     /// The stamp of the recording last opened from the page, scrolled back into view on return.
     var recordingsAnchor: String?
     /// The transcripts' text for that page's search.
@@ -161,6 +172,8 @@ final class AppModel {
                 testing = false
                 trashed = nil
                 removedAudio = nil
+                freedAudio = nil
+                freedRecordings = nil
             }
             updateLevelTimer()
             updatePeopleWatch()
@@ -196,7 +209,7 @@ final class AppModel {
     /// Called when a recording stops by shortcut or quit, so the panel can show its card.
     var onSaved: (() -> Void)?
 
-    private var library: RecordingLibrary
+    private(set) var library: RecordingLibrary
     private var recorder: Recorder?
     private var clockTimer: Timer?
     private var levelTimer: Timer?
@@ -670,6 +683,7 @@ final class AppModel {
         peopleNotice = nil
         peopleOpensFilling = filling
         showingSettings = false
+        showingFreeUpSpace = false
         showingAllRecordings = false
         showingPeople = true
     }
@@ -677,6 +691,7 @@ final class AppModel {
     func openSettings() {
         if card?.finishing != true { card = nil }
         showingPeople = false
+        showingFreeUpSpace = false
         showingAllRecordings = false
         showingSettings = true
         agents.refresh()
@@ -685,6 +700,7 @@ final class AppModel {
     func openAllRecordings() {
         if card?.finishing != true { card = nil }
         showingPeople = false
+        showingFreeUpSpace = false
         showingSettings = false
         recordingsFilter = RecordingFilter()
         recordingsAnchor = nil
@@ -973,7 +989,7 @@ final class AppModel {
     }
 
     /// Reloads the list and the open card without asking for a title.
-    private func refreshQuietly(_ stamp: String) {
+    func refreshQuietly(_ stamp: String) {
         reload()
         guard let card, RecordingLibrary.stamp(of: card.entry.folder) == stamp,
             let folder = library.folder(withStamp: stamp), let entry = RecordingLibrary.entry(at: folder)

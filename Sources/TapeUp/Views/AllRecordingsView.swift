@@ -255,7 +255,7 @@ private struct MonthHeading: View {
 
 /// A chip that narrows the list: its name and how many recordings it holds.
 /// On, it turns dark grey (light in dark mode), never the accent.
-private struct FilterChip: View {
+struct FilterChip: View {
     let title: String
     let count: Int
     let on: Bool

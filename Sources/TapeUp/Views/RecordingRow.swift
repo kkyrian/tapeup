@@ -21,6 +21,8 @@ struct RecordingRow: View {
     /// A few words of the transcript, in place of who was there, when the
     /// search found the row by what was said.
     var excerpt: RecordingSearch.Excerpt?
+    /// In place of the length at rest: the audio's size, on Free up space.
+    var size: String?
     /// Set by the gallery: the row for this folder draws as if hovered.
     @MainActor static var staged: String?
     @State private var hovering = false
@@ -68,17 +70,21 @@ struct RecordingRow: View {
                             .frame(width: 16, height: 16)
                             .hoverHelp("Waiting to transcribe")
                     } else {
-                        // Audio is the rule; only its absence is marked.
+                        // Audio is the rule; only its absence is marked, and keeping it.
                         HStack(spacing: 3) {
+                            if entry.keepAudio, entry.hasAudio {
+                                Image(systemName: "lock.fill").font(.system(size: 9))
+                            }
                             if !entry.hasAudio, entry.status != "recording" {
                                 Image(systemName: "text.page").font(.system(size: 10))
                             }
-                            Text(Format.length(entry.duration)).font(.system(size: 11))
+                            Text(size ?? Format.length(entry.duration)).font(.system(size: 11).monospacedDigit())
                         }
                         .foregroundStyle(.tertiary)
                         .accessibilityElement(children: .combine)
                         .accessibilityLabel(
-                            Format.length(entry.duration) + (entry.hasAudio ? "" : ", transcript only"))
+                            (size ?? Format.length(entry.duration)) + (entry.hasAudio ? "" : ", transcript only")
+                                + (entry.keepAudio && entry.hasAudio ? ", kept" : ""))
                     }
                 }
                 .opacity(hovered || copied ? 0 : 1)
@@ -107,6 +113,9 @@ struct RecordingRow: View {
             Button("Show in Finder") { model.reveal(entry) }
             Button("Rename…") { model.open(entry) }
             Divider()
+            if entry.hasAudio {
+                Button(entry.keepAudio ? "Stop Keeping Audio" : "Keep Audio") { model.setKeep(entry, !entry.keepAudio) }
+            }
             if model.canRemoveAudio(entry) {
                 // On its card, where Undo shows.
                 Button("Remove Audio, Keep Transcript") {
