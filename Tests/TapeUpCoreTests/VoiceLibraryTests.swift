@@ -54,6 +54,7 @@ struct VoiceFixture {
         let enumerator = FileManager.default.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey])!
         var result: [String: Data] = [:]
         for case let url as URL in enumerator {
+            if [".lock", ".events.lock", VoiceFiles.rootLockName].contains(url.lastPathComponent) { continue }
             if try url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true {
                 result[String(url.path.dropFirst(root.path.count))] = try Data(contentsOf: url)
             }
@@ -316,7 +317,10 @@ struct VoiceLibraryTests {
         #expect(VoiceStore.load(from: fixture.root).people["Mei"]?.examples.count == 2)
         let store = VoiceStore.load(from: fixture.root)
         #expect(
-            VoiceMatching.match(prints: [2: voicePrint()], seconds: [2: 100], store: store, named: [1: "MEI"]).isEmpty)
+            VoiceMatching.match(
+                prints: [2: voicePrint()], seconds: [2: 100], store: store, allowedPeople: ["Mei", "Ana", "Sam"],
+                named: [1: "MEI"]
+            ).isEmpty)
     }
 
     @Test func unreadableEarlierLabelsCannotLeaveLearningAttachedToReplacedVoices() throws {
@@ -326,9 +330,10 @@ struct VoiceLibraryTests {
         try fixture.library.name(1, "Mei", in: folder)
         try Data("broken".utf8).write(to: folder.appendingPathComponent(SpeakerLabels.resultFileName))
         let heard = try #require(VoicePrints.read(in: folder))
-        let before = try fixture.bytes()
-        #expect(throws: (any Error).self) { try SpeakerLabels.relabel(heard, count: 1, in: folder) }
-        #expect(try fixture.bytes() == before)
+        let result = try SpeakerLabels.relabel(heard, count: 1, in: folder)
+        #expect(result.names.isEmpty)
+        #expect(VoiceStore.load(from: fixture.root).people["Mei"]?.examples.isEmpty == true)
+        #expect(SpeakerLabels.result(in: folder) != nil)
     }
 
 }

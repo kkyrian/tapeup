@@ -101,7 +101,7 @@ struct PersonRenameTests {
         #expect(try fixture.bytes() == before)
     }
 
-    @Test func unreadableLabelsOrMissingLinesAbortWithoutAnyWrites() throws {
+    @Test func unreadableLabelsOrMissingLinesAreReportedWithoutChangingThatFolder() throws {
         for breakLines in [false, true] {
             let fixture = try VoiceFixture()
             defer { fixture.remove() }
@@ -110,9 +110,11 @@ struct PersonRenameTests {
             let target = folder.appendingPathComponent(
                 breakLines ? TranscriptDocument.linesFileName : SpeakerLabels.resultFileName)
             try Data("broken".utf8).write(to: target)
-            let before = try fixture.bytes()
-            #expect(throws: (any Error).self) { try fixture.library.renamePerson("Mei", to: "Ana") }
-            #expect(try fixture.bytes() == before)
+            let before = try Data(contentsOf: target)
+            let result = try fixture.library.renamePerson("Mei", to: "Ana")
+            #expect(result.skipped.count == 1)
+            #expect(result.failures.count == 1)
+            #expect(try Data(contentsOf: target) == before)
         }
     }
 
@@ -161,7 +163,7 @@ struct PersonRenameTests {
         #expect(people.people.isEmpty)
     }
 
-    @Test func unreadableEventTargetAbortsBeforeChanges() throws {
+    @Test func unreadableEventTargetIsReportedAndSkipped() throws {
         let fixture = try VoiceFixture()
         defer { fixture.remove() }
         try fixture.seed()
@@ -169,9 +171,11 @@ struct PersonRenameTests {
         let events = folder.appendingPathComponent("events.jsonl")
         try FileManager.default.removeItem(at: events)
         try FileManager.default.createDirectory(at: events, withIntermediateDirectories: false)
-        let before = try fixture.bytes()
-        #expect(throws: (any Error).self) { try fixture.library.renamePerson("Mei", to: "Ana") }
-        #expect(try fixture.bytes() == before)
+        let before = try Data(contentsOf: MetaFile.url(in: folder))
+        let result = try fixture.library.renamePerson("Mei", to: "Ana")
+        #expect(result.skipped.count == 1)
+        #expect(result.failures.count == 1)
+        #expect(try Data(contentsOf: MetaFile.url(in: folder)) == before)
     }
 
     @Test func caseOnlyRenameRetainsThePersonAndRawPeopleFields() throws {

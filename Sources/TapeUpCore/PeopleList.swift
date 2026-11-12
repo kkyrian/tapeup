@@ -16,6 +16,13 @@ public struct PeopleList: Sendable, Equatable {
     public static let format = "tapeup-people/1"
     public static let fileName = "people.json"
 
+    private var loadedData: Data?
+    private var wasLoaded = false
+
+    public static func == (lhs: PeopleList, rhs: PeopleList) -> Bool {
+        lhs.you == rhs.you && lhs.people == rhs.people
+    }
+
     public var you: String?
     public var people: [Person]
 
@@ -120,6 +127,8 @@ public struct PeopleList: Sendable, Equatable {
     /// Keeps everyone here and adds anyone new from `other`.
     public func merged(with other: PeopleList) -> PeopleList {
         var result = PeopleList(you: other.you ?? you, people: [])
+        result.loadedData = loadedData
+        result.wasLoaded = wasLoaded
         for person in people + other.people { result.add(person) }
         return result
     }
@@ -167,7 +176,18 @@ public struct PeopleList: Sendable, Equatable {
     /// Like `load`, but throws when a file exists and cannot be read as a
     /// list, so callers never save over a list they failed to understand.
     public static func loadChecked(from root: URL) throws -> PeopleList {
-        guard let text = try? String(contentsOf: url(in: root), encoding: .utf8) else { return PeopleList() }
+        try VoiceFiles.withRootLock(root) {
+            let data = try VoiceFiles.read(url(in: root))
+            var list = try loadData(data)
+            list.loadedData = data
+            list.wasLoaded = true
+            return list
+        }
+    }
+
+    private static func loadData(_ data: Data?) throws -> PeopleList {
+        guard let data else { return PeopleList() }
+        guard let text = String(data: data, encoding: .utf8) else { throw CocoaError(.fileReadCorruptFile) }
         do {
             return try parse(text)
         } catch {
@@ -184,26 +204,34 @@ public struct PeopleList: Sendable, Equatable {
 
     /// Moves an unreadable `people.json` aside so it is kept, not overwritten.
     public static func setAsideUnreadable(in root: URL) throws -> URL {
-        let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "")
-        let aside = root.appendingPathComponent("people-unreadable-\(stamp).json")
-        try FileManager.default.moveItem(at: url(in: root), to: aside)
-        return aside
+        try VoiceFiles.withRootLock(root) {
+            let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "")
+            let aside = root.appendingPathComponent("people-unreadable-\(stamp).json")
+            try FileManager.default.moveItem(at: url(in: root), to: aside)
+            return aside
+        }
     }
 
     public func save(to root: URL) throws {
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        var object: [String: Any] = [
-            "format": Self.format,
-            "people": people.map { person -> [String: Any] in
-                var fields: [String: Any] = ["name": person.name]
-                if let context = person.context { fields["context"] = context }
-                return fields
-            },
-        ]
-        if let you { object["you"] = you }
-        let data = try JSONSerialization.data(
-            withJSONObject: object, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
-        try data.write(to: Self.url(in: root), options: .atomic)
+        try VoiceFiles.withRootLock(root) {
+            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+            var object: [String: Any] = [
+                "format": Self.format,
+                "people": people.map { person -> [String: Any] in
+                    var fields: [String: Any] = ["name": person.name]
+                    if let context = person.context { fields["context"] = context }
+                    return fields
+                },
+            ]
+            if let you { object["you"] = you }
+            let data = try JSONSerialization.data(
+                withJSONObject: object, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
+            let current = try VoiceFiles.read(Self.url(in: root))
+            guard !wasLoaded || current == loadedData || current == data else {
+                throw VoiceLibrary.Failure.concurrentChange
+            }
+            try data.write(to: Self.url(in: root), options: .atomic)
+        }
     }
 
     private static func clean(_ text: String?) -> String? {

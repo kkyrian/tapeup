@@ -7,6 +7,12 @@ import Foundation
 public enum MetaFile {
     private static let lock = NSLock()
 
+    static func withLock<T>(_ operation: () throws -> T) rethrows -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return try operation()
+    }
+
     public static func url(in folder: URL) -> URL { folder.appendingPathComponent("meta.json") }
 
     public static func read(_ folder: URL) -> [String: Any]? {
@@ -43,11 +49,10 @@ public final class FolderLock: @unchecked Sendable {
         }
     }
 
-    /// Releases the lock and removes its file, so finished folders hold only
-    /// the recording.
+    /// Releases the lock. Keep its inode stable so processes cannot lock two
+    /// different files for the same recording.
     public func release() {
         guard descriptor >= 0 else { return }
-        unlink(path)
         flock(descriptor, LOCK_UN)
         close(descriptor)
         descriptor = -1

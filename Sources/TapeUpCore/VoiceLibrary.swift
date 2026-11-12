@@ -3,6 +3,8 @@ import Foundation
 /// Synchronous disk operations for the integrator; run on a serial background
 /// queue. A fill never teaches the store; only label actions below do.
 public struct VoiceLibrary: Sendable {
+    public enum Failure: Error, Equatable { case busyRecording, concurrentChange }
+
     public let root: URL
     public var parameters: VoiceMatching.Parameters
 
@@ -16,6 +18,7 @@ public struct VoiceLibrary: Sendable {
         var result: SpeakerResult
         var lines: [TranscriptLine]
         var meta: [String: Any]
+        var originalMeta: [String: Any]
         var prints: [Int: [Float]]
         var stamp: String { RecordingLibrary.stamp(of: folder) }
 
@@ -31,6 +34,7 @@ public struct VoiceLibrary: Sendable {
             }
             self.lines = lines
             meta = try VoiceFiles.object(MetaFile.url(in: folder))
+            originalMeta = meta
             prints =
                 VoicePrints.read(in: folder).map { SpeakerLabels.prints(of: result, heard: $0, lines: lines) } ?? [:]
         }
@@ -54,7 +58,9 @@ public struct VoiceLibrary: Sendable {
 
         mutating func removeAttendance(_ person: String) {
             // Retain attendance when another voice still carries that name.
-            guard !result.names.values.contains(person) else { return }
+            guard !result.names.values.contains(where: { $0.caseInsensitiveCompare(person) == .orderedSame }) else {
+                return
+            }
             guard var who = meta["who_was_there"] as? [String: Any], let names = who["names"] as? [String] else {
                 return
             }
@@ -62,8 +68,8 @@ public struct VoiceLibrary: Sendable {
             meta["who_was_there"] = who
         }
 
-        func writes() throws -> [(URL, Data?)] {
-            try VoiceFiles.speakerWrites(result, lines: lines, meta: meta, folder: folder)
+        func writes() throws -> [VoiceFiles.Write] {
+            try VoiceFiles.speakerWrites(result, lines: lines, meta: meta, folder: folder, before: originalMeta)
         }
     }
 
@@ -71,17 +77,20 @@ public struct VoiceLibrary: Sendable {
     /// add people to people.json or examples to the voice store.
     @discardableResult
     public func fill(in folder: URL) throws -> [VoiceMatching.Fill] {
-        try VoiceFiles.locked {
+        try VoiceFiles.withRootLock(root) {
+            guard let held = FolderLock(folder: folder) else { return [] }
+            defer { held.release() }
             var recording = try Recording(folder)
             let store = VoiceStore.load(from: root)
+            let people = try checkedPeople()
             let fills = VoiceMatching.match(
                 prints: recording.prints,
                 seconds: Dictionary(uniqueKeysWithValues: recording.result.voices.map { ($0.id, $0.seconds) }),
-                store: store,
+                store: store, allowedPeople: Set(people.allNames),
                 headphones: TranscriptDocument.sidesKnown(meta: recording.meta),
                 microphoneOnlyVoices: SpeakerLabels.microphoneOnlyVoices(
                     lines: recording.lines, assigned: recording.result.assigned),
-                you: PeopleList.load(from: root).you, named: recording.result.names, parameters: parameters)
+                you: people.you, named: recording.result.names, parameters: parameters)
             guard !fills.isEmpty else { return [] }
             for fill in fills {
                 let added = recording.attend(fill.person)
@@ -123,12 +132,14 @@ public struct VoiceLibrary: Sendable {
     }
 
     private func confirm(in folder: URL, voices: Set<Int>?) throws -> VoiceFileUndo {
-        try VoiceFiles.locked {
+        try VoiceFiles.withRootLock(root) {
+            guard let held = FolderLock(folder: folder) else { throw VoiceLibrary.Failure.busyRecording }
+            defer { held.release() }
             var recording = try Recording(folder)
             var store = try editableStore()
             try learnFills(&recording, store: &store, voices: voices)
             return try VoiceFiles.apply(
-                recording.writes() + [(VoiceStore.url(in: root), try JSONEncoder().encode(store))])
+                recording.writes() + [.file(VoiceStore.url(in: root), try JSONEncoder().encode(store))])
         }
     }
 
@@ -140,7 +151,8 @@ public struct VoiceLibrary: Sendable {
             if let example = recording.example(voice) { try store.addExample(example, for: person) }
             if let similarity = provenance.similarity {
                 store.recordFeedback(
-                    for: person, stamp: recording.stamp, voice: voice, similarity: similarity, confirmed: true)
+                    for: person, stamp: recording.stamp, voice: voice, similarity: similarity, confirmed: true,
+                    parameters: parameters)
             }
             provenance.origin = .confirmed
             recording.result.provenance[voice] = provenance
@@ -153,15 +165,23 @@ public struct VoiceLibrary: Sendable {
         }
         let old = recording.result.names[voice]
         let provenance = recording.result.provenance(for: voice)
+        if old == nil, let person, let example = recording.example(voice), let profile = store.people[person] {
+            let score = VoiceMatching.similarity(example.print, to: profile, parameters: parameters)
+            if score > parameters.minimumBar, score < VoiceMatching.bar(for: profile, parameters: parameters) {
+                store.recordMiss(
+                    for: person, stamp: recording.stamp, voice: voice, similarity: score, parameters: parameters)
+            }
+        }
         store.removeExample(stamp: recording.stamp, voice: voice)
-        if let old, let person, old != person, provenance.origin != .person, let example = recording.example(voice) {
+        if let old, old != person, provenance.origin != .person, let example = recording.example(voice) {
             let score =
                 provenance.similarity
                 ?? store.people[old].map { VoiceMatching.similarity(example.print, to: $0, parameters: parameters) }
             try store.addNegative(example, for: old)
             if let score {
                 store.recordFeedback(
-                    for: old, stamp: recording.stamp, voice: voice, similarity: score, confirmed: false)
+                    for: old, stamp: recording.stamp, voice: voice, similarity: score, confirmed: false,
+                    parameters: parameters)
             }
         }
         recording.result.names[voice] = person
@@ -175,7 +195,8 @@ public struct VoiceLibrary: Sendable {
             if old == person, provenance.origin != .person {
                 if provenance.origin == .filled, let score = provenance.similarity {
                     store.recordFeedback(
-                        for: person, stamp: recording.stamp, voice: voice, similarity: score, confirmed: true)
+                        for: person, stamp: recording.stamp, voice: voice, similarity: score, confirmed: true,
+                        parameters: parameters)
                 }
                 recording.result.provenance[voice] = .init(
                     origin: .confirmed, addedToWhoWasThere: provenance.addedToWhoWasThere,
@@ -187,23 +208,43 @@ public struct VoiceLibrary: Sendable {
     private func change(_ voice: Int, to person: String?, in folder: URL, confirmRemaining: Bool) throws
         -> VoiceFileUndo
     {
-        try VoiceFiles.locked {
+        try VoiceFiles.withRootLock(root) {
             var person = person?.trimmingCharacters(in: .whitespacesAndNewlines)
             if person?.isEmpty == true { throw VoiceStore.StoreError.invalidExample }
+            guard let held = FolderLock(folder: folder) else { throw VoiceLibrary.Failure.busyRecording }
+            defer { held.release() }
             var recording = try Recording(folder)
             var store = try editableStore()
             if let name = person { person = try canonicalPerson(name, store: store) }
             try choose(voice, person: person, recording: &recording, store: &store)
             if confirmRemaining { try learnFills(&recording, store: &store) }
-            var writes = try recording.writes() + [(VoiceStore.url(in: root), try JSONEncoder().encode(store))]
+            var writes = try recording.writes() + [.file(VoiceStore.url(in: root), try JSONEncoder().encode(store))]
             if let person {
                 var people = try checkedPeople()
                 if !people.contains(person) {
                     people.add(.init(name: person))
-                    writes.append((PeopleList.url(in: root), try Self.peopleData(people)))
+                    writes.append(.file(PeopleList.url(in: root), try Self.peopleData(people)))
                 }
             }
             return try VoiceFiles.apply(writes)
+        }
+    }
+
+    /// Removing a known person forgets their stored voice, including `you`.
+    /// Historical labels remain a record of who attended those recordings.
+    @discardableResult
+    public func forgetPerson(_ person: String) throws -> VoiceFileUndo {
+        try VoiceFiles.withRootLock(root) {
+            var people = try checkedPeople()
+            var store = try editableStore()
+            let aliases = try pendingAliases()[person.lowercased()] ?? [person.lowercased()]
+            people.people.removeAll { aliases.contains($0.name.lowercased()) }
+            if let you = people.you, aliases.contains(you.lowercased()) { people.you = nil }
+            for name in store.people.keys where aliases.contains(name.lowercased()) { store.forgetPerson(name) }
+            return try VoiceFiles.apply([
+                .file(VoiceStore.url(in: root), try JSONEncoder().encode(store)),
+                .file(PeopleList.url(in: root), try Self.peopleData(people)),
+            ])
         }
     }
 
@@ -255,7 +296,7 @@ public struct VoiceLibrary: Sendable {
     public func pastFills(
         of person: String, closeTo print: [Float], excluding source: URL, busy: Set<String> = []
     ) throws -> [PastFill] {
-        VoiceFiles.locked {
+        try VoiceFiles.withRootLock(root) {
             var hits: [PastFill] = []
             for folder in RecordingLibrary(root: root).recordingFolders()
             where RecordingLibrary.stamp(of: folder) < RecordingLibrary.stamp(of: source)
@@ -283,7 +324,7 @@ public struct VoiceLibrary: Sendable {
     public func pastFills(
         afterCorrecting voice: Int, from person: String, in folder: URL, busy: Set<String> = []
     ) throws -> [PastFill] {
-        try VoiceFiles.locked {
+        try VoiceFiles.withRootLock(root) {
             let recording = try Recording(folder)
             guard let print = recording.prints[voice] else { return [] }
             return try pastFills(of: person, closeTo: print, excluding: folder, busy: busy)
@@ -297,45 +338,58 @@ public struct VoiceLibrary: Sendable {
     }
 
     public func applyPastFills(_ hits: [PastFill], to person: String, busy: Set<String> = []) throws -> PastFillResult {
-        try VoiceFiles.locked {
+        try VoiceFiles.withRootLock(root) {
             let requested = person.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !requested.isEmpty else { throw VoiceStore.StoreError.invalidExample }
             var store = try editableStore()
             let person = try canonicalPerson(requested, store: store)
             var changed: [PastFill] = []
             var skipped: [PastFill] = []
-            var writes: [(URL, Data?)] = []
-            for folder in Set(hits.map(\.recording)).sorted(by: { $0.path < $1.path }) {
-                let proposed = hits.filter { $0.recording == folder }
-                guard !busy.contains(RecordingLibrary.stamp(of: folder)), var recording = try? Recording(folder) else {
-                    skipped += proposed
-                    continue
-                }
-                for hit in proposed {
-                    guard recording.result.names[hit.voice] == hit.person,
-                        recording.result.provenance(for: hit.voice).origin == .filled,
-                        recording.prints[hit.voice] == hit.print
+            var undo = VoiceFileUndo(files: [], root: root)
+            do {
+                for folder in Set(hits.map(\.recording)).sorted(by: { $0.path < $1.path }) {
+                    let proposed = hits.filter { $0.recording == folder }
+                    guard !busy.contains(RecordingLibrary.stamp(of: folder)), let held = FolderLock(folder: folder)
                     else {
-                        skipped.append(hit)
+                        skipped += proposed
                         continue
                     }
-                    try choose(hit.voice, person: person, recording: &recording, store: &store)
-                    changed.append(hit)
+                    defer { held.release() }
+                    guard var recording = try? Recording(folder) else {
+                        skipped += proposed
+                        continue
+                    }
+                    for hit in proposed {
+                        guard recording.result.names[hit.voice] == hit.person,
+                            recording.result.provenance(for: hit.voice).origin == .filled,
+                            recording.prints[hit.voice] == hit.print
+                        else {
+                            skipped.append(hit)
+                            continue
+                        }
+                        try choose(hit.voice, person: person, recording: &recording, store: &store)
+                        changed.append(hit)
+                    }
+                    if changed.contains(where: { $0.recording == folder }) {
+                        // This strip changes only the reviewed voices; other fills remain unchecked.
+                        undo.include(try VoiceFiles.apply(recording.writes()))
+                    }
                 }
-                if changed.contains(where: { $0.recording == folder }) {
-                    try learnFills(&recording, store: &store)
-                    writes += try recording.writes()
+                var writes: [VoiceFiles.Write] = []
+                if !changed.isEmpty {
+                    writes.append(.file(VoiceStore.url(in: root), try JSONEncoder().encode(store)))
+                    var people = try checkedPeople()
+                    if !people.contains(person) {
+                        people.add(.init(name: person))
+                        writes.append(.file(PeopleList.url(in: root), try Self.peopleData(people)))
+                    }
                 }
+                undo.include(try VoiceFiles.apply(writes))
+                return PastFillResult(changed: changed, skipped: skipped, undo: undo)
+            } catch {
+                _ = try undo.restore()
+                throw error
             }
-            if !changed.isEmpty {
-                writes.append((VoiceStore.url(in: root), try JSONEncoder().encode(store)))
-                var people = try checkedPeople()
-                if !people.contains(person) {
-                    people.add(.init(name: person))
-                    writes.append((PeopleList.url(in: root), try Self.peopleData(people)))
-                }
-            }
-            return PastFillResult(changed: changed, skipped: skipped, undo: try VoiceFiles.apply(writes))
         }
     }
 }

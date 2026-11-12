@@ -15,15 +15,20 @@ struct VoiceMatchingTests {
         let store = try store()
         let fills = VoiceMatching.match(
             prints: [1: voicePrint(), 2: voicePrint(0, 1), 3: voicePrint(-1)], seconds: [1: 60, 2: 59, 3: 100],
-            store: store)
+            store: store, allowedPeople: ["Mei", "Ana", "Sam"])
         #expect(fills.map(\.person) == ["Mei"])
-        #expect(VoiceMatching.match(prints: [:], seconds: [:], store: store).isEmpty)
-        #expect(VoiceMatching.match(prints: [1: [1]], seconds: [1: 100], store: store).isEmpty)
+        #expect(
+            VoiceMatching.match(prints: [:], seconds: [:], store: store, allowedPeople: ["Mei", "Ana", "Sam"]).isEmpty)
+        #expect(
+            VoiceMatching.match(
+                prints: [1: [1]], seconds: [1: 100], store: store, allowedPeople: ["Mei", "Ana", "Sam"]
+            ).isEmpty)
     }
 
     @Test func twoVoicesCompeteForOnePersonByBestGlobalAssignment() throws {
         let fills = VoiceMatching.match(
-            prints: [1: voicePrint(0.8, 0.3), 2: voicePrint()], seconds: [1: 100, 2: 100], store: try store())
+            prints: [1: voicePrint(0.8, 0.3), 2: voicePrint()], seconds: [1: 100, 2: 100], store: try store(),
+            allowedPeople: ["Mei", "Ana", "Sam"])
         #expect(fills.count == 1)
         #expect(fills.first?.voice == 2)
         #expect(fills.first?.person == "Mei")
@@ -32,27 +37,38 @@ struct VoiceMatchingTests {
     }
 
     @Test func oneVoiceCloseToTwoPeopleStaysEmpty() throws {
-        #expect(VoiceMatching.match(prints: [1: voicePrint(1, 1)], seconds: [1: 100], store: try store()).isEmpty)
+        #expect(
+            VoiceMatching.match(
+                prints: [1: voicePrint(1, 1)], seconds: [1: 100], store: try store(),
+                allowedPeople: ["Mei", "Ana", "Sam"]
+            ).isEmpty)
     }
 
     @Test func twoClearVoicesFillTwoDifferentPeople() throws {
         let fills = VoiceMatching.match(
-            prints: [2: voicePrint(0, 1), 1: voicePrint()], seconds: [1: 100, 2: 100], store: try store())
+            prints: [2: voicePrint(0, 1), 1: voicePrint()], seconds: [1: 100, 2: 100], store: try store(),
+            allowedPeople: ["Mei", "Ana", "Sam"])
         #expect(fills.map(\.person) == ["Mei", "Ana"])
     }
 
     @Test func negativeExamplesSuppressOnlyNearbyPrints() throws {
         var store = try store()
         try store.addNegative(voiceExample("negative"), for: "Mei")
-        #expect(VoiceMatching.match(prints: [1: voicePrint()], seconds: [1: 100], store: store).isEmpty)
         #expect(
-            VoiceMatching.match(prints: [1: voicePrint(0, 1)], seconds: [1: 100], store: store).first?.person == "Ana")
+            VoiceMatching.match(
+                prints: [1: voicePrint()], seconds: [1: 100], store: store, allowedPeople: ["Mei", "Ana", "Sam"]
+            ).isEmpty)
+        #expect(
+            VoiceMatching.match(
+                prints: [1: voicePrint(0, 1)], seconds: [1: 100], store: store, allowedPeople: ["Mei", "Ana", "Sam"]
+            ).first?.person == "Ana")
     }
 
     @Test func microphoneShortcutRequiresHeadphonesAndExactlyOneVoice() {
         func match(_ headphones: Bool, _ voices: Set<Int>) -> [VoiceMatching.Fill] {
             VoiceMatching.match(
-                prints: [:], seconds: [1: 10, 2: 10], store: VoiceStore(), headphones: headphones,
+                prints: [:], seconds: [1: 10, 2: 10], store: VoiceStore(), allowedPeople: ["Sam"],
+                headphones: headphones,
                 microphoneOnlyVoices: voices, you: "Sam")
         }
         #expect(match(false, [1]).isEmpty)
@@ -105,17 +121,24 @@ struct VoiceMatchingTests {
     @Test func namedPeopleRemainCompetitorsAndCannotFillTwice() throws {
         let store = try store()
         #expect(
-            VoiceMatching.match(prints: [2: voicePrint()], seconds: [2: 100], store: store, named: [1: "Mei"]).isEmpty)
+            VoiceMatching.match(
+                prints: [2: voicePrint()], seconds: [2: 100], store: store, allowedPeople: ["Mei", "Ana", "Sam"],
+                named: [1: "Mei"]
+            ).isEmpty)
         #expect(
             VoiceMatching.match(
-                prints: [:], seconds: [2: 100], store: store, headphones: true,
+                prints: [:], seconds: [2: 100], store: store, allowedPeople: ["Mei", "Ana", "Sam"], headphones: true,
                 microphoneOnlyVoices: [2], you: "Mei", named: [1: "Mei"]
             ).isEmpty)
     }
 
     @Test func invalidDurationDoesNotMatch() throws {
         for seconds in [Double.nan, .infinity, -1] {
-            #expect(VoiceMatching.match(prints: [1: voicePrint()], seconds: [1: seconds], store: try store()).isEmpty)
+            #expect(
+                VoiceMatching.match(
+                    prints: [1: voicePrint()], seconds: [1: seconds], store: try store(),
+                    allowedPeople: ["Mei", "Ana", "Sam"]
+                ).isEmpty)
         }
     }
 }

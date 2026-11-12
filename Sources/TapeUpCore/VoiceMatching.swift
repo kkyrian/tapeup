@@ -58,12 +58,33 @@ public enum VoiceMatching {
         return max(-1, positive - penalty * p.negativeWeight)
     }
 
+    /// Confirmations can only lower the bar. A correction at score s raises
+    /// it immediately to at least s + padding. A manually named miss between
+    /// the minimum and the current bar lowers it partway toward s. Every step
+    /// stays within the configured bounds; the accumulated bar is persisted
+    /// independently of capped feedback, so trimming history cannot raise it.
+    /// No model weights change.
     public static func bar(for person: VoiceStore.Person, parameters p: Parameters = Parameters()) -> Float {
-        var bar = p.bar
-        for feedback in person.feedback {
-            let target = feedback.similarity + (feedback.confirmed ? -p.feedbackPadding : p.feedbackPadding)
-            bar += p.feedbackStep * (target - bar)
-            bar = min(p.maximumBar, max(p.minimumBar, bar))
+        if let threshold = person.threshold { return min(p.maximumBar, max(p.minimumBar, threshold)) }
+        // Migrate old stores by replaying their retained evidence once. New
+        // observations persist the resulting bar before history is trimmed.
+        return person.feedback.reduce(min(p.maximumBar, max(p.minimumBar, p.bar))) { current, feedback in
+            updatedBar(
+                current, similarity: feedback.similarity, confirmed: feedback.confirmed,
+                missed: feedback.missed == true, parameters: p)
+        }
+    }
+
+    static func updatedBar(_ current: Float, similarity: Float, confirmed: Bool, missed: Bool, parameters p: Parameters)
+        -> Float
+    {
+        var bar = current
+        if missed {
+            if similarity > p.minimumBar, similarity < bar { bar += p.feedbackStep * (similarity - bar) }
+        } else if confirmed {
+            bar = min(bar, similarity - p.feedbackPadding)
+        } else {
+            bar = max(bar, similarity + p.feedbackPadding)
         }
         return min(p.maximumBar, max(p.minimumBar, bar))
     }
@@ -71,14 +92,16 @@ public enum VoiceMatching {
     /// Inputs use the displayed voice numbers, after folding. Existing names
     /// reserve people, so calling this never fills a person twice in a meeting.
     public static func match(
-        prints: [Int: [Float]], seconds: [Int: Double], store: VoiceStore,
+        prints: [Int: [Float]], seconds: [Int: Double], store: VoiceStore, allowedPeople: Set<String>,
         headphones: Bool = false, microphoneOnlyVoices: Set<Int> = [], you: String? = nil,
         named: [Int: String] = [:], parameters p: Parameters = Parameters()
     ) -> [Fill] {
+        let allowed = Set(allowedPeople.map { $0.lowercased() })
         var fills: [Fill] = []
         var taken = Set(named.values.map { $0.lowercased() })
         if headphones, microphoneOnlyVoices.count == 1, let voice = microphoneOnlyVoices.first,
-            named[voice] == nil, let you, !you.isEmpty, !taken.contains(you.lowercased()),
+            named[voice] == nil, let you, allowed.contains(you.lowercased()), !you.isEmpty,
+            !taken.contains(you.lowercased()),
             let talk = seconds[voice], talk.isFinite, talk > 0
         {
             fills.append(Fill(voice: voice, person: you, similarity: p.microphoneScore, microphone: true))
@@ -90,7 +113,7 @@ public enum VoiceMatching {
                 && VoiceStore.validPrint(prints[voice]!)
         }
         let people = store.people.keys.sorted().filter {
-            !taken.contains($0.lowercased()) && !store.people[$0]!.examples.isEmpty
+            allowed.contains($0.lowercased()) && !taken.contains($0.lowercased()) && !store.people[$0]!.examples.isEmpty
         }
         guard !voices.isEmpty, !people.isEmpty else { return fills }
         var weights = Array(
@@ -99,7 +122,8 @@ public enum VoiceMatching {
         for (row, voice) in voices.enumerated() {
             // Reserved people still compete in the margin: being named on a
             // different voice cannot turn an ambiguous print into a clear one.
-            let scores = store.people.filter { !$0.value.examples.isEmpty }.map { name, person in
+            let scores = store.people.filter { allowed.contains($0.key.lowercased()) && !$0.value.examples.isEmpty }.map
+            { name, person in
                 (name, similarity(prints[voice]!, to: person, parameters: p))
             }.sorted { $0.1 != $1.1 ? $0.1 > $1.1 : $0.0 < $1.0 }
             for (column, person) in people.enumerated() {

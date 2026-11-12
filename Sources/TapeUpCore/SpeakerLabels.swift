@@ -319,19 +319,21 @@ extension SpeakerLabels {
 
     /// Writes the labeled transcript and records it in `meta.json`.
     public static func save(_ result: SpeakerResult, lines: [TranscriptLine], in folder: URL) throws {
-        let meta = MetaFile.read(folder) ?? [:]
-        let transcript = meta["transcript"] as? [String: Any]
-        let text = render(
-            lines: lines, assigned: result.assigned, names: result.names,
-            model: transcript?["model"] as? String ?? "Qwen3-ASR", missing: transcript?["missing_passages"] as? Int ?? 0
-        )
-        try text.write(to: folder.appendingPathComponent(fileName), atomically: true, encoding: .utf8)
-        try JSONEncoder().encode(result).write(to: folder.appendingPathComponent(resultFileName), options: .atomic)
-        try mark("done", in: folder) { labels in
-            labels["file"] = fileName
-            labels["voices"] = result.count
-            labels["voices_estimated"] = result.estimated
-            labels["names"] = result.voices.compactMap { result.names[$0.id] }
+        let root = folder.deletingLastPathComponent().deletingLastPathComponent()
+        try VoiceFiles.withRootLock(root) {
+            try VoiceFiles.withRecordingLock(folder) {
+                let meta = try VoiceFiles.object(MetaFile.url(in: folder))
+                var updated = meta
+                var labels = meta["speaker_labels"] as? [String: Any] ?? [:]
+                labels["status"] = "done"
+                labels["file"] = fileName
+                labels["voices"] = result.count
+                labels["voices_estimated"] = result.estimated
+                labels["error"] = nil
+                updated["speaker_labels"] = labels
+                _ = try VoiceFiles.apply(
+                    VoiceFiles.speakerWrites(result, lines: lines, meta: updated, folder: folder, before: meta))
+            }
         }
     }
 
@@ -354,59 +356,74 @@ extension SpeakerLabels {
     /// same people, and saves it.
     @discardableResult
     public static func relabel(_ heard: VoicePrints, count: Int?, in folder: URL) throws -> SpeakerResult {
-        try VoiceFiles.locked {
-            guard let lines = TranscriptDocument.lines(in: folder) else { throw CocoaError(.fileNoSuchFile) }
-            var labeled = label(lines: lines, heard: heard, count: count)
-            var writes: [(URL, Data?)] = []
-            if let data = try VoiceFiles.read(folder.appendingPathComponent(resultFileName)) {
-                let earlier = try JSONDecoder().decode(SpeakerResult.self, from: data)
-                guard Set(earlier.voices.map(\.id)).count == earlier.voices.count else {
-                    throw CocoaError(.fileReadCorruptFile)
-                }
-                var moved: [Int: Int] = [:]
-                var chosen: [Int: Int] = [:]
-                if earlier.assigned.count == lines.count {
-                    let identities = Dictionary(uniqueKeysWithValues: earlier.voices.map { ($0.id, String($0.id)) })
-                    let namedIdentities = Dictionary(uniqueKeysWithValues: earlier.names.keys.map { ($0, String($0)) })
-                    for (new, old) in carry(identities, from: earlier.assigned, to: labeled.assigned, lines: lines) {
-                        if let old = Int(old) { moved[old] = new }
+        let root = folder.deletingLastPathComponent().deletingLastPathComponent()
+        return try VoiceFiles.withRootLock(root) {
+            try VoiceFiles.withRecordingLock(folder) {
+                guard let lines = TranscriptDocument.lines(in: folder) else { throw CocoaError(.fileNoSuchFile) }
+                var labeled = label(lines: lines, heard: heard, count: count)
+                var writes: [VoiceFiles.Write] = []
+                let previousData = try VoiceFiles.read(folder.appendingPathComponent(resultFileName))
+                var carried = false
+                if let data = previousData, let earlier = try? JSONDecoder().decode(SpeakerResult.self, from: data),
+                    Set(earlier.voices.map(\.id)).count == earlier.voices.count
+                {
+                    carried = true
+                    var moved: [Int: Int] = [:]
+                    var chosen: [Int: Int] = [:]
+                    if earlier.assigned.count == lines.count {
+                        let identities = Dictionary(uniqueKeysWithValues: earlier.voices.map { ($0.id, String($0.id)) })
+                        let namedIdentities = Dictionary(
+                            uniqueKeysWithValues: earlier.names.keys.map { ($0, String($0)) })
+                        for (new, old) in carry(identities, from: earlier.assigned, to: labeled.assigned, lines: lines)
+                        {
+                            if let old = Int(old) { moved[old] = new }
+                        }
+                        for (new, old) in carry(
+                            namedIdentities, from: earlier.assigned, to: labeled.assigned, lines: lines)
+                        {
+                            if let old = Int(old) {
+                                chosen[old] = new
+                                labeled.names[new] = earlier.names[old]
+                                labeled.provenance[new] = earlier.provenance(for: old)
+                            }
+                        }
+                    } else if earlier.voices.count == labeled.voices.count {
+                        // A new transcript, with the same voice numbers.
+                        labeled.names = earlier.names
+                        labeled.provenance = earlier.provenance
+                        moved = Dictionary(uniqueKeysWithValues: earlier.voices.map { ($0.id, $0.id) })
+                        chosen = moved
                     }
-                    for (new, old) in carry(namedIdentities, from: earlier.assigned, to: labeled.assigned, lines: lines)
-                    {
-                        if let old = Int(old) {
-                            chosen[old] = new
-                            labeled.names[new] = earlier.names[old]
-                            labeled.provenance[new] = earlier.provenance(for: old)
+                    if try VoiceFiles.read(VoiceStore.url(in: root)) != nil {
+                        var store = try VoiceStore.loadChecked(from: root)
+                        let before = store
+                        store.relabel(
+                            stamp: RecordingLibrary.stamp(of: folder), voices: moved, chosen: chosen,
+                            names: labeled.names, aliases: try VoiceLibrary(root: root).pendingAliases())
+                        if store != before {
+                            writes.append(.file(VoiceStore.url(in: root), try JSONEncoder().encode(store)))
                         }
                     }
-                } else if earlier.voices.count == labeled.voices.count {
-                    // A new transcript, with the same voice numbers.
-                    labeled.names = earlier.names
-                    labeled.provenance = earlier.provenance
-                    moved = Dictionary(uniqueKeysWithValues: earlier.voices.map { ($0.id, $0.id) })
-                    chosen = moved
                 }
-                let root = folder.deletingLastPathComponent().deletingLastPathComponent()
-                if try VoiceFiles.read(VoiceStore.url(in: root)) != nil {
-                    var store = try VoiceStore.loadChecked(from: root)
-                    let before = store
-                    store.relabel(
-                        stamp: RecordingLibrary.stamp(of: folder), voices: moved, chosen: chosen, names: labeled.names)
-                    if store != before { writes.append((VoiceStore.url(in: root), try JSONEncoder().encode(store))) }
+                if previousData != nil, !carried {
+                    var store = VoiceStore.load(from: root)
+                    store.forgetRecording(RecordingLibrary.stamp(of: folder))
+                    writes.append(.file(VoiceStore.url(in: root), try JSONEncoder().encode(store)))
                 }
+                let meta = try VoiceFiles.object(MetaFile.url(in: folder))
+                var updated = meta
+                var labels = updated["speaker_labels"] as? [String: Any] ?? [:]
+                labels["status"] = "done"
+                labels["file"] = fileName
+                labels["voices"] = labeled.count
+                labels["voices_estimated"] = labeled.estimated
+                labels["error"] = nil
+                updated["speaker_labels"] = labels
+                writes += try VoiceFiles.speakerWrites(
+                    labeled, lines: lines, meta: updated, folder: folder, before: meta)
+                _ = try VoiceFiles.apply(writes)
+                return labeled
             }
-            let meta = try VoiceFiles.object(MetaFile.url(in: folder))
-            var updated = meta
-            var labels = updated["speaker_labels"] as? [String: Any] ?? [:]
-            labels["status"] = "done"
-            labels["file"] = fileName
-            labels["voices"] = labeled.count
-            labels["voices_estimated"] = labeled.estimated
-            labels["error"] = nil
-            updated["speaker_labels"] = labels
-            writes += try VoiceFiles.speakerWrites(labeled, lines: lines, meta: updated, folder: folder)
-            _ = try VoiceFiles.apply(writes)
-            return labeled
         }
     }
 
@@ -421,43 +438,58 @@ extension SpeakerLabels {
 
     /// Gives a voice a name, or takes it away, and rewrites the labeled transcript.
     public static func name(_ voice: Int, _ name: String?, in folder: URL) throws {
-        guard var result = result(in: folder), let lines = TranscriptDocument.lines(in: folder) else {
-            throw CocoaError(.fileNoSuchFile)
+        let root = folder.deletingLastPathComponent().deletingLastPathComponent()
+        try VoiceFiles.withRootLock(root) {
+            try VoiceFiles.withRecordingLock(folder) {
+                guard var result = result(in: folder), let lines = TranscriptDocument.lines(in: folder) else {
+                    throw CocoaError(.fileNoSuchFile)
+                }
+                result.names[voice] = name
+                result.provenance[voice] = name == nil ? nil : SpeakerProvenance(origin: .person)
+                // A name is on one voice only, suggested or given.
+                result.suggested = result.suggested.filter { $0.key != voice && $0.value != name }
+                try save(result, lines: lines, in: folder)
+            }
         }
-        result.names[voice] = name
-        result.provenance[voice] = name == nil ? nil : SpeakerProvenance(origin: .person)
-        // A name is on one voice only, suggested or given.
-        result.suggested = result.suggested.filter { $0.key != voice && $0.value != name }
-        try save(result, lines: lines, in: folder)
     }
 
     /// Keeps suggested names for unnamed voices, each name on one voice only.
     public static func suggest(_ names: [Int: String], in folder: URL) throws {
-        guard var result = result(in: folder), let lines = TranscriptDocument.lines(in: folder) else {
-            throw CocoaError(.fileNoSuchFile)
+        let root = folder.deletingLastPathComponent().deletingLastPathComponent()
+        try VoiceFiles.withRootLock(root) {
+            try VoiceFiles.withRecordingLock(folder) {
+                guard var result = result(in: folder), let lines = TranscriptDocument.lines(in: folder) else {
+                    throw CocoaError(.fileNoSuchFile)
+                }
+                let voices = Set(result.voices.map(\.id))
+                var taken = Set(result.names.values)
+                result.suggested = [:]
+                for (voice, name) in names.sorted(by: { $0.key < $1.key })
+                where voices.contains(voice) && result.names[voice] == nil && taken.insert(name).inserted {
+                    result.suggested[voice] = name
+                }
+                try save(result, lines: lines, in: folder)
+            }
         }
-        let voices = Set(result.voices.map(\.id))
-        var taken = Set(result.names.values)
-        result.suggested = [:]
-        for (voice, name) in names.sorted(by: { $0.key < $1.key })
-        where voices.contains(voice) && result.names[voice] == nil && taken.insert(name).inserted {
-            result.suggested[voice] = name
-        }
-        try save(result, lines: lines, in: folder)
     }
 
     /// Gives every voice with a suggestion that name.
     public static func acceptSuggested(in folder: URL) throws {
-        guard var result = result(in: folder), let lines = TranscriptDocument.lines(in: folder) else {
-            throw CocoaError(.fileNoSuchFile)
+        let root = folder.deletingLastPathComponent().deletingLastPathComponent()
+        try VoiceFiles.withRootLock(root) {
+            try VoiceFiles.withRecordingLock(folder) {
+                guard var result = result(in: folder), let lines = TranscriptDocument.lines(in: folder) else {
+                    throw CocoaError(.fileNoSuchFile)
+                }
+                var taken = Set(result.names.values)
+                for (voice, name) in result.suggested.sorted(by: { $0.key < $1.key })
+                where result.names[voice] == nil && taken.insert(name).inserted {
+                    result.names[voice] = name
+                    result.provenance[voice] = SpeakerProvenance(origin: .person)
+                }
+                result.suggested = [:]
+                try save(result, lines: lines, in: folder)
+            }
         }
-        var taken = Set(result.names.values)
-        for (voice, name) in result.suggested.sorted(by: { $0.key < $1.key })
-        where result.names[voice] == nil && taken.insert(name).inserted {
-            result.names[voice] = name
-            result.provenance[voice] = SpeakerProvenance(origin: .person)
-        }
-        result.suggested = [:]
-        try save(result, lines: lines, in: folder)
     }
 }
