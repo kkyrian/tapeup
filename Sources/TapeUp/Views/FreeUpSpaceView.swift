@@ -2,9 +2,9 @@ import SwiftUI
 import TapeUpCore
 
 /// Recordings that still hold their audio, to clear it in one go: age
-/// chips, then the recordings in three groups by what still needs the
-/// audio, each with a lock that keeps its audio, and one action at the
-/// bottom that confirms in place.
+/// chips, then the recordings by what happens to them: the ones that lose
+/// their audio first, then the ones that stay and why. A lock on each row
+/// keeps its audio. One action at the bottom confirms in place.
 struct FreeUpSpaceView: View {
     @Bindable var model: AppModel
     @State private var asked: Confirm?
@@ -17,17 +17,37 @@ struct FreeUpSpaceView: View {
 
     enum Confirm { case removeAudio, trashUntranscribed }
 
+    /// What happens to a listed recording.
+    enum Section: CaseIterable {
+        /// The footer's action removes these, and only these.
+        case remove
+        /// Locked by the user: never cleared here. Next to the first, so a
+        /// row locked there lands in sight.
+        case locked
+        /// Staying until their speakers are labeled.
+        case unlabeled
+        /// Staying: without a transcript, the audio is all they have.
+        case untranscribed
+    }
+
     /// The list's height whatever it holds, so filtering never moves the page's edges.
     static let listHeight: CGFloat = 330
 
-    private var filter: SpaceFilter { model.spaceFilter }
+    private var age: SpaceFilter.Age { model.spaceFilter.age }
+
+    private func section(_ entry: RecordingEntry) -> Section {
+        if entry.keepAudio { return .locked }
+        switch model.spaceGroup(entry) {
+        case .ready: return model.canRemoveAudio(entry) ? .remove : .unlabeled
+        case .unlabeled: return .unlabeled
+        case .untranscribed: return .untranscribed
+        }
+    }
 
     var body: some View {
         let candidates = model.spaceCandidates
-        let kept = candidates.filter(\.keepAudio)
-        // Locked ones stay in place, so locking never moves the list.
-        let shown = filter.kept ? kept : candidates.filter { filter.age.matches($0) }
-        let groups = Dictionary(grouping: shown, by: model.spaceGroup)
+        let shown = candidates.filter { age.matches($0) }
+        let sections = Dictionary(grouping: shown, by: section)
         VStack(alignment: .leading, spacing: 0) {
             PageHeader(title: "Free up space", back: model.closeFreeUpSpace) {
                 EmptyView()
@@ -36,12 +56,12 @@ struct FreeUpSpaceView: View {
                     .font(.system(size: 11).monospacedDigit())
                     .foregroundStyle(.secondary)
             }
-            chips(candidates, kept: kept).padding(.top, 10)
-            list(shown, groups: groups)
+            chips(candidates).padding(.top, 10)
+            list(shown, sections: sections)
                 .frame(height: Self.listHeight, alignment: .top)
                 .padding(.top, 10)
             Divider().padding(.top, 6)
-            footer(groups: groups)
+            footer(sections: sections)
                 .padding(.top, 8)
         }
         .padding(Style.inset)
@@ -50,30 +70,23 @@ struct FreeUpSpaceView: View {
 
     // MARK: Chips
 
-    private func chips(_ candidates: [RecordingEntry], kept: [RecordingEntry]) -> some View {
+    private func chips(_ candidates: [RecordingEntry]) -> some View {
         FlowLayout(spacing: 6, lineSpacing: 6) {
             // Every chip always, so the rows never reflow as counts change.
             ForEach(SpaceFilter.Age.allCases, id: \.self) { age in
-                FilterChip(
-                    title: age.title, count: candidates.filter { age.matches($0) }.count,
-                    on: !filter.kept && filter.age == age
-                ) {
-                    model.spaceFilter = SpaceFilter(age: age, kept: false)
+                FilterChip(title: age.title, count: candidates.filter { age.matches($0) }.count, on: self.age == age) {
+                    model.spaceFilter = SpaceFilter(age: age)
                 }
             }
-            FilterChip(title: "Kept", count: kept.count, on: filter.kept) {
-                model.spaceFilter.kept.toggle()
-            }
-            .hoverHelp("Recordings you locked: Free up space leaves their audio")
         }
     }
 
     // MARK: The list
 
     @ViewBuilder
-    private func list(_ shown: [RecordingEntry], groups: [AppModel.SpaceGroup: [RecordingEntry]]) -> some View {
+    private func list(_ shown: [RecordingEntry], sections: [Section: [RecordingEntry]]) -> some View {
         if shown.isEmpty {
-            Text(emptyText)
+            Text(age == .all ? "No recording holds audio" : "No recording \(age.title.lowercased()) old holds audio")
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -82,10 +95,10 @@ struct FreeUpSpaceView: View {
         } else {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    let present = AppModel.SpaceGroup.allCases.filter { !(groups[$0] ?? []).isEmpty }
-                    ForEach(Array(present.enumerated()), id: \.element) { index, group in
-                        if let entries = groups[group] {
-                            heading(group, entries).padding(.top, index == 0 ? 2 : 14).padding(.bottom, 2)
+                    let present = Section.allCases.filter { !(sections[$0] ?? []).isEmpty }
+                    ForEach(Array(present.enumerated()), id: \.element) { index, section in
+                        if let entries = sections[section] {
+                            heading(section, entries).padding(.top, index == 0 ? 2 : 14).padding(.bottom, 2)
                             ForEach(entries.sorted { $0.started > $1.started }) { entry in
                                 RecordingRow(
                                     entry: entry, model: model, look: .monthDay,
@@ -94,37 +107,31 @@ struct FreeUpSpaceView: View {
                         }
                     }
                 }
+                .animation(.easeInOut(duration: 0.2), value: sections[.locked]?.map(\.id))
             }
             .scrollIndicators(.automatic)
             .padding(.horizontal, -6)
         }
     }
 
-    private var emptyText: String {
-        if filter.kept { return "Nothing kept yet. Lock a recording on this page\nand Free up space leaves its audio." }
-        if filter.age != .all { return "No recording \(filter.age.title.lowercased()) old holds audio" }
-        return "No recording holds audio"
-    }
-
-    /// The group's name and count, then, for a group not ready yet, why
-    /// and what to do first.
-    private func heading(_ group: AppModel.SpaceGroup, _ entries: [RecordingEntry]) -> some View {
+    /// What happens to the section's recordings, their count and size, then
+    /// why they stay and what to do first.
+    private func heading(_ section: Section, _ entries: [RecordingEntry]) -> some View {
         let bytes = entries.reduce(0) { $0 + model.audioBytes($1) }
         return VStack(alignment: .leading, spacing: 1) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(title(group)).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                Text(title(section)).font(.system(size: 13, weight: .semibold)).lineLimit(1)
                 Text("\(entries.count) · \(Format.size(bytes))")
                     .font(.system(size: 11).monospacedDigit()).foregroundStyle(.secondary)
                     .lineLimit(1)
                 Spacer(minLength: 0)
             }
             .frame(height: 20)
-            if !filter.kept, group != .ready {
+            if let why = why(section) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(group == .unlabeled ? "Labeling needs the audio" : "Only audio, so far")
-                        .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+                    Text(why).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
                     Spacer(minLength: 0)
-                    groupActions(group, entries)
+                    sectionActions(section, entries)
                 }
                 .frame(height: 18)
             }
@@ -132,21 +139,27 @@ struct FreeUpSpaceView: View {
         .padding(.horizontal, 6)
     }
 
-    private func title(_ group: AppModel.SpaceGroup) -> String {
-        if filter.kept {
-            return group == .ready ? "Kept" : group == .unlabeled ? "Kept, not labeled" : "Kept, no transcript"
+    private func title(_ section: Section) -> String {
+        switch section {
+        case .remove: "These lose their audio"
+        case .unlabeled: "Speakers not labeled"
+        case .untranscribed: "No transcript"
+        case .locked: "Locked"
         }
-        switch group {
-        case .ready: return "Ready"
-        case .unlabeled: return "Speakers not labeled"
-        case .untranscribed: return "No transcript"
+    }
+
+    private func why(_ section: Section) -> String? {
+        switch section {
+        case .remove: nil
+        case .unlabeled, .untranscribed: "Audio stays for now"
+        case .locked: "Audio stays"
         }
     }
 
     @ViewBuilder
-    private func groupActions(_ group: AppModel.SpaceGroup, _ entries: [RecordingEntry]) -> some View {
-        switch group {
-        case .ready:
+    private func sectionActions(_ section: Section, _ entries: [RecordingEntry]) -> some View {
+        switch section {
+        case .remove, .locked:
             EmptyView()
         case .unlabeled:
             let waiting = entries.filter {
@@ -175,15 +188,13 @@ struct FreeUpSpaceView: View {
 
     /// One line that says what will happen or just did, over one action.
     @ViewBuilder
-    private func footer(groups: [AppModel.SpaceGroup: [RecordingEntry]]) -> some View {
-        let ready = filter.kept ? [] : (groups[.ready] ?? []).filter { !$0.keepAudio && model.canRemoveAudio($0) }
+    private func footer(sections: [Section: [RecordingEntry]]) -> some View {
+        let ready = sections[.remove] ?? []
         let readyBytes = ready.reduce(0) { $0 + model.audioBytes($1) }
-        let untranscribed =
-            filter.kept
-            ? [] : (groups[.untranscribed] ?? []).filter { !$0.keepAudio && !model.transcription.isWorking(on: $0) }
+        let untranscribed = (sections[.untranscribed] ?? []).filter { !model.transcription.isWorking(on: $0) }
         VStack(alignment: .leading, spacing: 6) {
             // Two lines' room always, so confirming never moves the action.
-            line(ready: ready, untranscribed: untranscribed, groups: groups)
+            line(ready: ready, untranscribed: untranscribed, sections: sections)
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
@@ -202,14 +213,11 @@ struct FreeUpSpaceView: View {
                         .clickTarget("Confirm trash recordings")
                     FlatButton(kind: .plain, action: { confirming = nil }) { Text("Cancel") }
                 }
-            case _ where filter.kept:
-                // The action's room, empty: these are never cleared here.
-                Color.clear.frame(height: 32)
             default:
                 FlatButton(kind: .primary, action: { confirming = .removeAudio }) {
                     Text(
                         ready.isEmpty
-                            ? "Nothing ready to remove"
+                            ? "Nothing to remove"
                             : "Remove audio from \(ready.count) · \(Format.size(readyBytes))")
                 }
                 .disabled(ready.isEmpty)
@@ -221,7 +229,7 @@ struct FreeUpSpaceView: View {
 
     @ViewBuilder
     private func line(
-        ready: [RecordingEntry], untranscribed: [RecordingEntry], groups: [AppModel.SpaceGroup: [RecordingEntry]]
+        ready: [RecordingEntry], untranscribed: [RecordingEntry], sections: [Section: [RecordingEntry]]
     ) -> some View {
         switch confirming {
         case .removeAudio where !ready.isEmpty:
@@ -247,23 +255,15 @@ struct FreeUpSpaceView: View {
                     Text("\(freed.count) moved to the Trash")
                     LinkButton("Undo", action: model.undoTrashUntranscribed).frame(height: 13)
                 }
-            } else if filter.kept {
-                Text("Free up space never clears these")
             } else {
-                let unkept = { (group: AppModel.SpaceGroup) in (groups[group] ?? []).filter { !$0.keepAudio }.count }
-                let waiting = unkept(.unlabeled) + unkept(.untranscribed)
-                let locked = groups.values.joined().filter(\.keepAudio).count
+                let waiting = (sections[.unlabeled]?.count ?? 0) + (sections[.untranscribed]?.count ?? 0)
                 Text(
                     (waiting == 0
                         ? "Transcripts, names and voices stay"
                         : ready.isEmpty
                             ? "Label or transcribe them first"
                             : "\(waiting) more need speakers or a transcript first")
-                        + (locked == 1
-                            ? "\n1 locked recording keeps its audio"
-                            : locked > 1
-                                ? "\n\(locked) locked recordings keep their audio"
-                                : ready.isEmpty ? "" : "\nLock a row to keep its audio"))
+                        + (ready.isEmpty || sections[.locked] != nil ? "" : "\nLock a row to keep its audio"))
             }
         }
     }

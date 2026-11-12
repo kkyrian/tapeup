@@ -228,13 +228,13 @@ marks it with a page glyph before its length, Copy path leaves out the
 audio line, and what needs sound (playing a voice, labeling speakers)
 hides (TU-037). Who was there (a count, optional names suggested from past
 recordings) is optional and never delays saving. Free up
-space, from ···, lists recordings that still hold audio by age, in three
-groups: ready, speakers not labeled (label first), and no transcript
-(transcribe first, or move the whole recording to the Trash after one
-more click). One action removes the ready ones' audio after a confirming
-click, with Undo. A lock on each of its rows, and nowhere else, keeps a
-recording's audio (`keep_audio` in `meta.json`); locked rows stay in place
-and are left out (TU-038). Renaming a person
+space, from ···, lists recordings that still hold audio by age, grouped by
+what happens to them: "These lose their audio" (exactly what its one
+action removes, after a confirming click, with Undo), Locked, speakers not
+labeled (label first), and no transcript (transcribe first, or move the
+whole recording to the Trash after one more click). A lock on each of its
+rows, and nowhere else, keeps a recording's audio (`keep_audio` in
+`meta.json`) and moves it to Locked (TU-038). Renaming a person
 on the People page renames them in every recording, the labeled
 transcripts and the voice store at once, with Undo; renaming onto a listed
 name asks to merge (TU-040).

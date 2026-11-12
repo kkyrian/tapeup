@@ -1110,7 +1110,7 @@ enum UITest {
                 "and keeps the recording's audio (\(model.problem ?? "no problem"))")
             expect(
                 model.spaceCandidates.contains { RecordingLibrary.stamp(of: $0.folder) == stamp },
-                "the locked row stays on the page")
+                "the locked row stays on the page, under Locked")
         }
         let spaceHeight = panel.window.frame.height
         let kept = model.spaceCandidates.filter(\.keepAudio)
@@ -1133,10 +1133,6 @@ enum UITest {
         model.undoFreeAudio()
         settle(0.2)
         expect(ready.allSatisfy(\.hasAudio), "Undo put every file back")
-        model.spaceFilter.kept = true
-        settle(0.2)
-        check("free-up-space-kept")
-        expect(abs(panel.window.frame.height - spaceHeight) <= 1, "the Kept chip keeps the page's height")
         for entry in kept { model.setKeep(entry, false) }
         expect(click("Back", in: panel), "Free up space's Back clicks")
         expect(!model.showingFreeUpSpace, "and returns to Recent")

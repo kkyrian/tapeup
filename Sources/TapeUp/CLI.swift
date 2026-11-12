@@ -20,8 +20,8 @@ enum CLI {
                                                  label speakers: N voices (people who talked,
                                                  the user included), or estimated without --voices
           TapeUp agent [off] [--model M] [--effort E]
-                                                 show the agent that suggests titles and names, turn
-                                                 it off, or set its model and effort ("default" resets)
+                                                 show the agent that suggests titles, turn it off,
+                                                 or set its model and effort ("default" resets)
 
         <recording> is a recording's folder, its folder name, or the time it
         starts with (2026-11-06-1430). transcribe and speakers wait until the

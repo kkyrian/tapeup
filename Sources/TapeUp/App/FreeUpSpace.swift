@@ -33,8 +33,6 @@ struct SpaceFilter: Equatable {
     }
 
     var age = Age.all
-    /// On, the page lists the kept recordings instead, which it never clears.
-    var kept = false
 }
 
 extension AppModel {

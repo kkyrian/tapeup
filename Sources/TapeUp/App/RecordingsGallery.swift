@@ -77,8 +77,9 @@ enum RecordingsGallery {
         shoot("s1-space")
         model.spaceFilter.age = .threeMonths
         shoot("s2-space-older")
-        model.spaceFilter = SpaceFilter(age: .all, kept: true)
-        shoot("s3-space-kept")
+        // Older than a month: the locked one, apart, under those that go.
+        model.spaceFilter.age = .month
+        shoot("s3-space-month")
         model.spaceFilter = SpaceFilter()
         FreeUpSpaceView.staged = .removeAudio
         shoot("s4-space-confirm")
