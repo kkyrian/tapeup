@@ -47,9 +47,9 @@ When you stop recording, tap how many people were on the call. Once the
 transcript is ready, TapeUp finds that many voices and shows a line each
 one said. Play a voice to hear who it is, then pick their name.
 
-TapeUp remembers the voices you name. The next time you meet the same
-people, it fills in their names for you. Voices stay on your Mac and are
-never sent to your agent.
+TapeUp remembers the voices you name. In later meetings, it fills in the
+names of voices it recognizes. If a name is wrong, pick the right person.
+Voices stay on your Mac and are never sent to your agent.
 
 If you wear headphones, TapeUp marks your own lines as yours from the start.
 
@@ -60,8 +60,8 @@ If you wear headphones, TapeUp marks your own lines as yours from the start.
 
 Each recording is a folder with its audio and transcript. Click **Copy
 path** and paste it into your agent of choice (for example, Claude Code or
-Codex). Your agent reads the transcript and can answer anything about the
-meeting.
+Codex). Your agent reads the transcript and answers your questions about
+the meeting.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset=".github/images/handoff-dark.gif">
@@ -93,8 +93,8 @@ transcribes all the ones that need it.
 
 ### Free up space
 
-Remove the audio from old meetings and keep their transcripts, names and
-voices. In the TapeUp panel, choose **Free Up Space…** from the ··· menu. It
+Move the audio of old meetings to the Trash and keep their transcripts and
+speaker names. In the TapeUp panel, choose **Free Up Space…** from the ··· menu. It
 shows which recordings will lose their audio before you confirm. Each
 recording there has a lock: lock it to keep its audio.
 
