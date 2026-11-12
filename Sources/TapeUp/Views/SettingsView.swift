@@ -87,7 +87,7 @@ struct SettingsView: View {
                 LinkButton("Forget all") { forgetting = true }.padding(.trailing, -6)
             }
         }
-        .hoverHelp("Names you give voices teach TapeUp to fill them in next time")
+        .hoverHelp("Kept on this Mac only, never sent to your agent")
     }
 
     private var canMoveFolder: Bool { model.phase == .idle && !model.movingRecordings }

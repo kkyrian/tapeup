@@ -13,6 +13,8 @@ struct RecordingRow: View {
         case dense
         /// Weekday and day over two lines, for the one-line look while searching.
         case weekday
+        /// One line with the month and day, for a list without month headings.
+        case monthDay
     }
 
     let entry: RecordingEntry
@@ -23,6 +25,9 @@ struct RecordingRow: View {
     var excerpt: RecordingSearch.Excerpt?
     /// In place of the length at rest: the audio's size, on Free up space.
     var size: String?
+    /// Off where moving the whole recording to the Trash would surprise:
+    /// Free up space, which clears audio only.
+    var trashable = true
     /// Set by the gallery: the row for this folder draws as if hovered.
     @MainActor static var staged: String?
     @State private var hovering = false
@@ -36,7 +41,7 @@ struct RecordingRow: View {
                 .font(.system(size: 12).monospacedDigit())
                 .foregroundStyle(.secondary)
                 .frame(width: leadingWidth, alignment: .leading)
-            if look == .dense {
+            if look == .dense || look == .monthDay {
                 denseText
             } else {
                 VStack(alignment: .leading, spacing: 2) {
@@ -80,7 +85,7 @@ struct RecordingRow: View {
                             }
                             Text(size ?? Format.length(entry.duration)).font(.system(size: 11).monospacedDigit())
                         }
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(size == nil ? .tertiary : .secondary)
                         .accessibilityElement(children: .combine)
                         .accessibilityLabel(
                             (size ?? Format.length(entry.duration)) + (entry.hasAudio ? "" : ", transcript only")
@@ -91,7 +96,9 @@ struct RecordingRow: View {
                 HStack(spacing: 0) {
                     IconButton(symbol: copied ? "checkmark" : "link", help: "Copy path", size: 22, action: copy)
                     IconButton(symbol: "folder", help: "Show in Finder", size: 22) { model.reveal(entry) }
-                    IconButton(symbol: "trash", help: "Move to Trash", size: 22) { model.trash(entry) }
+                    if trashable {
+                        IconButton(symbol: "trash", help: "Move to Trash", size: 22) { model.trash(entry) }
+                    }
                 }
                 .opacity(hovered || copied ? 1 : 0)
                 .allowsHitTesting(hovered || copied)
@@ -101,8 +108,8 @@ struct RecordingRow: View {
             .animation(.easeOut(duration: 0.12), value: hovering)
         }
         .padding(.horizontal, 6)
-        .padding(.vertical, look == .dense ? 2 : 6)
-        .frame(minHeight: look == .dense ? 24 : 28)
+        .padding(.vertical, look == .dense || look == .monthDay ? 2 : 6)
+        .frame(minHeight: look == .dense || look == .monthDay ? 24 : 28)
         .background(hovered ? Style.fill : .clear, in: .rect(cornerRadius: 6, style: .continuous))
         .contentShape(.rect)
         .onHover { hovering = $0 }
@@ -123,7 +130,7 @@ struct RecordingRow: View {
                     model.removeAudio(entry)
                 }
             }
-            Button("Move to Trash") { model.trash(entry) }
+            if trashable { Button("Move to Trash") { model.trash(entry) } }
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(
@@ -179,6 +186,7 @@ struct RecordingRow: View {
         switch look {
         case .time: Format.time(entry.started)
         case .dense, .weekday: Format.weekdayDay(entry.started)
+        case .monthDay: Format.monthDay(entry.started)
         }
     }
 
@@ -186,6 +194,7 @@ struct RecordingRow: View {
         switch look {
         case .time: Format.timeColumnWidth
         case .dense, .weekday: Format.weekdayDayColumnWidth
+        case .monthDay: Format.monthDayColumnWidth
         }
     }
 

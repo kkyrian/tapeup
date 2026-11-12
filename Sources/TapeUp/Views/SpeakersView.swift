@@ -195,12 +195,16 @@ private struct PastFillStrip: View {
         if let offer = model.speakers.offer, offer.stamp == stamp {
             VStack(alignment: .leading, spacing: 6) {
                 Text(
-                    "\(offer.from) was also filled in for this voice in \(count(offer.hits.count)), and nobody checked \(offer.hits.count == 1 ? "it" : "them"). Change \(offer.hits.count == 1 ? "it" : "them") to \(offer.to)?"
+                    "TapeUp also filled in \(offer.from) for a similar voice in \(count(offer.hits.count)). Change \(offer.hits.count == 1 ? "it" : "them") to \(offer.to)?"
                 )
                 .font(.system(size: 11))
                 .fixedSize(horizontal: false, vertical: true)
-                ForEach(offer.hits, id: \.stamp) { hit in
+                // Three at most, newest first; Change all covers the rest.
+                ForEach(offer.hits.sorted { $0.stamp > $1.stamp }.prefix(3), id: \.stamp) { hit in
                     PastFillRow(model: model, hit: hit, single: offer.hits.count == 1)
+                }
+                if offer.hits.count > 3 {
+                    Text("and \(offer.hits.count - 3) more").font(.system(size: 11)).foregroundStyle(.secondary)
                 }
                 HStack(spacing: 10) {
                     LinkButton(offer.hits.count == 1 ? "Change it" : "Change all \(offer.hits.count)") {

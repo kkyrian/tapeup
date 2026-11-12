@@ -51,12 +51,8 @@ struct FreeUpSpaceView: View {
 
     private func chips(unkept: [RecordingEntry], kept: [RecordingEntry]) -> some View {
         FlowLayout(spacing: 6, lineSpacing: 6) {
-            // An age nothing is past yet has no chip; the one picked always shows.
-            ForEach(
-                SpaceFilter.Age.allCases.filter { age in
-                    age == .all || age == filter.age || unkept.contains { age.matches($0) }
-                }, id: \.self
-            ) { age in
+            // Every chip always, so the rows never reflow as counts change.
+            ForEach(SpaceFilter.Age.allCases, id: \.self) { age in
                 FilterChip(
                     title: age.title, count: unkept.filter { age.matches($0) }.count,
                     on: !filter.kept && filter.age == age
@@ -91,8 +87,8 @@ struct FreeUpSpaceView: View {
                             heading(group, entries).padding(.top, index == 0 ? 2 : 14).padding(.bottom, 2)
                             ForEach(entries.sorted { $0.started > $1.started }) { entry in
                                 RecordingRow(
-                                    entry: entry, model: model, look: .dense,
-                                    size: Format.size(model.audioBytes(entry)))
+                                    entry: entry, model: model, look: .monthDay,
+                                    size: Format.size(model.audioBytes(entry)), trashable: false)
                             }
                         }
                     }
@@ -109,19 +105,30 @@ struct FreeUpSpaceView: View {
         return "No recording holds audio"
     }
 
-    /// The group's name and count, with what it needs before its audio can go.
+    /// The group's name and count, then, for a group not ready yet, why
+    /// and what to do first.
     private func heading(_ group: AppModel.SpaceGroup, _ entries: [RecordingEntry]) -> some View {
         let bytes = entries.reduce(0) { $0 + model.audioBytes($1) }
-        return HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Text(title(group)).font(.system(size: 13, weight: .semibold)).lineLimit(1).layoutPriority(1)
-            Text("\(entries.count)")
-                .font(.system(size: 11).monospacedDigit()).foregroundStyle(.tertiary)
-                .hoverHelp("\(Format.size(bytes)) of audio")
-            Spacer(minLength: 4)
-            if !filter.kept { groupActions(group, entries) }
+        return VStack(alignment: .leading, spacing: 1) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(title(group)).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                Text("\(entries.count) · \(Format.size(bytes))")
+                    .font(.system(size: 11).monospacedDigit()).foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .frame(height: 20)
+            if !filter.kept, group != .ready {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(group == .unlabeled ? "Labeling needs the audio" : "Only audio, so far")
+                        .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+                    Spacer(minLength: 0)
+                    groupActions(group, entries)
+                }
+                .frame(height: 18)
+            }
         }
         .padding(.horizontal, 6)
-        .frame(height: 20)
     }
 
     private func title(_ group: AppModel.SpaceGroup) -> String {
@@ -157,7 +164,7 @@ struct FreeUpSpaceView: View {
             } else {
                 LinkButton("Transcribe") { model.makeTranscripts(waiting) }
                     .hoverHelp("Make their transcripts first; speakers are labeled with them")
-                LinkButton("Trash…") { confirming = .trashUntranscribed }
+                LinkButton("Trash them…") { confirming = .trashUntranscribed }
                     .hoverHelp("Move these recordings to the Trash: without a transcript, the audio is all they have")
             }
         }
@@ -174,11 +181,13 @@ struct FreeUpSpaceView: View {
             filter.kept
             ? [] : (groups[.untranscribed] ?? []).filter { !model.transcription.isWorking(on: $0) }
         VStack(alignment: .leading, spacing: 6) {
+            // Two lines' room always, so confirming never moves the action.
             line(ready: ready, untranscribed: untranscribed, groups: groups)
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .frame(height: 14, alignment: .leading)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(height: 28, alignment: .bottomLeading)
             switch confirming {
             case .removeAudio where !ready.isEmpty:
                 HStack(spacing: 8) {
@@ -216,12 +225,16 @@ struct FreeUpSpaceView: View {
         switch confirming {
         case .removeAudio where !ready.isEmpty:
             let unnamed = ready.filter(model.hasUnnamedVoices).count
+            let bytes = ready.reduce(0) { $0 + model.audioBytes($1) }
             Text(
-                unnamed > 0
-                    ? "Transcripts stay. \(unnamed) have voices you can't play after."
-                    : "Remove audio from \(ready.count)? Transcripts and names stay.")
+                "Remove audio from \(ready.count) (\(Format.size(bytes)))?\n"
+                    + (unnamed > 0
+                        ? "Transcripts stay; unnamed voices in \(unnamed) lose replay."
+                        : "Transcripts, names and voices stay."))
         case .trashUntranscribed where !untranscribed.isEmpty:
-            Text("Move \(untranscribed.count) with no transcript to the Trash?")
+            Text(
+                "Move \(untranscribed.count) recording\(untranscribed.count == 1 ? "" : "s") to the Trash?\n"
+                    + "They have no transcript, so nothing stays.")
         default:
             if let freed = model.freedAudio {
                 HStack(spacing: 2) {

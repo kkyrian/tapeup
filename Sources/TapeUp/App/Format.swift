@@ -63,6 +63,25 @@ enum Format {
     /// "Sat 8", for a line under its month.
     static func weekdayDay(_ date: Date) -> String { date.formatted(.dateTime.weekday(.abbreviated).day()) }
 
+    /// A date in a list without month headings: "Nov 11", or "11/3/25" in another year.
+    static func monthDay(_ date: Date, now: Date = Date()) -> String {
+        Calendar.current.isDate(date, equalTo: now, toGranularity: .year)
+            ? date.formatted(.dateTime.month(.abbreviated).day())
+            : date.formatted(.dateTime.month(.defaultDigits).day().year(.twoDigits))
+    }
+
+    /// The width of the widest such date, so a column of them lines up.
+    static let monthDayColumnWidth: CGFloat = {
+        let font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .regular)
+        let samples = (1...12).map { month in
+            Calendar.current.date(from: DateComponents(year: 2026, month: month, day: 28))!
+        }
+        let widths =
+            samples.map { (monthDay($0, now: $0) as NSString).size(withAttributes: [.font: font]).width }
+            + [(monthDay(samples[11], now: Date.distantFuture) as NSString).size(withAttributes: [.font: font]).width]
+        return ceil(widths.max() ?? 0) + 2
+    }()
+
     /// A month heading: "November", or "October 2025" in another year.
     static func month(_ date: Date, now: Date = Date()) -> String {
         Calendar.current.isDate(date, equalTo: now, toGranularity: .year)

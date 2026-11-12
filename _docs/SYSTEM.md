@@ -98,6 +98,22 @@ TU-014, TU-019, TU-036).
   and the row's quote follows the line being heard. It stops with the
   card, the panel, a recount or a recording starting, and cannot start
   while recording, since the computer-audio tap would hear it. (TU-017, TU-031, TU-032)
+- **Remembered voices:** `.voices.json` in the recordings root keeps, per
+  person on the People list, up to 20 voice prints (the longest talkers)
+  from voices a person named or confirmed, and "not me" prints from
+  corrections. After labeling, each voice is scored against each person
+  (mean of the three best example cosines); a voice is filled in when it
+  clears that person's bar (0.50, raised by corrections up to 0.85), leads
+  the next person by 0.25, talked 30 s or more, and no other voice in the
+  meeting took that person. The numbers come from 40 AMI meetings. A fill
+  puts the person in who was there but never adds anyone to the People list
+  and never teaches the store; playing that voice, or naming another voice
+  in the meeting, confirms it. Changing a fill records "not me", takes the
+  person out of who was there if the fill put them there, and offers the
+  same fix for unchecked fills of that person in earlier meetings, nothing
+  changed without a click. Removing a person forgets their voice; Settings
+  shows the count and Forget all. Agents never receive the prints. The
+  user's agent titles recordings only (TU-039).
 - **Made titles:** once the transcript is done, a recording the user has
   not named is named from lines sampled evenly across it (about 6,000
   characters), in the Mac's language: by the user's agent when one is on,
@@ -211,7 +227,16 @@ from a row's right-click menu); the card then says Transcript only, a row
 marks it with a page glyph before its length, Copy path leaves out the
 audio line, and what needs sound (playing a voice, labeling speakers)
 hides (TU-037). Who was there (a count, optional names suggested from past
-recordings) is optional and never delays saving.
+recordings) is optional and never delays saving. A lock beside Remove
+audio keeps a recording's audio (`keep_audio` in `meta.json`). Free up
+space, from ···, lists recordings that still hold audio by age, in three
+groups: ready, speakers not labeled (label first), and no transcript
+(transcribe first, or move the whole recording to the Trash after one
+more click). One action removes the ready ones' audio after a confirming
+click, with Undo; kept recordings are left out (TU-038). Renaming a person
+on the People page renames them in every recording, the labeled
+transcripts and the voice store at once, with Undo; renaming onto a listed
+name asks to merge (TU-040).
 
 ## Design Decisions
 
