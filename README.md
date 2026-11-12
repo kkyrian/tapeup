@@ -1,10 +1,3 @@
-**Status**: implemented
-**Prior art**: None
-**Supersedes**: None
-**Implements**: [_docs/SYSTEM.md](_docs/SYSTEM.md) — the app and recording-folder design
-**Extends**: None
-**Related**: [LICENSE](LICENSE) — MIT license
-
 <p align="center">
   <img src=".github/images/icon.png" width="96" height="96" alt="">
 </p>
@@ -133,7 +126,7 @@ Names with a word on who they are. Add them here, or press
 **Fill from your AI** and your agent writes the list.
 
 The list feeds the name suggestions, and transcripts spell those names
-right.
+right. Rename someone and every recording follows.
 
 <br clear="all">
 <br>
@@ -157,6 +150,7 @@ they're said.
 - **Switch devices.** AirPods in or out mid-call, and it keeps recording.
 - **Nothing lost.** Audio is written as it records, so a crash keeps the meeting.
 - **Free up space.** Clear the audio of old meetings in one go, transcripts kept.
+  Lock the ones whose audio you want to keep.
 - **Private.** Recording and transcription run on your Mac, in 52 languages.
   Only the agent you pick sees a transcript.
 
@@ -179,9 +173,10 @@ each one means, and TapeUp has a command line they can use.
 
 ## Command line
 
-Your agent can work on saved recordings with TapeUp's own command line:
-`/Applications/TapeUp.app/Contents/MacOS/TapeUp help`. These examples use
-`TapeUp` for that path.
+Your agent can do on saved recordings what you do in the app: import,
+transcribe, label speakers, name voices, keep the people list, free up
+space. Its `help` starts with examples, and its results say what to run
+next.
 
 ```text
 TapeUp folder [<path> [--move]]
@@ -200,45 +195,12 @@ TapeUp keep <recording>
 TapeUp agent [off] [--model M] [--effort E]
 ```
 
-Give a recording's folder, folder name, start time (`2026-11-06-1430`),
-or `latest`: the recording that started most recently, excluding one still
-recording. An import uses the file’s date; use the stamp it prints, not
-`latest`, for later commands. Import copies one audio or
-video file in, leaves the original, then transcribes and labels its speakers.
-It waits until everything is ready. Running the same import again keeps the
-first copy and finishes any missing work. Allow a long timeout or run in
-the background. After interruption, missing stages resume; a transcript
-restarts. A duplicate import reports an ignored `--title` and the existing title.
-`speakers` keeps existing labels and names unless you ask for a different
-voice count with `--voices`. A changed count can change voice numbers; names
-follow a clear majority of their earlier lines. An ambiguous merge can leave
-a voice unnamed, so review the voices afterward.
+`TapeUp` is `/Applications/TapeUp.app/Contents/MacOS/TapeUp`. A recording
+is its folder, its start time (`2026-11-06-1430`) or `latest`. While the
+app is open, commands go through it, so its list and Undo keep up.
 
-`voices` gives each voice's number, name, where the name came from, talk time
-and a quote. Name a voice only when the user said who it is: TapeUp learns
-that person's voice from it. It changes only that voice; other fills stay
-unchecked. Give `""` to clear a name. Placeholder names are refused. Correcting a name
-TapeUp filled in lists similar earlier fills for the user to review; it
-changes none of them by itself. Each offered correction includes the exact
-`voices name` command with a stale-fill guard; ask the user before running
-it. Its name changes only the reviewed voice.
-
-Change people with `TapeUp people`: renames follow through recordings and
-remembered voices. A rename prints its reverse command. Ask the user whether
-two listed names are the same person before using `--merge`; merges and
-removals cannot be undone from the command line. Removing a person
-forgets their voice and leaves past recordings' names. `remove-audio` moves
-audio to the Trash once its transcript is complete, its speakers are labeled
-and nothing is using it. The result gives its Trash path; Finder's Put Back
-restores it. `keep` locks audio against removal. Only the user unlocks it in
-Free up space.
-
-`Next:` suggests a likely next step; run it only if it serves the request.
-Commands in results use the running executable's path unless it is on PATH. Use `--json` when
-branching in code, and plain output when reading or telling the user. JSON
-mode gives one object on stdout or one error object on stderr, without
-progress. Voice listings contain a `voices` array; when names are missing,
-`next` asks the user who they are before showing a command shape. While the app runs, commands go through it so its list and Undo follow along. Recordings start in the app.
+Your agent names a voice only after you tell it who that is. It can lock
+a recording's audio but never unlock it. Recordings start in the app.
 
 ## First launch
 
@@ -288,12 +250,3 @@ Issues and pull requests are welcome.
 ## License
 
 MIT. See [LICENSE](LICENSE).
-
-## How to update this document
-
-Keep the examples aligned with `TapeUp help` and describe what people can do
-with the released app. Keep architecture in `_docs/SYSTEM.md`.
-
-## Open Questions
-
-None currently.

@@ -101,7 +101,9 @@ update both sides of the lineage. Backfill missing fields or sections when an
 artifact is encountered.
 
 Generated files, upstream-owned files, licensed non-editable files, and
-finished output documents are exempt. Raw source captures are also exempt:
+finished output documents are exempt. So is `README.md`: it is the GitHub
+homepage, written for people trying the app; keep its command list aligned
+with `TapeUp help` and leave the details to the help and the agents guide. Raw source captures are also exempt:
 preserve them verbatim and add
 `> Raw source material — exempt from artifact rules; consumed by: <link(s)>`
 when a consuming artifact exists.
