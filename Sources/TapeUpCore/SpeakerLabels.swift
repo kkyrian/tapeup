@@ -247,6 +247,22 @@ public enum SpeakerLabels {
     }
 }
 
+/// How a named voice was assigned. Missing provenance in older files means
+/// the person chose it; only `filled` remains unconfirmed.
+public struct SpeakerProvenance: Sendable, Equatable, Codable {
+    public enum Origin: String, Sendable, Codable { case person, filled, confirmed }
+    public var origin: Origin
+    public var addedToWhoWasThere: Bool
+    /// Acoustic score at fill time, before the store learns this example.
+    public var similarity: Float?
+
+    public init(origin: Origin, addedToWhoWasThere: Bool = false, similarity: Float? = nil) {
+        self.origin = origin
+        self.addedToWhoWasThere = addedToWhoWasThere
+        self.similarity = similarity
+    }
+}
+
 /// A recording's speaker labels: what the model found and the names the
 /// user gave. Kept hidden beside the labeled transcript so a rename rewrites
 /// it without running the model again.
@@ -258,6 +274,11 @@ public struct SpeakerResult: Sendable, Equatable, Codable {
     /// Each transcript line's voice, in line order.
     public var assigned: [Int?]
     public var names: [Int: String] = [:]
+    public var provenance: [Int: SpeakerProvenance] = [:]
+
+    public func provenance(for voice: Int) -> SpeakerProvenance {
+        provenance[voice] ?? SpeakerProvenance(origin: .person)
+    }
     /// Names the user's agent suggested for voices the user has not named,
     /// shown until the user takes or replaces them. A recount drops them.
     public var suggested: [Int: String] = [:]
@@ -281,6 +302,10 @@ public struct SpeakerResult: Sendable, Equatable, Codable {
         names = try values.decodeIfPresent([Int: String].self, forKey: .names) ?? [:]
         suggested = try values.decodeIfPresent([Int: String].self, forKey: .suggested) ?? [:]
         folded = try values.decodeIfPresent(Int.self, forKey: .folded)
+        provenance = try values.decodeIfPresent([Int: SpeakerProvenance].self, forKey: .provenance) ?? [:]
+        for voice in names.keys where provenance[voice] == nil {
+            provenance[voice] = SpeakerProvenance(origin: .person)
+        }
     }
 }
 
@@ -329,18 +354,60 @@ extension SpeakerLabels {
     /// same people, and saves it.
     @discardableResult
     public static func relabel(_ heard: VoicePrints, count: Int?, in folder: URL) throws -> SpeakerResult {
-        guard let lines = TranscriptDocument.lines(in: folder) else { throw CocoaError(.fileNoSuchFile) }
-        var labeled = label(lines: lines, heard: heard, count: count)
-        if let earlier = result(in: folder) {
-            if earlier.assigned.count == lines.count {
-                labeled.names = carry(earlier.names, from: earlier.assigned, to: labeled.assigned, lines: lines)
-            } else if earlier.voices.count == labeled.voices.count {
-                // The transcript was made again: the same voices, numbered by talk time as before.
-                labeled.names = earlier.names
+        try VoiceFiles.locked {
+            guard let lines = TranscriptDocument.lines(in: folder) else { throw CocoaError(.fileNoSuchFile) }
+            var labeled = label(lines: lines, heard: heard, count: count)
+            var writes: [(URL, Data?)] = []
+            if let data = try VoiceFiles.read(folder.appendingPathComponent(resultFileName)) {
+                let earlier = try JSONDecoder().decode(SpeakerResult.self, from: data)
+                guard Set(earlier.voices.map(\.id)).count == earlier.voices.count else {
+                    throw CocoaError(.fileReadCorruptFile)
+                }
+                var moved: [Int: Int] = [:]
+                var chosen: [Int: Int] = [:]
+                if earlier.assigned.count == lines.count {
+                    let identities = Dictionary(uniqueKeysWithValues: earlier.voices.map { ($0.id, String($0.id)) })
+                    let namedIdentities = Dictionary(uniqueKeysWithValues: earlier.names.keys.map { ($0, String($0)) })
+                    for (new, old) in carry(identities, from: earlier.assigned, to: labeled.assigned, lines: lines) {
+                        if let old = Int(old) { moved[old] = new }
+                    }
+                    for (new, old) in carry(namedIdentities, from: earlier.assigned, to: labeled.assigned, lines: lines)
+                    {
+                        if let old = Int(old) {
+                            chosen[old] = new
+                            labeled.names[new] = earlier.names[old]
+                            labeled.provenance[new] = earlier.provenance(for: old)
+                        }
+                    }
+                } else if earlier.voices.count == labeled.voices.count {
+                    // A new transcript, with the same voice numbers.
+                    labeled.names = earlier.names
+                    labeled.provenance = earlier.provenance
+                    moved = Dictionary(uniqueKeysWithValues: earlier.voices.map { ($0.id, $0.id) })
+                    chosen = moved
+                }
+                let root = folder.deletingLastPathComponent().deletingLastPathComponent()
+                if try VoiceFiles.read(VoiceStore.url(in: root)) != nil {
+                    var store = try VoiceStore.loadChecked(from: root)
+                    let before = store
+                    store.relabel(
+                        stamp: RecordingLibrary.stamp(of: folder), voices: moved, chosen: chosen, names: labeled.names)
+                    if store != before { writes.append((VoiceStore.url(in: root), try JSONEncoder().encode(store))) }
+                }
             }
+            let meta = try VoiceFiles.object(MetaFile.url(in: folder))
+            var updated = meta
+            var labels = updated["speaker_labels"] as? [String: Any] ?? [:]
+            labels["status"] = "done"
+            labels["file"] = fileName
+            labels["voices"] = labeled.count
+            labels["voices_estimated"] = labeled.estimated
+            labels["error"] = nil
+            updated["speaker_labels"] = labels
+            writes += try VoiceFiles.speakerWrites(labeled, lines: lines, meta: updated, folder: folder)
+            _ = try VoiceFiles.apply(writes)
+            return labeled
         }
-        try save(labeled, lines: lines, in: folder)
-        return labeled
     }
 
     /// Labels a transcript made again, when it had speaker labels, with the
@@ -358,6 +425,7 @@ extension SpeakerLabels {
             throw CocoaError(.fileNoSuchFile)
         }
         result.names[voice] = name
+        result.provenance[voice] = name == nil ? nil : SpeakerProvenance(origin: .person)
         // A name is on one voice only, suggested or given.
         result.suggested = result.suggested.filter { $0.key != voice && $0.value != name }
         try save(result, lines: lines, in: folder)
@@ -387,6 +455,7 @@ extension SpeakerLabels {
         for (voice, name) in result.suggested.sorted(by: { $0.key < $1.key })
         where result.names[voice] == nil && taken.insert(name).inserted {
             result.names[voice] = name
+            result.provenance[voice] = SpeakerProvenance(origin: .person)
         }
         result.suggested = [:]
         try save(result, lines: lines, in: folder)

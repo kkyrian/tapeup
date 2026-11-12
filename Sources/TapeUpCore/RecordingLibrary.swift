@@ -150,7 +150,7 @@ public struct RecordingLibrary: Sendable {
             try manager.moveItem(at: folder, to: to)
             moved += 1
         }
-        for file in [PeopleList.fileName, "AGENTS.md"] {
+        for file in [PeopleList.fileName, VoiceStore.fileName, "AGENTS.md"] {
             let from = root.appendingPathComponent(file)
             let to = destination.appendingPathComponent(file)
             if manager.fileExists(atPath: from.path), !manager.fileExists(atPath: to.path) {
