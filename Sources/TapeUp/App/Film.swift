@@ -150,7 +150,7 @@ private final class Recording: NSObject, SCRecordingOutputDelegate {
 // MARK: The stage
 
 /// What the stage shows besides the panel: the pointer, the menu-bar item,
-/// a drawn menu and a terminal.
+/// a drawn menu, hover help and a terminal.
 @MainActor @Observable
 final class Director {
     var cursor = CGPoint(x: 330, y: 220)
@@ -162,12 +162,8 @@ final class Director {
     var terminal: [String]?
     /// The terminal's input line while it is being typed.
     var typing: String?
-    /// A call going on in another app, under everything.
-    var call = false
-    /// Keys just pressed, shown large as a keystroke viewer would.
-    var keys: String?
-    /// The floating controls, centered under the menu bar.
-    var pill = false
+    /// Hover help under the pointer, as the app's own shows it.
+    var help: String?
     /// The Import window, open on the stage, and its height as laid out.
     var importing: Imports?
     var importHeight: CGFloat = 0
@@ -203,18 +199,6 @@ final class Take {
 
     /// Where the panel's top-left corner sits on the stage.
     var panelOrigin: CGPoint { CGPoint(x: size.width - Stage.inset - PanelView.width - 18, y: Stage.inset + 26 + 6) }
-    /// Where the floating controls sit: centered under the menu bar.
-    static func pillOrigin(_ size: CGSize) -> CGPoint {
-        CGPoint(x: (size.width - FloatingControlsView.width) / 2, y: Stage.inset + 26 + 10)
-    }
-    var pauseButton: CGPoint {
-        let origin = Self.pillOrigin(size)
-        return CGPoint(x: origin.x + FloatingControlsView.width - 38, y: origin.y + 15)
-    }
-    var stopButton: CGPoint {
-        let origin = Self.pillOrigin(size)
-        return CGPoint(x: origin.x + FloatingControlsView.width - 15, y: origin.y + 15)
-    }
     /// Where the Finder window and the Import window sit on the stage.
     static let finderOrigin = CGPoint(x: 30, y: 120)
     static func importOrigin(_ size: CGSize) -> CGPoint {
@@ -307,6 +291,29 @@ final class Take {
         await pause(0.1)
     }
 
+    /// Clicks a named control with the mouse events a person's click sends,
+    /// as the UI test does, for a control whose effect lives in its view.
+    func click(target name: String) async {
+        guard let frame = ClickTargets.frame(name) else { return print("  no control named \(name)") }
+        // SwiftUI's frames run down from the top; the window's run up.
+        let point = NSPoint(x: frame.midX, y: host.bounds.height - frame.midY)
+        func send(_ type: NSEvent.EventType) {
+            guard
+                let event = NSEvent.mouseEvent(
+                    with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                    windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1,
+                    pressure: type == .leftMouseDown ? 1 : 0)
+            else { return }
+            window.sendEvent(event)
+        }
+        withAnimation(.easeOut(duration: 0.08)) { director.pressing = true }
+        send(.leftMouseDown)
+        await pause(0.12)
+        send(.leftMouseUp)
+        withAnimation(.easeOut(duration: 0.12)) { director.pressing = false }
+        await pause(0.1)
+    }
+
     /// Clicks the menu-bar item: it darkens, and the panel opens.
     func openPanel() async {
         await move(to: item, 0.65)
@@ -350,7 +357,7 @@ final class Take {
     func pickFromMore(_ item: String, then action: () -> Void) async {
         await pick(
             item, from: at(Spot.more),
-            items: ["Import…", "People…", "Settings…", "-", "Check for Updates…", "Quit TapeUp ⌘Q"],
+            items: ["Import…", "People…", "Free Up Space…", "Settings…", "-", "Check for Updates…", "Quit TapeUp ⌘Q"],
             then: action)
     }
 
@@ -374,11 +381,6 @@ final class Take {
             editor.insertText(String(character), replacementRange: editor.selectedRange())
             await pause(perCharacter * Double.random(in: 0.7...1.3))
         }
-    }
-
-    /// Return in the focused field.
-    func pressReturn() {
-        (window.firstResponder as? NSTextView)?.doCommand(by: #selector(NSResponder.insertNewline(_:)))
     }
 
     /// Ends typing: the panel gives up the keyboard.
@@ -427,9 +429,7 @@ final class Take {
     }
 
     /// Stops the staged recording and shows its card, saving, then saved.
-    /// - Parameter showPanel: stopped from outside the panel, which then
-    ///   drops on its own with the saved recording, as after ⌥⌘R.
-    func stopRecording(title: String?, showPanel: Bool = false) async {
+    func stopRecording(title: String?) async {
         ticker?.invalidate()
         ticker = nil
         let duration = model.elapsed
@@ -455,12 +455,6 @@ final class Take {
         var finishing = entry
         finishing.transcript = .pending
         model.card = .init(entry: finishing, finishing: true, justRecorded: true)
-        if showPanel {
-            withAnimation(.easeOut(duration: 0.15)) {
-                director.itemPressed = true
-                director.panelOpen = true
-            }
-        }
         await pause(0.9)
         model.card = .init(entry: entry, finishing: false, justRecorded: true)
         guard let title else { return }
@@ -484,7 +478,7 @@ final class Take {
 }
 
 /// The made-up desktop: a screen with a menu bar, the panel under its item,
-/// a drawn menu, a terminal and the pointer, on the page GitHub shows.
+/// a drawn menu, hover help, a terminal and the pointer, on the page GitHub shows.
 struct Stage: View {
     static let inset: CGFloat = 12
     let model: AppModel
@@ -504,9 +498,6 @@ struct Stage: View {
             Shots.Palette.page(dark)
             ZStack(alignment: .topLeading) {
                 Shots.Palette.desktop(dark)
-                if director.call {
-                    CallWindow(dark: dark).padding(.leading, 18).padding(.top, 26 + 40)
-                }
                 if let lines = director.terminal {
                     Shots.Terminal(
                         text: lines.joined(separator: "\n"), typing: director.typing, compact: true, width: 740,
@@ -529,37 +520,22 @@ struct Stage: View {
                 }
                 Shots.MenuBar(dark: dark, status: status, wide: false, pressed: director.itemPressed)
                     .frame(width: size.width - Self.inset * 2, height: 26)
-                // Under the panel: opened later, the panel comes to the front.
-                if director.pill {
-                    FloatingControlsView(model: model, stop: {}, drag: { _, _ in })
-                        .background(Color(nsColor: .windowBackgroundColor), in: .capsule)
-                        .overlay(
-                            Capsule().strokeBorder(
-                                dark ? Color.white.opacity(0.14) : Color.black.opacity(0.08), lineWidth: 0.5)
-                        )
-                        .shadow(color: .black.opacity(dark ? 0.45 : 0.14), radius: 10, y: 4)
-                        .offset(x: Take.pillOrigin(size).x - Self.inset, y: Take.pillOrigin(size).y - Self.inset)
-                        .transition(.opacity)
-                }
                 if director.panelOpen {
                     panel
                         .offset(x: panelX - Self.inset, y: 26 + 6)
                         .transition(.opacity)
                 }
-                if let keys = director.keys {
-                    Text(keys)
-                        .font(.system(size: 30, weight: .medium))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 22)
-                        .padding(.vertical, 12)
-                        .background(Color.black.opacity(0.62), in: .rect(cornerRadius: 14, style: .continuous))
-                        .frame(width: size.width - Self.inset * 2)
-                        .offset(y: size.height - Self.inset * 2 - 110)
-                        .transition(.opacity)
-                }
                 if let menu = director.menu {
                     DrawnMenuView(menu: menu, dark: dark)
                         .offset(x: menu.origin.x - Self.inset, y: menu.origin.y - Self.inset)
+                        .transition(.opacity.animation(.easeOut(duration: 0.1)))
+                }
+                if let help = director.help {
+                    // Where HoverHelp puts it: just left of the pointer, under
+                    // it, kept on the stage as it is kept on the screen.
+                    let x = min(director.cursor.x - 4, size.width - Self.inset - DrawnHelp.size(help).width - 4)
+                    DrawnHelp(text: help, dark: dark)
+                        .offset(x: x - Self.inset, y: director.cursor.y - Self.inset + 24)
                         .transition(.opacity.animation(.easeOut(duration: 0.1)))
                 }
                 if let names = director.dragging {
@@ -617,6 +593,8 @@ struct Stage: View {
                 .scaleEffect(director.pressing ? 0.9 : 1, anchor: .topLeading)
         }
         .frame(width: 1, height: 1, alignment: .topLeading)
+        // Clicks sent to a control land on it, not on the pointer drawn over it.
+        .allowsHitTesting(false)
     }
 }
 
@@ -729,7 +707,7 @@ private struct DragGhost: View {
 
 /// A macOS menu, drawn: the ··· menu cannot open for real in a recording.
 struct DrawnMenuView: View {
-    static let width: CGFloat = 168
+    static let width: CGFloat = 184
     let menu: Director.DrawnMenu
     let dark: Bool
 
@@ -770,55 +748,30 @@ struct DrawnMenuView: View {
     private func highlighted(_ index: Int) -> Bool { menu.highlighted == index }
 }
 
-/// A video call in some other app: four people in tiles, no one's brand.
-private struct CallWindow: View {
+/// The app's hover help, drawn: its own window never gets into the movie.
+/// Sized as HoverHelp sizes it, wrapping past 320 points.
+private struct DrawnHelp: View {
+    let text: String
     let dark: Bool
-    private let people = [("Priya Shah", "PS"), ("José Ortiz", "JO"), ("Ana", "A"), ("You", "S")]
+
+    static func size(_ text: String) -> CGSize {
+        let bounds = (text as NSString).boundingRect(
+            with: NSSize(width: 320, height: 1000), options: [.usesLineFragmentOrigin],
+            attributes: [.font: NSFont.systemFont(ofSize: 11)])
+        return CGSize(width: ceil(bounds.width) + 16, height: ceil(bounds.height) + 8)
+    }
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 7) {
-                ForEach([Color.red, .yellow, .green], id: \.self) { color in
-                    Circle().fill(color.opacity(0.85)).frame(width: 11, height: 11)
-                }
-                Spacer()
-            }
-            .overlay(Text("Beta launch").font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary))
-            .padding(.horizontal, 12)
-            .frame(height: 30)
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: 6), GridItem(.flexible(), spacing: 6)], spacing: 6) {
-                ForEach(Array(people.enumerated()), id: \.offset) { index, person in
-                    ZStack(alignment: .bottomLeading) {
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(dark ? Color(white: 0.2) : Color(white: 0.86))
-                        Circle()
-                            .fill(dark ? Color(white: 0.32) : Color(white: 0.72))
-                            .frame(width: 46, height: 46)
-                            .overlay(Text(person.1).font(.system(size: 16, weight: .semibold)).foregroundStyle(.white))
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        Text(person.0)
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Color.black.opacity(0.4), in: .rect(cornerRadius: 4))
-                            .padding(6)
-                    }
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .strokeBorder(Color.green.opacity(index == 0 ? 0.9 : 0), lineWidth: 2)
-                    )
-                    .frame(height: 118)
-                }
-            }
-            .padding(6)
-        }
-        .frame(width: 420)
-        .background(dark ? Color(white: 0.12) : Color(white: 0.96), in: .rect(cornerRadius: 10, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(dark ? Color.white.opacity(0.12) : Color.black.opacity(0.1), lineWidth: 0.5)
-        )
-        .shadow(color: .black.opacity(dark ? 0.4 : 0.12), radius: 14, y: 6)
+        Text(text)
+            .font(.system(size: 11))
+            .foregroundStyle(.primary)
+            .multilineTextAlignment(.leading)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 4)
+            .frame(width: Self.size(text).width, height: Self.size(text).height)
+            .background(dark ? Color(white: 0.2) : Color(white: 0.97), in: .rect(cornerRadius: 5, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous).strokeBorder(.separator, lineWidth: 0.5))
+            .shadow(color: .black.opacity(dark ? 0.4 : 0.15), radius: 4, y: 2)
     }
 }

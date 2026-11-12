@@ -13,14 +13,10 @@ enum Spot {
     static let more = CGPoint(x: 292, y: 197)
     /// The first recording under Today.
     static let firstRow = CGPoint(x: 122, y: 231)
-    static func count(_ number: Int) -> CGPoint { CGPoint(x: 26 + CGFloat(number - 1) * 32, y: 161) }
-    static let names = CGPoint(x: 156, y: 197)
     static let copyPath = CGPoint(x: 72, y: 80)
     static let close = CGPoint(x: 18, y: 32)
     static let labelSpeakers = CGPoint(x: 55, y: 268)
     static func voice(_ number: Int) -> CGPoint { CGPoint(x: 45, y: 290 + CGFloat(number - 1) * 43) }
-    static let claudeCode = CGPoint(x: 79, y: 210)
-    static let addPerson = CGPoint(x: 80, y: 62)
 }
 
 /// The README's journeys, each from the menu bar to the result, as the
@@ -33,8 +29,7 @@ struct Journey {
     let script: @MainActor (Take) async -> Void
 
     static let all: [Journey] = [
-        record, floating, whoWasThere, handoff, people, settings, speakers, importing, importProgress, allRecordings,
-        probe,
+        record, handoff, speakers, space, importing, importProgress, allRecordings, probe,
     ]
 
     static var said: [String] { Shots.said.map(\.1) }
@@ -75,84 +70,6 @@ struct Journey {
             await take.click()
             await take.stopRecording(title: "Beta launch plan")
             await take.move(to: CGPoint(x: 250, y: 330), 0.8)
-            await take.pause(2.2)
-        })
-
-    /// In a call in another app: ⌥⌘R, a look at the words arriving in the
-    /// panel, then stop from the floating controls; the saved recording
-    /// drops from the menu bar.
-    static let floating = Journey(
-        name: "floating", size: CGSize(width: 640, height: 470),
-        setUp: { take in
-            take.hideNewest()
-            take.director.call = true
-            take.director.cursor = CGPoint(x: 300, y: 330)
-        },
-        script: { take in
-            await take.pause(0.5)
-            withAnimation(.easeOut(duration: 0.12)) { take.director.keys = "⌥ ⌘ R" }
-            await take.pause(0.25)
-            var wordsFrom: TimeInterval?
-            take.startRecording(from: 0) { elapsed in
-                // Nothing yet, then a few words at a time once the panel is open.
-                guard let from = wordsFrom else { return [] }
-                let words = said.prefix(3).joined(separator: " ").split(separator: " ")
-                let shown = min(words.count, max(0, Int((elapsed - from) / 0.75) + 1) * 3)
-                return Shots.lastTwoSentences(words.prefix(shown).joined(separator: " "))
-            }
-            withAnimation(.easeOut(duration: 0.25)) { take.director.pill = true }
-            await take.pause(0.6)
-            withAnimation(.easeOut(duration: 0.3)) { take.director.keys = nil }
-            await take.pause(0.6)
-            // The panel, as the words arrive in its Transcript row.
-            await take.openPanel()
-            await take.move(to: CGPoint(x: 120, y: 420), 0.5)
-            wordsFrom = take.model.elapsed
-            await take.pause(4.8)
-            withAnimation(.easeOut(duration: 0.12)) {
-                take.director.panelOpen = false
-                take.director.itemPressed = false
-            }
-            await take.pause(0.4)
-            await take.move(to: take.stopButton, 0.8)
-            await take.click()
-            withAnimation(.easeOut(duration: 0.15)) { take.director.pill = false }
-            await take.stopRecording(title: "Beta launch plan", showPanel: true)
-            await take.move(to: CGPoint(x: 200, y: 400), 0.8)
-            await take.pause(1.6)
-        })
-
-    /// Stop a long call, then say how many were there and who.
-    static let whoWasThere = Journey(
-        name: "who-was-there", size: CGSize(width: 420, height: 470),
-        setUp: { take in
-            take.hideNewest()
-            take.startRecording(from: 1912) { _ in [said[12], said[13]] }
-        },
-        script: { take in
-            await take.pause(0.15)
-            await take.openPanel()
-            await take.pause(0.6)
-            await take.move(toPanel: Spot.record, 0.6)
-            await take.click()
-            await take.stopRecording(title: "Beta launch plan")
-            await take.pause(0.3)
-            await take.move(toPanel: Spot.count(4), 0.6)
-            await take.click {
-                guard var people = take.model.card?.entry.people else { return }
-                people.count = 4
-                take.model.setPeople(people)
-            }
-            await take.move(toPanel: Spot.names, 0.5)
-            await take.click()
-            for (index, prefix) in ["pr", "jo", "an"].enumerated() {
-                await take.type(prefix, into: index == 0 ? "Participant names" : nil, perCharacter: 0.12)
-                await take.pause(0.45)
-                take.pressReturn()
-                await take.pause(0.4)
-            }
-            take.resignKeyboard()
-            await take.move(to: CGPoint(x: 250, y: 380), 0.8)
             await take.pause(2.2)
         })
 
@@ -220,51 +137,24 @@ struct Journey {
             await take.pause(3.5)
         })
 
-    /// ··· → People…, then add someone.
-    static let people = Journey(name: "people", size: CGSize(width: 420, height: 480)) { take in
-        await take.pause(0.15)
-        await take.openPanel()
-        await take.pause(0.5)
-        await take.pickFromMore("People…") { take.model.openPeople() }
-        await take.pause(0.6)
-        await take.move(toPanel: Spot.addPerson, 0.6)
-        await take.click()
-        await take.type("Nora Quinn", into: "Add a person")
-        await take.pause(0.3)
-        await take.type("sales", into: "Note")
-        await take.pause(0.4)
-        take.pressReturn()
-        take.resignKeyboard()
-        await take.move(to: CGPoint(x: 250, y: 380), 0.8)
-        await take.pause(2.2)
-    }
-
-    /// ··· → Settings…, then turn on Claude Code.
-    static let settings = Journey(name: "settings", size: CGSize(width: 420, height: 480)) { take in
-        await take.pause(0.15)
-        await take.openPanel()
-        await take.pause(0.5)
-        await take.pickFromMore("Settings…") { take.model.openSettings() }
-        await take.pause(0.7)
-        await take.move(toPanel: Spot.claudeCode, 0.7)
-        await take.click { take.model.agents.choose(.claude) }
-        await take.move(to: CGPoint(x: 250, y: 340), 0.8)
-        await take.pause(2.2)
-    }
-
-    /// Open a recording, label its speakers, play a voice and name it.
+    /// Name a voice once and later meetings fill it in. Label speakers on
+    /// the launch call: Voice 1 comes up as Priya Shah, named in yesterday's
+    /// design review. A listen checks her and the name stays; then José's
+    /// voice plays and is named from the menu.
     static let speakers = Journey(
         name: "speakers", size: CGSize(width: 420, height: 580),
         setUp: { take in
+            if let review = take.model.recent.first(where: { $0.title == "Design review" }) {
+                namePriya(in: review.folder)
+            }
             if let entry = take.model.recent.first(where: { $0.title == nil }) {
                 writeVoices(in: entry.folder)
-                // Silent: the film only needs the play buttons shown.
-                FileManager.default.createFile(atPath: entry.audio.path, contents: nil)
                 _ = try? RecordingLibrary.save(title: "Beta launch plan", in: entry.folder)
             }
             take.model.reload()
         },
         script: { take in
+            let speakers = take.model.speakers
             await take.pause(0.15)
             await take.openPanel()
             await take.pause(0.5)
@@ -274,35 +164,90 @@ struct Journey {
                 take.model.card = .init(entry: entry, finishing: false, justRecorded: false)
             }
             await take.pause(0.6)
+            // The real labeling: the voice store fills Priya in.
             await take.move(toPanel: Spot.labelSpeakers, 0.6)
             await take.click { take.model.labelSpeakers() }
             await take.pause(0.9)
-            // Play the first voice: its quote follows each line it said.
-            if let entry = take.model.card?.entry, let result = take.model.speakers.result(for: entry),
+            guard let entry = take.model.card?.entry, let result = speakers.result(for: entry),
                 let lines = TranscriptDocument.lines(in: entry.folder)
-            {
-                let heard = zip(lines, result.assigned).filter { $0.1 == 1 }.map(\.0.text)
-                await take.move(toTarget: "Play voice 1", 0.7)
-                await take.click { take.model.speakers.player.stage(1, in: entry, line: heard.first) }
-                for line in heard.dropFirst().prefix(1) {
-                    await take.pause(1.5)
-                    take.model.speakers.player.stage(1, in: entry, line: line)
-                }
-                await take.pause(1.3)
+            else { return }
+            func heard(_ voice: Int) -> [String] { zip(lines, result.assigned).filter { $0.1 == voice }.map(\.0.text) }
+            // Its name says where it came from, as SpeakersView's help does.
+            await take.move(toPanel: Spot.voice(1), 0.6)
+            await take.pause(0.25)
+            withAnimation(.easeOut(duration: 0.1)) {
+                take.director.help = "Filled in from their voice. Pick someone else if it's wrong"
             }
-            // Name it while it plays, then stop it.
-            if let entry = take.model.card?.entry {
-                let others = take.model.suggestions(matching: "", excluding: entry.people.names, limit: 12)
-                let items = entry.people.names + (others.isEmpty ? [] : ["-"] + others)
-                await take.pick("Priya Shah", from: take.at(Spot.voice(1)), items: items) {
-                    take.model.speakers.name(1, "Priya Shah", in: entry)
-                }
-                await take.pause(0.6)
-                await take.move(toTarget: "Play voice 1", 0.6)
-                await take.click { take.model.speakers.player.stop() }
+            await take.pause(2.0)
+            withAnimation(.easeOut(duration: 0.1)) { take.director.help = nil }
+            // A listen, as the play button runs it, checks the fill; the name stays.
+            await take.move(toTarget: "Play voice 1", 0.6)
+            await take.click {
+                speakers.confirm(1, in: entry)
+                speakers.player.stage(1, in: entry, line: heard(1).first)
             }
-            await take.move(to: take.at(CGPoint(x: 330, y: Spot.voice(3).y)), 0.6)
-            await take.pause(1.6)
+            for line in heard(1).dropFirst().prefix(1) {
+                await take.pause(1.4)
+                speakers.player.stage(1, in: entry, line: line)
+            }
+            await take.pause(1.2)
+            await take.click { speakers.player.stop() }
+            await take.pause(0.5)
+            // José answers the third line: play his voice, name it, stop it.
+            guard let jose = result.assigned[3] else { return }
+            await take.move(toTarget: "Play voice \(jose)", 0.7)
+            await take.click { speakers.player.stage(jose, in: entry, line: heard(jose).first) }
+            await take.pause(1.3)
+            let current = take.model.card?.entry ?? entry
+            let others = take.model.suggestions(matching: "", excluding: current.people.names, limit: 12)
+            let items = current.people.names + (others.isEmpty ? [] : ["-"] + others)
+            await take.pick("José Ortiz", from: take.at(Spot.voice(jose)), items: items) {
+                speakers.name(jose, "José Ortiz", in: current)
+            }
+            await take.pause(0.6)
+            await take.move(toTarget: "Play voice \(jose)", 0.6)
+            await take.click { speakers.player.stop() }
+            await take.move(to: take.at(CGPoint(x: 230, y: Spot.voice(jose).y + 60)), 0.7)
+            await take.pause(2.2)
+        })
+
+    /// ··· → Free Up Space…, the recordings over three months old, one kept
+    /// by its lock, and the rest's audio gone in one confirmed click, with
+    /// Undo. Their transcripts and names stay.
+    static let space = Journey(
+        name: "space", size: CGSize(width: 420, height: 620),
+        setUp: { take in
+            seedOldMeetings(take.root)
+            // Removed audio goes to a trash in the film's own home, gone with it.
+            Settings.store.set(
+                take.root.deletingLastPathComponent().appendingPathComponent("Trash").path, forKey: "fixtureTrash")
+            take.model.reload()
+        },
+        script: { take in
+            await take.pause(0.15)
+            await take.openPanel()
+            await take.pause(0.5)
+            await take.pickFromMore("Free Up Space…") { take.model.openFreeUpSpace() }
+            await take.pause(1.1)
+            await take.move(toTarget: "Over 3 months", 0.7)
+            await take.click(target: "Over 3 months")
+            await take.pause(1.3)
+            // An interview to listen to again: its lock keeps the audio.
+            if let kept = take.model.spaceCandidates.first(where: { $0.title == "User interview" }) {
+                let lock = "keep " + RecordingLibrary.stamp(of: kept.folder)
+                await take.move(toTarget: lock, 0.8)
+                await take.pause(0.2)
+                await take.click(target: lock)
+                await take.pause(1.5)
+            }
+            await take.move(toTarget: "Remove audio from ready", 0.8)
+            await take.click(target: "Remove audio from ready")
+            await take.pause(2.0)
+            await take.move(toTarget: "Confirm remove audio", 0.6)
+            await take.click(target: "Confirm remove audio")
+            await take.pause(0.3)
+            await take.move(to: take.at(CGPoint(x: 200, y: 420)), 0.8)
+            await take.pause(2.6)
         })
 
     /// Opens on the Import window beside the Finder, so the first frame says
@@ -487,12 +432,9 @@ struct Journey {
         await take.stopRecording(title: nil)
         await mark("card")
         take.model.closeCard()
-        take.model.openPeople()
-        await mark("people")
-        take.model.closePeople()
-        take.model.openSettings()
-        await mark("settings")
-        take.model.closeSettings()
+        take.model.openFreeUpSpace()
+        await mark("space")
+        take.model.closeFreeUpSpace()
         if let entry = take.model.recent.first(where: { $0.title == nil }) {
             writeVoices(in: entry.folder)
             take.model.card = .init(entry: entry, finishing: false, justRecorded: false)
@@ -504,15 +446,114 @@ struct Journey {
     /// Who said each sample line: Priya, Sam (the microphone), José, Ana.
     static let voiceOfLine = [0, 1, 0, 2, 0, 3, 1, 0, 1, 0, 3, 1, 0, 2]
 
+    /// A voice print as the speaker model writes one, unit length, its own
+    /// direction for each voice; `near` tips it a little toward another.
+    static func voicePrint(_ voice: Int, near other: Int? = nil) -> [Float] {
+        var print = [Float](repeating: 0, count: VoiceStore.dimensions)
+        print[voice] = 1
+        if let other { print[other] = 0.45 }
+        let length = sqrt(print.reduce(0) { $0 + $1 * $1 })
+        return print.map { $0 / length }
+    }
+
     /// Voices for the sample call as the speaker model would leave them,
-    /// so Label speakers finds them at once.
+    /// so Label speakers finds them at once. Each turn runs half a second
+    /// past its line, as the model hears a speaker's breath; that gives
+    /// Priya the half minute a remembered voice needs to be filled in, and
+    /// Sam, on the microphone, less, so only she is. Her print is close to
+    /// the one remembered from the design review, not the same.
     static func writeVoices(in folder: URL) {
         guard let lines = TranscriptDocument.lines(in: folder) else { return }
         let turns = lines.enumerated().map { index, line in
-            VoiceTurn(start: line.start, end: line.end, voice: voiceOfLine[index % voiceOfLine.count])
+            VoiceTurn(start: line.start - 0.5, end: line.end + 0.5, voice: voiceOfLine[index % voiceOfLine.count])
         }
         var prints: [Int: [Float]] = [:]
-        for voice in 0..<4 { prints[voice] = (0..<8).map { $0 == voice ? 1 : 0 } }
+        for voice in 0..<4 { prints[voice] = voicePrint(voice, near: voice == 0 ? 8 : nil) }
         try? VoicePrints(turns: turns, prints: prints).save(in: folder)
+    }
+
+    /// Yesterday's design review, labeled, with Priya's voice named by hand:
+    /// the voice store learns her the way it does in use.
+    static func namePriya(in folder: URL) {
+        let said = [
+            (0, 11.0, "Let's start with the onboarding screens, the second one first."),
+            (1, 6.0, "It still feels crowded to me."),
+            (0, 10.0, "Agreed. We could move the import step to the very end."),
+            (1, 7.0, "Then the first run is only the record button."),
+            (0, 9.0, "Good. Mei, can you mock that up for Thursday?"),
+            (0, 8.0, "And keep the settings out of the first run entirely."),
+        ]
+        var start = 3.0
+        var lines: [TranscriptLine] = []
+        var turns: [VoiceTurn] = []
+        for (voice, length, text) in said {
+            lines.append(TranscriptLine(start: start, end: start + length, text: text))
+            turns.append(VoiceTurn(start: start, end: start + length, voice: voice))
+            start += length + 1.5
+        }
+        let heard = VoicePrints(turns: turns, prints: [0: voicePrint(0), 1: voicePrint(5)])
+        try? TranscriptDocument.save(lines: lines, failures: 0, pieces: lines.count, model: .large, in: folder)
+        try? heard.save(in: folder)
+        guard let result = try? SpeakerLabels.relabel(heard, count: nil, in: folder), let priya = result.assigned[0]
+        else { return }
+        let root = folder.deletingLastPathComponent().deletingLastPathComponent()
+        _ = try? VoiceLibrary(root: root).name(priya, "Priya Shah", in: folder)
+    }
+
+    /// Meetings from the last six months beside the recent ones, as Free up
+    /// space finds them: most transcribed with every voice named, two never
+    /// transcribed. Each audio file is as long on disk as its meeting would
+    /// be at 128 kbps, and holds nothing.
+    static func seedOldMeetings(_ root: URL) {
+        let library = RecordingLibrary(root: root)
+        let meetings: [(days: Double, minutes: Double, title: String, people: [String], transcribed: Bool)] = [
+            (38, 46, "Weekly with Ana", ["Ana"], true),
+            (61, 52, "Design critique", ["Mei", "Priya Shah"], true),
+            (75, 31, "Budget planning", ["Priya Shah", "Nora Quinn"], true),
+            (97, 42, "Pilot debrief", ["José Ortiz", "Ana"], true),
+            (109, 58, "User interview", ["Mei"], true),
+            (138, 74, "Quarterly review", ["Priya Shah", "José Ortiz", "Ana"], true),
+            (152, 27, "Survey kickoff", ["Nora Quinn"], false),
+            (166, 49, "1:1 with Priya", ["Priya Shah"], true),
+            (181, 63, "Site check-in", ["José Ortiz", "Mei"], false),
+        ]
+        let said = [
+            "Let's go through what we learned first.", "The second site had the most trouble with setup.",
+            "I'll write that up by Friday.", "Can we keep the same questions next round?",
+            "That leaves the budget for one more visit.", "Send me the notes and I'll take a pass.",
+        ]
+        for (index, meeting) in meetings.enumerated() {
+            let started = Date().addingTimeInterval(-meeting.days * 86_400 - Double(index % 4) * 3600)
+            guard let folder = try? library.newFolder(at: started) else { continue }
+            let meta: [String: Any] = [
+                "status": "recorded", "audio": "audio.m4a", "duration_seconds": meeting.minutes * 60,
+                "started": ISO8601DateFormatter().string(from: started),
+            ]
+            try? JSONSerialization.data(withJSONObject: meta).write(to: folder.appendingPathComponent("meta.json"))
+            FileManager.default.createFile(atPath: folder.appendingPathComponent("audio.m4a").path, contents: nil)
+            try? RecordingLibrary.save(
+                people: .init(count: meeting.people.count + 1, names: meeting.people), in: folder)
+            if meeting.transcribed {
+                let lines = (0..<6).map { line in
+                    TranscriptLine(
+                        start: Double(line) * 30, end: Double(line) * 30 + 12, text: said[(index + line) % said.count])
+                }
+                try? TranscriptDocument.save(lines: lines, failures: 0, pieces: lines.count, model: .large, in: folder)
+                // Sam and everyone there, each voice named.
+                let names = ["Sam"] + meeting.people
+                let assigned: [Int?] = lines.indices.map { $0 % names.count + 1 }
+                var result = SpeakerResult(
+                    count: names.count, estimated: false,
+                    voices: SpeakerLabels.voices(lines: lines, assigned: assigned), assigned: assigned)
+                result.names = Dictionary(uniqueKeysWithValues: names.enumerated().map { ($0.offset + 1, $0.element) })
+                try? SpeakerLabels.save(result, lines: lines, in: folder)
+            }
+            _ = try? RecordingLibrary.save(title: meeting.title, in: folder)
+        }
+        for entry in library.entries() {
+            guard let handle = try? FileHandle(forWritingTo: entry.audio) else { continue }
+            try? handle.truncate(atOffset: UInt64(entry.duration * 16_000))
+            try? handle.close()
+        }
     }
 }
