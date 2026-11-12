@@ -19,14 +19,14 @@ enum CLI {
               \(tool) import "interview.m4a"
               After the user says who Voice 2 is:
               \(tool) voices name 2026-11-06-1430 2 "Mei"
-              \(tool) people rename "Mei" "Nora Quinn"
+              \(tool) people rename "Mei" "Mei Lin"
 
             Commands:
               folder [<path> [--move]]             show or change the recordings folder
               import <file> [--title T]            copy, transcribe and label; retry missing stages
               title <recording> <title>            set a recording's title (its folder is renamed); "" clears it
               transcribe <recording>               make transcript.md again
-              speakers <recording> [--voices N]    keep labels; a different N refolds voices
+              speakers <recording> [--voices N]    label once; a different N relabels with N voices
               voices <recording>                  list voices, names, talk time and quotes
               voices name <recording> <voice> <person>
                                                   name only this voice; "" clears it
