@@ -1,3 +1,10 @@
+**Status**: implemented
+**Prior art**: None
+**Supersedes**: None
+**Implements**: [_docs/SYSTEM.md](_docs/SYSTEM.md) — the app and recording-folder design
+**Extends**: None
+**Related**: [LICENSE](LICENSE) — MIT license
+
 <p align="center">
   <img src=".github/images/icon.png" width="96" height="96" alt="">
 </p>
@@ -170,6 +177,48 @@ each one means, and TapeUp has a command line they can use.
     └── meta.json     when, how long, who was there
 ```
 
+## Command line
+
+Your agent can work on saved recordings with TapeUp's own command line:
+`/Applications/TapeUp.app/Contents/MacOS/TapeUp help`. These examples use
+`TapeUp` for that path.
+
+```text
+TapeUp folder [<path> [--move]]
+TapeUp import <file> [--title T]
+TapeUp title <recording> <title>
+TapeUp transcribe <recording>
+TapeUp speakers <recording> [--voices N]
+TapeUp voices <recording>
+TapeUp name <recording> <voice> <person>
+TapeUp people
+TapeUp people add <name> [--context C]
+TapeUp people rename <old> <new> [--merge]
+TapeUp people remove <name>
+TapeUp remove-audio <recording>
+TapeUp keep <recording> [off]
+TapeUp agent [off] [--model M] [--effort E]
+```
+
+Give a recording's folder, folder name or start time (`2026-11-06-1430`).
+Import copies one audio or video file in, leaves the original, and tells you
+how to transcribe it next; importing the same file again keeps the first copy.
+`voices` gives each voice's number, name, where the name came from, talk time
+and a quote. Name a voice only when the user said who it is: TapeUp learns
+that person's voice from it. Give `""` to clear a name. Correcting a name
+TapeUp filled in lists similar earlier fills for the user to review; it
+changes none of them by itself.
+
+Change people with `TapeUp people`: renames follow through recordings and
+remembered voices, and `--merge` joins two listed people. Removing a person
+forgets their voice and leaves past recordings' names. `remove-audio` moves
+audio to the Trash once there is a transcript and nothing is using it.
+`keep` locks the audio against removal; `keep <recording> off` unlocks it.
+Ask the user before unlocking audio they chose to keep.
+
+Add `--json` for structured results and errors. While the app runs, commands
+go through it so its list and Undo follow along. Recordings start in the app.
+
 ## First launch
 
 TapeUp is free and isn't notarized by Apple, so macOS stops it once:
@@ -218,3 +267,12 @@ Issues and pull requests are welcome.
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+## How to update this document
+
+Keep the examples aligned with `TapeUp help` and describe what people can do
+with the released app. Keep architecture in `_docs/SYSTEM.md`.
+
+## Open Questions
+
+None currently.

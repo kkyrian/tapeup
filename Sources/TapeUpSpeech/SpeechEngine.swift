@@ -299,7 +299,10 @@ public enum FolderTranscriber {
         guard let meta = MetaFile.read(folder) else { throw CocoaError(.fileNoSuchFile) }
         let sources = meta["sources"] as? [String] ?? ["microphone", "computer audio"]
         let audio = folder.appendingPathComponent(meta["audio"] as? String ?? "audio.m4a")
-        try RecordingLibrary.markTranscript("transcribing", model: engine.model.name, in: folder)
+        let library = RecordingLibrary(root: folder.deletingLastPathComponent().deletingLastPathComponent())
+        try library.withLock {
+            try RecordingLibrary.markTranscript("transcribing", model: engine.model.name, in: folder)
+        }
         let session = try await engine.session(
             names: names, microphone: sources.contains("microphone"), computer: sources.contains("computer audio"))
         return try await session.transcribe(

@@ -142,31 +142,54 @@ public enum RecordingImport {
         _ candidate: Candidate, into library: RecordingLibrary, plan: Plan,
         progress: @escaping @Sendable (Double) -> Void = { _ in }
     ) async throws -> URL {
-        let folder = try library.newFolder(at: candidate.started)
+        try await copyOnce(candidate, into: library, plan: plan, progress: progress).folder
+    }
+
+    /// Idempotent even when two processes import the same file together.
+    /// Encoding needs no library lock; publishing the copy and checking its
+    /// fingerprint share the existing root lock.
+    public static func copyOnce(
+        _ candidate: Candidate, into library: RecordingLibrary, plan: Plan,
+        progress: @escaping @Sendable (Double) -> Void = { _ in }
+    ) async throws -> (folder: URL, imported: Bool) {
+        func existing() -> URL? {
+            guard imported(in: library).contains(candidate.fingerprint) else { return nil }
+            return library.recordingFolders().first {
+                (MetaFile.read($0)?["imported"] as? [String: Any])?["fingerprint"] as? String == candidate.fingerprint
+            }
+        }
+        if let folder = try library.withLock({ existing() }) { return (folder, false) }
+        let folder = try library.withLock { try library.newFolder(at: candidate.started) }
         do {
             let audio = folder.appendingPathComponent("audio.m4a")
             try await encode(candidate.url, to: audio, duration: candidate.duration, progress: progress)
-            let meta: [String: Any] = [
-                "format": "tapeup-recording/0", "channels": ["left": "imported", "right": "imported"],
-                "status": "recorded", "audio": "audio.m4a", "duration_seconds": candidate.duration.rounded(),
-                "started": ISO8601DateFormatter().string(from: candidate.started), "sources": [String](),
-                "imported": [
-                    "file": candidate.name, "fingerprint": candidate.fingerprint,
-                    "at": ISO8601DateFormatter().string(from: Date()), "label_speakers": plan.labelSpeakers,
-                ],
-            ]
-            let data = try JSONSerialization.data(withJSONObject: meta, options: [.prettyPrinted, .sortedKeys])
-            try data.write(to: MetaFile.url(in: folder), options: .atomic)
-            if !plan.people.isEmpty { try RecordingLibrary.save(people: plan.people, in: folder) }
-            if plan.transcribe { try RecordingLibrary.markTranscript("waiting", in: folder) }
-            let given = plan.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            let name = given.isEmpty ? (candidate.name as NSString).deletingPathExtension : given
-            // The name given, else the file's own; the folder's date and time
-            // keep two of the same name apart.
-            if !name.isEmpty {
-                return try RecordingLibrary.save(title: name, in: folder)
+            return try library.withLock {
+                if let prior = existing() {
+                    try FileManager.default.removeItem(at: folder)
+                    return (prior, false)
+                }
+                let meta: [String: Any] = [
+                    "format": "tapeup-recording/0", "channels": ["left": "imported", "right": "imported"],
+                    "status": "recorded", "audio": "audio.m4a", "duration_seconds": candidate.duration.rounded(),
+                    "started": ISO8601DateFormatter().string(from: candidate.started), "sources": [String](),
+                    "imported": [
+                        "file": candidate.name, "fingerprint": candidate.fingerprint,
+                        "at": ISO8601DateFormatter().string(from: Date()), "label_speakers": plan.labelSpeakers,
+                    ],
+                ]
+                let data = try JSONSerialization.data(withJSONObject: meta, options: [.prettyPrinted, .sortedKeys])
+                try data.write(to: MetaFile.url(in: folder), options: .atomic)
+                if !plan.people.isEmpty { try RecordingLibrary.save(people: plan.people, in: folder) }
+                if plan.transcribe { try RecordingLibrary.markTranscript("waiting", in: folder) }
+                let given = plan.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                let name = given.isEmpty ? (candidate.name as NSString).deletingPathExtension : given
+                // The name given, else the file's own; the folder's date and time
+                // keep two of the same name apart.
+                if !name.isEmpty {
+                    return (try RecordingLibrary.save(title: name, in: folder), true)
+                }
+                return (folder, true)
             }
-            return folder
         } catch {
             try? FileManager.default.removeItem(at: folder)
             throw error

@@ -12,8 +12,19 @@ enum CLI {
     static let help = """
         TapeUp: work on saved recordings. Recordings are started in the app.
 
-          TapeUp folder                          show the recordings folder
+          TapeUp folder                         show the recordings folder
           TapeUp folder <path> [--move]          use another folder; --move takes the recordings along
+          TapeUp import <file> [--title T]       copy in audio or video; transcribe it next
+          TapeUp voices <recording>             list voices, names, talk time and a quote
+          TapeUp name <recording> <voice> <person>
+                                                 name a voice; "" clears it
+          TapeUp people                         list people, you first
+          TapeUp people add <name> [--context C] add a person or update their context
+          TapeUp people rename <old> <new> [--merge]
+                                                 rename everywhere; --merge joins listed people
+          TapeUp people remove <name>           forget a person; recordings keep the name
+          TapeUp remove-audio <recording>        Trash unlocked audio; keep the transcript
+          TapeUp keep <recording> [off]          lock audio against removal; off unlocks it
           TapeUp title <recording> <title>       name a recording (its folder is renamed); "" clears it
           TapeUp transcribe <recording>          make transcript.md again, on this Mac
           TapeUp speakers <recording> [--voices N]
@@ -26,16 +37,21 @@ enum CLI {
         <recording> is a recording's folder, its folder name, or the time it
         starts with (2026-11-06-1430). transcribe and speakers wait until the
         work is done: minutes for a long recording, longer the first time while
-        a model downloads; progress notes go to stderr. Name voices in the app.
-        Add --json anywhere for one JSON object: on stdout when the command
-        works, on stderr with error, message, suggestion and retryable when it
+        a model downloads; progress notes go to stderr.
+        <voice> is its number or current name. Name a voice only when the user
+        said who it is: TapeUp learns that person's voice from it.
+        Add --json anywhere for JSON (voices returns an array): on stdout on
+        success, on stderr with error, message, suggestion and retryable when it
         does not. Usage errors exit 2, other failures 1.
-        People are listed in people.json in the recordings folder; edit it directly.
+        Change people with TapeUp people.
         The agent is turned on only by the user, in TapeUp's Settings, under Your AI.
 
         """
 
-    static let commands: Set = ["folder", "title", "transcribe", "speakers", "agent", "help"]
+    static let commands: Set = [
+        "folder", "title", "transcribe", "speakers", "agent", "help", "import", "voices", "name", "people",
+        "remove-audio", "keep",
+    ]
 
     private static var json = false
 
@@ -76,7 +92,7 @@ enum CLI {
                 }
                 succeed(text, object)
             }
-            send(["command": "folder", "value": destination.path, "move": moving ? "1" : "0"]) { folder in
+            send(["command": "folder", "value": destination.path, "move": moving ? "1" : "0"]) { folder, _ in
                 done(folder)
             } alone: {
                 moveRootAlone(to: destination, moving: moving)
@@ -90,11 +106,15 @@ enum CLI {
             }
             let folder = recording(rest[0])
             let title = rest.dropFirst().joined(separator: " ")
-            send(["command": "title", "recording": folder.path, "value": title]) { renamed in
+            send(["command": "title", "recording": folder.path, "value": title]) { renamed, _ in
                 reportTitle(renamed)
             } alone: {
                 do {
-                    reportTitle(try RecordingLibrary.save(title: title, in: folder))
+                    reportTitle(
+                        try library.withLock {
+                            let current = library.folder(withStamp: RecordingLibrary.stamp(of: folder)) ?? folder
+                            return try RecordingLibrary.save(title: title, in: current)
+                        })
                 } catch {
                     fail("write_failed", "Could not save the title: \(error.localizedDescription)", retryable: true)
                 }
@@ -105,7 +125,7 @@ enum CLI {
                 fail("usage", "TapeUp transcribe <recording>", suggestion: "Run TapeUp help.")
             }
             let folder = recording(rest[0])
-            send(["command": "transcribe", "recording": folder.path]) { folder in
+            send(["command": "transcribe", "recording": folder.path]) { folder, _ in
                 waitForTranscript(stamp: RecordingLibrary.stamp(of: folder))
             } alone: {
                 transcribeAlone(folder)
@@ -138,10 +158,69 @@ enum CLI {
             }
             var request = ["command": "speakers", "recording": folder.path]
             request["voices"] = voices.map(String.init)
-            send(request) { folder in
+            send(request) { folder, _ in
                 waitForSpeakers(stamp: RecordingLibrary.stamp(of: folder))
             } alone: {
                 speakersAlone(folder, count: voices)
+            }
+        case "import":
+            let title = option("title", in: &rest)
+            refuseFlags(rest, usage: "TapeUp import <file> [--title T]")
+            guard rest.count == 1 else { fail("usage", "TapeUp import <file> [--title T]") }
+            let file = URL(fileURLWithPath: (rest[0] as NSString).expandingTildeInPath).standardizedFileURL
+            var request = ["command": "import", "value": file.path]
+            request["title"] = title
+            send(request) { _, output in
+                report(output)
+            } alone: {
+                Task {
+                    do {
+                        let candidate = try await RecordingImport.inspect(file)
+                        let copy = try await RecordingImport.copyOnce(
+                            candidate, into: library, plan: .init(transcribe: false, labelSpeakers: false, title: title)
+                        )
+                        report(try CLIWork.imported(copy.folder, copied: copy.imported).encoded())
+                    } catch { failure(error, importing: true) }
+                }
+                NSApplication.shared.run()
+            }
+        case "voices", "name", "people", "remove-audio", "keep":
+            var request = ["command": command]
+            if command == "people" {
+                request["context"] = option("context", in: &rest)
+                let merge = rest.contains("--merge")
+                rest.removeAll { $0 == "--merge" }
+                refuseFlags(
+                    rest,
+                    usage: "TapeUp people [add <name> [--context C] | rename <old> <new> [--merge] | remove <name>]")
+                let action = rest.first ?? "list"
+                let count = ["list": 0, "add": 2, "rename": 3, "remove": 2][action]
+                guard let count, rest.count == count, !merge || action == "rename",
+                    request["context"] == nil || action == "add"
+                else { fail("usage", "Run TapeUp help for people commands.") }
+                request["action"] = action
+                if rest.count > 1 { request["value"] = rest[1] }
+                if rest.count > 2 { request["new"] = rest[2] }
+                request["merge"] = merge ? "1" : "0"
+            } else {
+                refuseFlags(rest, usage: "TapeUp \(command) <recording>")
+                let valid =
+                    command == "name"
+                    ? rest.count == 3
+                    : command == "keep" ? (rest.count == 1 || (rest.count == 2 && rest[1] == "off")) : rest.count == 1
+                guard valid else { fail("usage", "Run TapeUp help for \(command).") }
+                request["recording"] = recording(rest[0]).path
+                if command == "name" {
+                    request["voice"] = rest[1]
+                    request["value"] = rest[2]
+                }
+                if command == "keep" { request["value"] = rest.count == 2 ? "off" : "on" }
+            }
+            let work = request
+            send(work) { _, output in
+                report(output)
+            } alone: {
+                do { report(try CLIWork.alone(work, root: root).encoded()) } catch { failure(error) }
             }
         case "agent":
             var changes: [String: String] = [:]
@@ -200,6 +279,44 @@ enum CLI {
         }
     }
 
+    private static func option(_ name: String, in words: inout [String]) -> String? {
+        guard let index = words.firstIndex(where: { $0 == "--\(name)" || $0.hasPrefix("--\(name)=") }) else {
+            return nil
+        }
+        let word = words.remove(at: index)
+        if word.hasPrefix("--\(name)=") { return String(word.dropFirst(name.count + 3)) }
+        guard index < words.count, !words[index].hasPrefix("--") else { fail("usage", "--\(name) takes a value.") }
+        return words.remove(at: index)
+    }
+
+    private static func report(_ output: String?) -> Never {
+        guard let output, let data = output.data(using: .utf8),
+            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let text = object["text"],
+            let value = object["value"]
+        else { fail("write_failed", "TapeUp returned no result.", retryable: true) }
+        succeed(String(describing: text), value)
+    }
+
+    private static func failure(_ error: Error, importing: Bool = false) -> Never {
+        if let refusal = error as? Refusal {
+            fail(refusal.code, refusal.message, suggestion: refusal.suggestion, retryable: refusal.retryable)
+        }
+        if error as? VoiceLibrary.Failure == .busyRecording || error as? VoiceLibrary.Failure == .concurrentChange {
+            fail(
+                "busy", "Another process is changing this recording or library.",
+                suggestion: "Try again when it finishes.", retryable: true)
+        }
+        if importing, let failure = error as? RecordingImport.Failure {
+            fail(
+                "unreadable", "Could not import the file: \(failure).",
+                suggestion: "Give a readable audio or video file.")
+        }
+        fail(
+            "write_failed",
+            "Could not \(importing ? "import the file" : "save the change"): \(error.localizedDescription)",
+            retryable: true)
+    }
+
     private static func refuseFlags(_ words: [String], usage: String) {
         if let flag = words.first(where: { $0.hasPrefix("--") }) {
             fail("usage", "\(usage) has no \(flag).", suggestion: "Run TapeUp help.")
@@ -236,7 +353,7 @@ enum CLI {
     /// is not running. The app says at once that it took the request, then
     /// answers when the work is done, which can take minutes for a move.
     private static func send(
-        _ request: [String: String], then: @escaping (URL) -> Void, alone: @escaping () -> Void
+        _ request: [String: String], then: @escaping (URL, String?) -> Void, alone: @escaping () -> Void
     ) {
         guard appRunning else { return alone() }
         let id = UUID().uuidString
@@ -272,7 +389,7 @@ enum CLI {
         if let code = reply["error"] {
             fail(code, reply["message"] ?? code, suggestion: reply["suggestion"], retryable: reply["retryable"] == "1")
         }
-        then(URL(fileURLWithPath: reply["folder"] ?? root.path))
+        then(URL(fileURLWithPath: reply["folder"] ?? root.path), reply["output"])
     }
 
     @MainActor private final class Answer {
@@ -372,7 +489,38 @@ enum CLI {
         }
     }
 
+    /// Acquire the same folder lock that removal and voice edits use before
+    /// any model or audio work starts. Release it under the root lock when
+    /// publishing, so speaker-file saves can take their own nested lock.
+    private static func lockAudio(_ folder: URL, command: String) -> (URL, FolderLock) {
+        do {
+            return try library.withLock {
+                guard let current = library.folder(withStamp: RecordingLibrary.stamp(of: folder)),
+                    let entry = RecordingLibrary.entry(at: current)
+                else {
+                    throw Refusal("not_found", "That recording no longer exists.")
+                }
+                try CLIWork.check(entry, needsIdle: false)
+                guard let held = FolderLock(folder: current) else {
+                    throw Refusal("busy", "That recording is in use.", retryable: true)
+                }
+                do {
+                    if command == "transcribe" {
+                        try RecordingLibrary.markTranscript("waiting", in: current)
+                    } else {
+                        try SpeakerLabels.mark("finding", in: current)
+                    }
+                    return (current, held)
+                } catch {
+                    held.release()
+                    throw error
+                }
+            }
+        } catch { failure(error) }
+    }
+
     private static func transcribeAlone(_ folder: URL) {
+        let (folder, held) = lockAudio(folder, command: "transcribe")
         let stamp = RecordingLibrary.stamp(of: folder)
         let model = SpeechModel.forNow()
         // The same hints the app gives: the people list, who was at recent recordings, their titles.
@@ -382,6 +530,7 @@ enum CLI {
             titles: recent.compactMap(\.title))
         let library = library
         Task {
+            defer { held.release() }
             do {
                 if !ModelStore.isDownloaded(model) {
                     note("Downloading \(model.name) (\(Format.gigabytes(model.downloadBytes))) the first time…")
@@ -389,11 +538,21 @@ enum CLI {
                 }
                 let engine = try await SpeechEngine.load(model)
                 guard let folder = library.folder(withStamp: stamp) else { throw CocoaError(.fileNoSuchFile) }
-                try await FolderTranscriber.run(folder: folder, engine: engine, names: names)
-                reportTranscript(library.folder(withStamp: stamp) ?? folder)
+                let outcome = try await FolderTranscriber.transcribe(folder: folder, engine: engine, names: names)
+                let finished = try library.withLock {
+                    held.release()
+                    guard let current = library.folder(withStamp: stamp) else { throw CocoaError(.fileNoSuchFile) }
+                    try TranscriptDocument.save(
+                        lines: outcome.lines, failures: outcome.failures, pieces: outcome.pieces, model: engine.model,
+                        in: current)
+                    return current
+                }
+                reportTranscript(finished)
             } catch {
                 if let folder = library.folder(withStamp: stamp) {
-                    try? RecordingLibrary.markTranscript("failed", model: model.name, error: "\(error)", in: folder)
+                    try? library.withLock {
+                        try RecordingLibrary.markTranscript("failed", model: model.name, error: "\(error)", in: folder)
+                    }
                 }
                 fail(
                     "transcription_failed", "The transcript could not be made: \(error.localizedDescription)",
@@ -404,24 +563,37 @@ enum CLI {
     }
 
     private static func speakersAlone(_ folder: URL, count: Int?) {
+        let (folder, held) = lockAudio(folder, command: "speakers")
+        let library = library
+        let stamp = RecordingLibrary.stamp(of: folder)
         Task {
+            defer { held.release() }
             do {
                 let heard: VoicePrints
-                if let saved = VoicePrints.read(in: folder) {
+                var listened = false
+                let current = library.folder(withStamp: stamp) ?? folder
+                if let saved = VoicePrints.read(in: current) {
                     heard = saved
                 } else {
                     if !SpeakerFinder.isDownloaded() {
                         note("Downloading the speaker model (130 MB) the first time…")
                         try await SpeakerFinder.download { _ in }
                     }
-                    try? SpeakerLabels.mark("finding", in: folder)
-                    heard = try await SpeakerFinder.listen(folder: folder)
-                    try heard.save(in: folder)
+                    heard = try await SpeakerFinder.listen(folder: library.folder(withStamp: stamp) ?? folder)
+                    listened = true
                 }
-                try SpeakerLabels.relabel(heard, count: count, in: folder)
-                reportSpeakers(folder)
+                let finished = try library.withLock {
+                    guard let current = library.folder(withStamp: stamp) else { throw CocoaError(.fileNoSuchFile) }
+                    if listened { try heard.save(in: current) }
+                    held.release()
+                    try SpeakerLabels.relabel(heard, count: count, in: current)
+                    return current
+                }
+                reportSpeakers(finished)
             } catch {
-                try? SpeakerLabels.mark("failed", error: "\(error)", in: folder)
+                if let current = library.folder(withStamp: stamp) {
+                    try? library.withLock { try SpeakerLabels.mark("failed", error: "\(error)", in: current) }
+                }
                 fail(
                     "labels_failed", "Speakers could not be labeled: \(error.localizedDescription)", retryable: true)
             }
@@ -460,7 +632,7 @@ enum CLI {
         FileHandle.standardError.write(Data((text + "\n").utf8))
     }
 
-    private static func succeed(_ text: String, _ object: [String: Any]) -> Never {
+    private static func succeed(_ text: String, _ object: Any) -> Never {
         if json, let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]) {
             print(String(decoding: data, as: UTF8.self))
         } else {

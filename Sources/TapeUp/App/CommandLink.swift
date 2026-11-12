@@ -18,7 +18,7 @@ enum CommandLink {
                 guard request["root"] == model.root.standardizedFileURL.path else { return }
                 // Moving recordings can take minutes; the command waits once it knows.
                 send(["id": id, "taken": "1"])
-                model.handle(request) { refusal, folder in
+                model.handle(request) { refusal, folder, output in
                     var answer = ["id": id]
                     if let refusal {
                         answer["error"] = refusal.code
@@ -26,6 +26,7 @@ enum CommandLink {
                         answer["suggestion"] = refusal.suggestion
                         answer["retryable"] = refusal.retryable ? "1" : "0"
                     }
+                    answer["output"] = output
                     answer["folder"] = folder?.path
                     send(answer)
                 }
@@ -40,7 +41,7 @@ enum CommandLink {
 }
 
 /// Why the app did not do what a command asked, in the command line's terms.
-struct Refusal: Sendable {
+struct Refusal: Error, Sendable {
     var code: String
     var message: String
     var suggestion: String?

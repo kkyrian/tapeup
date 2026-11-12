@@ -27,6 +27,16 @@ extension VoiceLibrary {
         var aliases: [String]? = nil
     }
 
+    /// The destination of an unfinished rename is already this identity,
+    /// rather than a second listed person requiring a merge.
+    public func isPendingRename(_ old: String, to new: String) throws -> Bool {
+        try VoiceFiles.withRootLock(root) {
+            try pendingRenames().contains {
+                $0.old.caseInsensitiveCompare(old) == .orderedSame && $0.new.caseInsensitiveCompare(new) == .orderedSame
+            }
+        }
+    }
+
     /// Persist the intent before touching a recording. Recordings are written
     /// one at a time; root identities are finalized last. Recovery repeats an
     /// interrupted step safely, including when a folder has since been titled.
@@ -59,7 +69,9 @@ extension VoiceLibrary {
             }
             var undo = VoiceFileUndo(files: [], root: root)
             let id: UUID
-            if let existing = pending.first(where: { $0.old == old && $0.new == new }) {
+            if let existing = pending.first(where: {
+                $0.old.caseInsensitiveCompare(old) == .orderedSame && $0.new.caseInsensitiveCompare(new) == .orderedSame
+            }) {
                 id = existing.id
             } else {
                 if let only {

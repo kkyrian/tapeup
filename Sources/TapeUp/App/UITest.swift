@@ -615,6 +615,75 @@ enum UITest {
                     "and back (\(back.out))")
             }
         }
+        // The saved-recording commands share the app's list, labels and Undo.
+        let cliSource = base.appendingPathComponent("cli-import.m4a")
+        writeSilence(seconds: 1, to: cliSource)
+        let imported = command(["import", cliSource.path, "--title", "Mei interview"])
+        expect(imported.status == 0 && imported.out.contains("true"), "CLI imports through the app (\(imported.out))")
+        if let entry = model.allEntries.first(where: { $0.title == "Mei interview" }) {
+            let stamp = RecordingLibrary.stamp(of: entry.folder)
+            expect(entry.transcript == .none, "CLI import leaves transcription for the next command")
+            let again = command(["import", cliSource.path])
+            expect(again.status == 0 && again.out.contains("false"), "CLI import retry keeps the existing recording")
+            let missing = command(["voices", stamp])
+            expect(missing.status == 1 && missing.out.contains("no_speakers"), "CLI voices explains missing labels")
+            let lines = [TranscriptLine(start: 0, end: 1, text: "A short interview.")]
+            try? TranscriptDocument.render(lines: lines, labeled: false, model: "test").write(
+                to: entry.folder.appendingPathComponent(TranscriptDocument.fileName), atomically: true, encoding: .utf8)
+            try? JSONEncoder().encode(lines).write(
+                to: entry.folder.appendingPathComponent(TranscriptDocument.linesFileName))
+            let heard = VoicePrints(turns: [.init(start: 0, end: 1, voice: 1)], prints: [:])
+            try? SpeakerLabels.save(
+                SpeakerLabels.label(lines: lines, heard: heard, count: 1), lines: lines, in: entry.folder)
+            try? RecordingLibrary.markTranscript("done", in: entry.folder)
+            let listed = command(["voices", stamp])
+            expect(listed.status == 0 && listed.out.contains("A short interview."), "CLI lists a voice and its quote")
+            let named = command(["name", stamp, "1", "José Ortiz"])
+            expect(named.status == 0 && model.peopleList.contains("José Ortiz"), "CLI voice naming updates People")
+            expect(SpeakerLabels.result(in: entry.folder)?.names[1] == "José Ortiz", "CLI voice naming updates labels")
+            let cleared = command(["name", stamp, "José Ortiz", ""])
+            expect(
+                cleared.status == 0 && SpeakerLabels.result(in: entry.folder)?.names[1] == nil,
+                "CLI clears a voice name")
+            let added = command(["people", "add", "Ana", "--context", "lab mate"])
+            expect(added.status == 0 && model.peopleList.contains("Ana"), "CLI adds to the app's People list")
+            let people = command(["people"])
+            expect(people.status == 0 && people.out.contains("lab mate"), "CLI lists people with context")
+            let renamed = command(["people", "rename", "Ana", "Nora Quinn", "--merge"])
+            expect(renamed.status == 0 && !model.peopleList.contains("Ana"), "CLI renames through People")
+            model.undoRename()
+            expect(model.peopleList.contains("Ana"), "the app can Undo a CLI person rename")
+            let removed = command(["people", "remove", "Ana"])
+            expect(removed.status == 0 && !model.peopleList.contains("Ana"), "CLI removes a person from the app's list")
+            let locked = command(["keep", stamp])
+            expect(
+                locked.status == 0
+                    && model.allEntries.first(where: { RecordingLibrary.stamp(of: $0.folder) == stamp })?.keepAudio
+                        == true,
+                "CLI keep refreshes the app's list")
+            let refused = command(["remove-audio", stamp])
+            expect(refused.status == 1 && refused.out.contains("kept"), "CLI respects locked audio")
+            let unlocked = command(["keep", stamp, "off"])
+            expect(unlocked.status == 0, "CLI unlocks audio")
+            if let held = FolderLock(folder: entry.folder) {
+                let busy = command(["remove-audio", stamp])
+                expect(
+                    busy.status == 1 && busy.out.contains("busy") && entry.hasAudio,
+                    "CLI app route respects another process's folder lock")
+                held.release()
+            } else {
+                expect(false, "CLI fixture can be locked")
+            }
+            let audio = command(["remove-audio", stamp])
+            expect(audio.status == 0 && !entry.hasAudio, "CLI moves audio to the Trash through the app")
+            let noAudio = command(["remove-audio", stamp])
+            expect(noAudio.status == 0 && noAudio.out.contains("false"), "CLI removing audio twice succeeds")
+            model.undoRemoveAudio()
+            expect(entry.hasAudio, "the app can Undo CLI audio removal")
+            check("cli-saved-recording")
+        } else {
+            expect(false, "CLI import updates the app's list")
+        }
         DistributedNotificationCenter.default().removeObserver(link)
 
         let victim = model.recent[2]
