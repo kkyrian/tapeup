@@ -47,9 +47,14 @@ When you stop recording, tap how many people were on the call. Once the
 transcript is ready, TapeUp finds that many voices and shows a line each
 one said. Play a voice to hear who it is, then pick their name.
 
-TapeUp remembers the voices you name. In later meetings, it fills in the
-names of voices it recognizes. If a name is wrong, pick the right person.
-Voices stay on your Mac and are never sent to your agent.
+TapeUp remembers the voices you name. It turns each voice into a voice
+print and compares it with the voices you named before. When a voice is
+close to one person and clearly closer than to anyone else, TapeUp fills
+in that name. Each person has their own match threshold. It starts at
+0.50 and adjusts between 0.50 and 0.85 as you name, correct and confirm
+voices, so the more you use TapeUp, the more accurate it gets. Voice
+prints stay on your Mac and are never sent to your agent.
+[How it works](#recognizing-voices)
 
 If you wear headphones, TapeUp marks your own lines as yours from the start.
 
@@ -211,6 +216,32 @@ TapeUp runs open models on your Mac with [speech-swift](https://github.com/soniq
   and [WeSpeaker](https://huggingface.co/aufklarer/WeSpeaker-ResNet34-LM-MLX) voice prints.
 - **Titles:** Claude Code or Codex if you choose one, with the model it is
   set to. Otherwise, Apple Intelligence on your Mac.
+
+## Recognizing voices
+
+Each voice TapeUp finds becomes a voice print, a WeSpeaker embedding. A
+voice you name or confirm is saved as an example of that person, up to 20
+per person. To match a new voice, TapeUp scores it against each person by
+cosine similarity, using the average of their 3 closest examples. It fills
+in a name only when:
+
+- the score reaches that person's threshold,
+- it leads the next person by at least 0.25, and
+- the voice talks for at least 30 seconds.
+
+Each person's threshold starts at 0.50 and stays between 0.50 and 0.85. It
+changes with what you do:
+
+- **You correct a name.** The threshold rises above that wrong match right
+  away, and the voice is kept as not that person.
+- **You name a voice TapeUp missed.** The threshold moves a fifth of the way
+  down toward that voice's score.
+- **You play a filled-in voice and keep its name.** That confirms it, and
+  the threshold can only go down.
+
+No model is retrained. Only the examples and each person's threshold
+change. We tuned the starting values on the
+[AMI Meeting Corpus](https://groups.inf.ed.ac.uk/ami/corpus/).
 
 ## Build
 
