@@ -63,6 +63,9 @@ Once the transcript is ready, TapeUp finds each voice in the recording,
 on your Mac. Each one comes with a line it said and a button to hear it,
 so naming it takes a second.
 
+Name a voice once and later meetings fill that name in by themselves.
+The voices TapeUp remembers stay on your Mac and never go to your agent.
+
 With headphones on, your own lines are marked from the start.
 
 <br clear="all">
@@ -85,10 +88,10 @@ That answer is Claude Code's own, unedited.
   <img align="right" width="380" src=".github/images/settings.gif" alt="From the ··· menu, Settings… opens Settings. Under Your AI, Claude Code is picked instead of Off.">
 </picture>
 
-### Let your AI do the naming
+### Let your AI do the titles
 
 Pick Claude Code or Codex in Settings, the one you're signed in to,
-and it titles each recording and suggests who was there.
+and it titles each recording.
 
 It stays off until you pick one. Without it, Apple Intelligence titles
 recordings where your Mac has it.
@@ -146,6 +149,7 @@ they're said.
 - **Any app.** Zoom, Meet in a browser, Teams, a video. No bot joins the call.
 - **Switch devices.** AirPods in or out mid-call, and it keeps recording.
 - **Nothing lost.** Audio is written as it records, so a crash keeps the meeting.
+- **Free up space.** Clear the audio of old meetings in one go, transcripts kept.
 - **Private.** Recording and transcription run on your Mac, in 52 languages.
   Only the agent you pick sees a transcript.
 

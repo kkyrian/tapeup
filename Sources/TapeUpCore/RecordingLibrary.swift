@@ -357,6 +357,103 @@ public struct RecordingLibrary: Sendable {
         - `transcript-with-speaker-labels.md`: present once speakers are
           labeled: the same lines, each starting with who spoke, a name
           the user picked or `Voice 1`, `Voice 2` (numbered by talk time). Rewritten
+          when the user names a voice or changes the count. TapeUp fills in
+          the names of voices it recognizes from earlier recordings.
+        - `meta.json`: `started` (ISO 8601), `duration_seconds`, `status`,
+          `title` once the recording is named (by the user, or made from the
+          transcript by TapeUp or the user's agent), `sources` (what was
+          recorded: `microphone`, `computer audio` or both), `paused_seconds`
+          when the user paused (paused time is left out of the audio),
+          `devices` (inputs and outputs used, in order), `timeline` (silence
+          inserted where a device switched), `transcript` (`status`: `waiting`,
+          `transcribing`, `done` or `failed`; `model`; `side_labels`;
+          `missing_passages` when some speech could not be transcribed),
+          `speaker_labels` once asked for (`status`: `finding`, `done` or
+          `failed`; `voices`; `voices_estimated`, true when the user gave no
+          count; `names`), and, when
+          the user filled it in, `who_was_there` with an optional `count`
+          (including the user) and optional `names`. `keep_audio` is true
+          when the user chose to keep the audio when clearing space.
+        - `events.jsonl`: what happened while recording, one JSON object per line;
+          later work adds lines with an `at` time, such as `title made`,
+          `agent failed` or `person renamed` (a person renamed everywhere).
+
+        `people.json` beside this file lists the people the user records with
+        (`you` is the user; each person has a `name` and an optional `context`).
+        TapeUp suggests names from it and gives the names to the speech model, so
+        they are spelled right in transcripts. `.voices.json` holds the voice
+        prints TapeUp remembers to recognize people: biometric data that stays
+        on this Mac. Never copy it, send it anywhere, or edit it.
+
+        A recording imported from another file has `imported` in `meta.json`
+        (`file`: the original name, `fingerprint`: its SHA-256, `at`: when it
+        was imported) and an empty `sources`. Its `audio.m4a` has the same sound
+        in both channels, so it has no sides; `started` is when the file says it
+        was recorded. The original file stays where it was.
+
+        `status` is `recording` while it runs, `recorded` once `audio.m4a` is
+        final, and `transcribed` once `transcript.md` is. If a folder still says
+        `recording` with an `audio.caf`, TapeUp stopped unexpectedly; it finishes
+        such folders the next time it opens.
+
+        ## Sides
+
+        When the computer audio played into headphones for the whole recording,
+        each line of `transcript.md` starts with the side it was heard on:
+        `Microphone` (said at this Mac) or `Computer audio` (played by the Mac,
+        such as the other people on a call). Either side can be more than one
+        person: several people can share one microphone, and a call can have many
+        people on the other end. A side is never a person's name.
+
+        With speakers, the microphone also hears the call, so the two sides
+        cannot be told apart and lines carry no side (`side_labels` is false).
+        Telling individual voices apart is a separate step the user asks for; it
+        writes `transcript-with-speaker-labels.md` and leaves `transcript.md` as
+        it is. Voice labels come from how voices sound: lines where two people
+        talk at once, or people sharing one microphone, are the most often wrong.
+
+        ## Commands
+
+        `/Applications/TapeUp.app/Contents/MacOS/TapeUp help` lists what you can
+        do from the command line: show or change this folder, name a recording,
+        make its transcript again, label its speakers. A recording is named by
+        its folder or the time it starts with (`2026-11-06-1430`). Recordings are
+        started only in the app.
+
+        ## Your rules
+
+        Write your own instructions for agents here: how to name transcripts,
+        where summaries go, who usually attends. TapeUp never rewrites this file
+        once you change it.
+
+        """
+
+    /// Guides earlier versions wrote. A file still identical to one is
+    /// TapeUp's own text, not the user's, and is brought up to date.
+    static let earlierAgentsGuides = [
+        """
+        # TapeUp recordings
+
+        Recordings are filed by year: each folder inside `2026/` and the like is
+        one recording made by TapeUp, named for the minute it started
+        (`YYYY-MM-DD-HHMM`, with `-2`, `-3` when two start in the same minute), then
+        its title once it has one (`2026/2026-11-06-1430 Lab sync`). A title is
+        made from the transcript unless the user names the recording first, and a
+        rename moves the folder, so look recordings up by folder, not by a saved path.
+
+        - `audio.m4a`: stereo AAC. **Left channel: the microphone** (the person at
+          this Mac). **Right channel: everything the Mac played** (the other people
+          on a call, a video, a lecture). Never modified once written; write
+          derived files beside it. When the user recorded only one source, the
+          other channel is silent. The user may remove it to keep only the
+          transcript; `events.jsonl` then has an `audio removed` line.
+        - `transcript.md`: made on this Mac while recording, one paragraph per
+          stretch of speech, each starting with its time from the start of
+          `audio.m4a`. Rewritten only when asked to transcribe again (then
+          speaker labels are redone from the same voices). See "Sides" below.
+        - `transcript-with-speaker-labels.md`: present once speakers are
+          labeled: the same lines, each starting with who spoke, a name
+          the user picked or `Voice 1`, `Voice 2` (numbered by talk time). Rewritten
           when the user names a voice or changes the count.
         - `meta.json`: `started` (ISO 8601), `duration_seconds`, `status`,
           `title` once the recording is named (by the user, or made from the
@@ -422,11 +519,7 @@ public struct RecordingLibrary: Sendable {
         where summaries go, who usually attends. TapeUp never rewrites this file
         once you change it.
 
-        """
-
-    /// Guides earlier versions wrote. A file still identical to one is
-    /// TapeUp's own text, not the user's, and is brought up to date.
-    static let earlierAgentsGuides = [
+        """,
         """
         # TapeUp recordings
 

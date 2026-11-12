@@ -195,19 +195,19 @@ private struct PastFillStrip: View {
         if let offer = model.speakers.offer, offer.stamp == stamp {
             VStack(alignment: .leading, spacing: 6) {
                 Text(
-                    "\(offer.from) was also filled in for this voice in \(count(offer.hits.count)), and nobody checked. Change \(offer.hits.count == 1 ? "it" : "them") to \(offer.to)?"
+                    "\(offer.from) was also filled in for this voice in \(count(offer.hits.count)), and nobody checked \(offer.hits.count == 1 ? "it" : "them"). Change \(offer.hits.count == 1 ? "it" : "them") to \(offer.to)?"
                 )
                 .font(.system(size: 11))
                 .fixedSize(horizontal: false, vertical: true)
                 ForEach(offer.hits, id: \.stamp) { hit in
-                    PastFillRow(model: model, hit: hit)
+                    PastFillRow(model: model, hit: hit, single: offer.hits.count == 1)
                 }
                 HStack(spacing: 10) {
                     LinkButton(offer.hits.count == 1 ? "Change it" : "Change all \(offer.hits.count)") {
                         model.speakers.applyOffer()
                     }
                     .clickTarget("Change all past fills")
-                    LinkButton("Leave them", action: model.speakers.leaveOffer)
+                    LinkButton(offer.hits.count == 1 ? "Leave it" : "Leave them", action: model.speakers.leaveOffer)
                 }
                 .padding(.leading, -6)
             }
@@ -231,10 +231,12 @@ private struct PastFillStrip: View {
 private struct PastFillRow: View {
     @Bindable var model: AppModel
     let hit: VoiceLibrary.PastFill
+    /// The only one offered: the strip's own button changes it.
+    let single: Bool
 
     var body: some View {
-        let entry = RecordingLibrary.entry(at: hit.recording)
-        let result = SpeakerLabels.result(in: hit.recording)
+        let entry = RecordingLibrary(root: model.root).folder(withStamp: hit.stamp).flatMap(RecordingLibrary.entry(at:))
+        let result = entry.flatMap { SpeakerLabels.result(in: $0.folder) }
         let player = model.speakers.player
         let playable = entry.map { $0.hasAudio } ?? false
         let playing = entry.map { player.isPlaying(hit.voice, in: $0) } ?? false
@@ -253,7 +255,7 @@ private struct PastFillRow: View {
                     }
                     .disabled(model.phase != .idle)
                 }
-                LinkButton("Change") { model.speakers.applyOffer(only: hit) }
+                if !single { LinkButton("Change") { model.speakers.applyOffer(only: hit) } }
             }
             Text("\u{201C}\(playing ? player.line ?? hit.quote : hit.quote)\u{201D}")
                 .font(.system(size: 11))

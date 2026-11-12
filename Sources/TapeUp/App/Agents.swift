@@ -125,7 +125,7 @@ final class Agents {
     }
 
     /// What the user's AI does, on the Settings page.
-    static let caption = "Your agent suggests titles and participant names."
+    static let caption = "Your agent suggests titles."
 
     /// The Settings item in ··· and on right-click, saying when the chosen
     /// agent can no longer be called.
