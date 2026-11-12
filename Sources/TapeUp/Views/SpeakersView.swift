@@ -16,7 +16,7 @@ struct SpeakersView: View {
                     SectionLabel(text: "Speakers")
                     Spacer()
                     if !result.suggested.isEmpty {
-                        UseButton(help: "Use the suggested names") { model.speakers.acceptSuggestedNames(in: entry) }
+                        UseButton(help: "Use the suggested names") { model.acceptSuggestedNames(in: entry) }
                     } else if result.estimated, result.voices.count > 0 {
                         Text("Estimated · tap a count to change")
                             .font(.system(size: 11))
@@ -148,7 +148,7 @@ private struct NamePicker: View {
             ForEach(others, id: \.self) { person in pick(person) }
             if name != nil {
                 Divider()
-                Button("No name") { model.speakers.name(voice.id, nil, in: entry) }
+                Button("No name") { model.nameVoice(voice.id, nil, in: entry) }
             }
         } label: {
             HStack(spacing: 4) {
@@ -181,7 +181,7 @@ private struct NamePicker: View {
 
     private func pick(_ person: String) -> some View {
         Button {
-            model.speakers.name(voice.id, person, in: entry)
+            model.nameVoice(voice.id, person, in: entry)
         } label: {
             if person == name { Label(person, systemImage: "checkmark") } else { Text(person) }
         }

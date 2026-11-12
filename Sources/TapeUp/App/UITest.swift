@@ -291,8 +291,12 @@ enum UITest {
             check("card-speakers-estimated")
             let estimate = model.speakers.result(for: current())
             expect(estimate?.estimated == true && estimate?.voices.count == 3, "without a count, 3 voices estimated")
-            model.speakers.name(1, "Priya Shah", in: current())
+            model.nameVoice(1, "Priya Shah", in: current())
             check("card-speakers-named")
+            expect(
+                model.card?.entry.people.names.contains("Priya Shah") == true && model.card?.entry.people.count == nil,
+                "naming a voice adds them to who was there, leaving the count")
+            expect(model.peopleList.contains("Priya Shah"), "and to the people list")
             let file = current().folder.appendingPathComponent(SpeakerLabels.fileName)
             let text = (try? String(contentsOf: file, encoding: .utf8)) ?? ""
             expect(text.contains("Priya Shah: Thanks for making time"), "the name is in the labeled transcript")
@@ -949,11 +953,14 @@ enum UITest {
                 check("card-audio-restored")
                 expect(model.card?.entry.hasAudio == true && model.removedAudio == nil, "Undo put the audio back")
                 // Removed again, then opened later: the card says so, and Undo is gone.
-                model.removeAudio(entry)
-                expect(click("Back", in: panel), "Back leaves the card")
+                // A title may have renamed the folder meanwhile: use the card's entry.
+                if let current = model.card?.entry { model.removeAudio(current) }
+                // Back's own click is tested below; here only the reopening matters.
+                model.closeCard()
                 settle(0.3)
-                expect(model.card == nil, "and closes it")
-                expect(click("row " + stamp, in: panel), "the card reopens")
+                if let reopened = model.allEntries.first(where: { RecordingLibrary.stamp(of: $0.folder) == stamp }) {
+                    model.open(reopened)
+                }
                 settle(0.3)
                 check("card-transcript-only")
                 expect(

@@ -1016,6 +1016,17 @@ final class AppModel {
         if people.count != card.entry.people.count, speakers.started(card.entry) {
             speakers.label(card.entry, count: people.count)
         }
+        // Someone new at a meeting joins the people list, so they are
+        // suggested next time and their name is spelled right.
+        let added = people.names.filter { name in
+            !card.entry.people.names.contains(name) && !peopleList.contains(name)
+        }
+        if !added.isEmpty {
+            changePeople { list in
+                for name in added { list.add(.init(name: name)) }
+                return true
+            }
+        }
         card.entry.people = people
         self.card = card
         if card.entry.folder == activeFolder {
@@ -1028,6 +1039,29 @@ final class AppModel {
         } catch {
             problem = "Could not save who was there: \(error.localizedDescription)"
         }
+    }
+
+    /// Names a voice, and adds the name to who was there, so naming a
+    /// speaker never has to be done twice.
+    func nameVoice(_ voice: Int, _ name: String?, in entry: RecordingEntry) {
+        speakers.name(voice, name, in: entry)
+        if let name { addToWhoWasThere([name], in: entry) }
+    }
+
+    func acceptSuggestedNames(in entry: RecordingEntry) {
+        speakers.acceptSuggestedNames(in: entry)
+        addToWhoWasThere(speakers.result(for: entry).map { Array($0.names.values) } ?? [], in: entry)
+    }
+
+    /// Adds names to the open recording's who was there, leaving the count
+    /// alone: changing it would fold the voices again.
+    private func addToWhoWasThere(_ names: [String], in entry: RecordingEntry) {
+        guard let card, card.entry.folder == entry.folder else { return }
+        var people = card.entry.people
+        for name in names.sorted() where !people.names.contains(where: { $0.lowercased() == name.lowercased() }) {
+            people.names.append(name)
+        }
+        if people != card.entry.people { setPeople(people) }
     }
 
     /// Names the open recording; the folder keeps its dated name.
