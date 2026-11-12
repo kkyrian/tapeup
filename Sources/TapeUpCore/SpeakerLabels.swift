@@ -255,11 +255,13 @@ public struct SpeakerProvenance: Sendable, Equatable, Codable {
     public var addedToWhoWasThere: Bool
     /// Acoustic score or microphone confidence at fill time, before learning.
     public var similarity: Float?
+    public var microphone: Bool? = nil
 
-    public init(origin: Origin, addedToWhoWasThere: Bool = false, similarity: Float? = nil) {
+    public init(origin: Origin, addedToWhoWasThere: Bool = false, similarity: Float? = nil, microphone: Bool? = nil) {
         self.origin = origin
         self.addedToWhoWasThere = addedToWhoWasThere
         self.similarity = similarity
+        self.microphone = microphone
     }
 }
 
@@ -399,7 +401,9 @@ extension SpeakerLabels {
                         let before = store
                         store.relabel(
                             stamp: RecordingLibrary.stamp(of: folder), voices: moved, chosen: chosen,
-                            names: labeled.names, aliases: try VoiceLibrary(root: root).pendingAliases())
+                            names: labeled.names,
+                            aliases: try VoiceLibrary(root: root).pendingAliases(
+                                for: RecordingLibrary.stamp(of: folder)))
                         if store != before {
                             writes.append(.file(VoiceStore.url(in: root), try JSONEncoder().encode(store)))
                         }

@@ -118,19 +118,19 @@ struct VoiceTuningAndIdentityTests {
         #expect(SpeakerLabels.result(in: moved)?.names[1] == "Sam")
     }
 
-    @Test func undoFindsTheRecordingAtItsNewTitleAndRestoresOriginalBytes() throws {
+    @Test func undoFindsTheRecordingAtItsNewTitleAndRestoresIdentity() throws {
         let f = try VoiceFixture()
         defer { f.remove() }
         let folder = try f.recording()
-        let filenames = ["meta.json", SpeakerLabels.resultFileName, SpeakerLabels.fileName]
-        let originals = try filenames.map { try Data(contentsOf: folder.appendingPathComponent($0)) }
         let undo = try f.library.name(1, "Mei", in: folder)
         let moved = try titled(folder)
         let result = try undo.restore()
         #expect(result.skipped.isEmpty)
-        for (file, original) in zip(filenames, originals) {
-            #expect(try Data(contentsOf: moved.appendingPathComponent(file)) == original)
-        }
+        #expect(SpeakerLabels.result(in: moved)?.names.isEmpty == true)
+        #expect(RecordingLibrary.entry(at: moved)?.people.names.isEmpty == true)
+        #expect(
+            try String(contentsOf: moved.appendingPathComponent(SpeakerLabels.fileName), encoding: .utf8).contains(
+                "Voice 1"))
         #expect(!FileManager.default.fileExists(atPath: folder.path))
     }
 
@@ -231,7 +231,7 @@ struct VoiceTuningAndIdentityTests {
         #expect(VoiceMatching.similarity(voicePrint(), to: person) == -1)
     }
 
-    @Test func undoPreservesLaterEditsAfterTitlingAndReportsTheCurrentPath() throws {
+    @Test func inverseUndoPreservesLaterMetadataAfterTitling() throws {
         let f = try VoiceFixture()
         defer { f.remove() }
         let folder = try f.recording()
@@ -239,11 +239,9 @@ struct VoiceTuningAndIdentityTests {
         let moved = try titled(folder)
         try MetaFile.update(moved) { $0["extra"] = "later edit" }
         let result = try undo.restore()
-        #expect(
-            result.skipped.contains {
-                $0.lastPathComponent == "meta.json"
-                    && $0.deletingLastPathComponent().lastPathComponent == moved.lastPathComponent
-            })
+        #expect(result.problem == nil)
+        #expect(result.restored.contains { $0.lastPathComponent == moved.lastPathComponent })
+        #expect(SpeakerLabels.result(in: moved)?.names.isEmpty == true)
         #expect(MetaFile.read(moved)?["extra"] as? String == "later edit")
     }
 

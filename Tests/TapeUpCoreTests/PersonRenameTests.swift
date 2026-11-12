@@ -4,14 +4,14 @@ import Testing
 @testable import TapeUpCore
 
 struct PersonRenameTests {
-    @Test func renameEveryFileThenUndoRestoresEveryByte() throws {
+    @Test func renameThenInverseRestoresIdentityAndKeepsAudit() throws {
         let fixture = try VoiceFixture()
         defer { fixture.remove() }
         try fixture.seed("Mei")
         let first = try fixture.recording(
             names: [1: "Mei"], provenance: [1: .init(origin: .filled, addedToWhoWasThere: true)], attendees: ["Mei"])
         let second = try fixture.recording("2026-01-03-1200", names: [1: "Mei"], attendees: ["Mei"])
-        let before = try fixture.bytes()
+        let beforeStore = VoiceStore.load(from: fixture.root)
         let result = try fixture.library.renamePerson("Mei", to: "Priya Shah")
         #expect(result.changedRecordings.count == 2)
         #expect(result.skipped.isEmpty)
@@ -33,7 +33,12 @@ struct PersonRenameTests {
         }
         #expect(SpeakerLabels.result(in: first)?.provenance(for: 1).origin == .filled)
         try result.undo.restore()
-        #expect(try fixture.bytes() == before)
+        #expect(VoiceStore.load(from: fixture.root) == beforeStore)
+        #expect(PeopleList.load(from: fixture.root).allNames == ["Mei"])
+        for folder in [first, second] {
+            #expect(SpeakerLabels.result(in: folder)?.names[1] == "Mei")
+            #expect(RecordingLibrary.entry(at: folder)?.people.names == ["Mei"])
+        }
     }
 
     @Test func mergeUnifiesPeopleAttendanceAndVoiceStore() throws {
@@ -46,14 +51,16 @@ struct PersonRenameTests {
         try people.save(to: fixture.root)
         let folder = try fixture.recording(
             prints: [1: voicePrint(), 2: voicePrint(0, 1)], names: [1: "Mei", 2: "Ana"], attendees: ["Mei", "Ana"])
-        let before = try fixture.bytes()
+        let beforeStore = VoiceStore.load(from: fixture.root)
         let result = try fixture.library.renamePerson("Mei", to: "Ana")
         #expect(PeopleList.load(from: fixture.root).people == [.init(name: "Ana", context: "A note")])
         #expect(RecordingLibrary.entry(at: folder)?.people.names == ["Ana"])
         #expect(Set(SpeakerLabels.result(in: folder)?.names.values.map { $0 } ?? []) == ["Ana"])
         #expect(VoiceStore.load(from: fixture.root).people["Ana"]?.examples.count == 2)
         try result.undo.restore()
-        #expect(try fixture.bytes() == before)
+        #expect(VoiceStore.load(from: fixture.root) == beforeStore)
+        #expect(Set(PeopleList.load(from: fixture.root).allNames) == ["Mei", "Ana"])
+        #expect(SpeakerLabels.result(in: folder)?.names == [1: "Mei", 2: "Ana"])
     }
 
     @Test func busyFolderIsSkippedAndCanBeCaughtUp() throws {
@@ -88,17 +95,17 @@ struct PersonRenameTests {
         #expect(try fixture.bytes() == before)
     }
 
-    @Test func missingEventsAreCreatedAndUndoRemovesThem() throws {
+    @Test func inverseRenameAppendsAuditEvenWhenNoEventFileExisted() throws {
         let fixture = try VoiceFixture()
         defer { fixture.remove() }
         let folder = try fixture.recording(attendees: ["Mei"])
         let events = folder.appendingPathComponent("events.jsonl")
         try FileManager.default.removeItem(at: events)
-        let before = try fixture.bytes()
         let result = try fixture.library.renamePerson("Mei", to: "Ana")
         #expect(FileManager.default.fileExists(atPath: events.path))
         try result.undo.restore()
-        #expect(try fixture.bytes() == before)
+        #expect(FileManager.default.fileExists(atPath: events.path))
+        #expect(RecordingLibrary.entry(at: folder)?.people.names == ["Mei"])
     }
 
     @Test func unreadableLabelsOrMissingLinesAreReportedWithoutChangingThatFolder() throws {

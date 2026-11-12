@@ -3,7 +3,10 @@ import Foundation
 /// Synchronous disk operations for the integrator; run on a serial background
 /// queue. A fill never teaches the store; only label actions below do.
 public struct VoiceLibrary: Sendable {
-    public enum Failure: Error, Equatable { case busyRecording, concurrentChange }
+    public enum Failure: Error, Equatable {
+        case busyRecording, concurrentChange
+        case ambiguousRecording(String)
+    }
 
     public let root: URL
     public var parameters: VoiceMatching.Parameters
@@ -100,7 +103,8 @@ public struct VoiceLibrary: Sendable {
                 let added = recording.attend(fill.person)
                 recording.result.names[fill.voice] = fill.person
                 recording.result.provenance[fill.voice] = .init(
-                    origin: .filled, addedToWhoWasThere: added, similarity: fill.similarity)
+                    origin: .filled, addedToWhoWasThere: added, similarity: fill.similarity, microphone: fill.microphone
+                )
                 recording.result.suggested[fill.voice] = nil
             }
             _ = try VoiceFiles.apply(recording.writes())
@@ -144,18 +148,24 @@ public struct VoiceLibrary: Sendable {
             var store = try editableStore()
             try learnFills(&recording, store: &store, voices: voices)
             return try VoiceFiles.apply(
-                recording.writes() + [.file(VoiceStore.url(in: root), try JSONEncoder().encode(store))])
+                recording.writes() + [.file(VoiceStore.url(in: root), try JSONEncoder().encode(store))]
+            ).reversingLabels(in: self)
         }
     }
 
-    private func learnFills(_ recording: inout Recording, store: inout VoiceStore, voices: Set<Int>? = nil) throws {
+    private func learnFills(
+        _ recording: inout Recording, store: inout VoiceStore, voices: Set<Int>? = nil,
+        excluding personChosen: String? = nil
+    ) throws {
         for (voice, person) in recording.result.names.sorted(by: { $0.key < $1.key }) {
             guard voices == nil || voices!.contains(voice), recording.result.provenance(for: voice).origin == .filled
             else { continue }
+            if let personChosen, person.caseInsensitiveCompare(personChosen) == .orderedSame { continue }
             var provenance = recording.result.provenance(for: voice)
             if let example = recording.example(voice, minimumSeconds: parameters.minimumSeconds) {
                 try store.addExample(example, for: person, parameters: parameters)
-                if let similarity = provenance.similarity {
+                if !isMicrophone(provenance, voice: voice, recording: recording), let similarity = provenance.similarity
+                {
                     store.recordFeedback(
                         for: person, stamp: recording.stamp, voice: voice, similarity: similarity, confirmed: true,
                         parameters: parameters)
@@ -166,13 +176,23 @@ public struct VoiceLibrary: Sendable {
         }
     }
 
+    private func isMicrophone(_ provenance: SpeakerProvenance, voice: Int, recording: Recording) -> Bool {
+        if let microphone = provenance.microphone { return microphone }
+        // Older files retained confidence 1 (or omitted it) without the flag.
+        return (provenance.similarity == nil || provenance.similarity == parameters.microphoneScore)
+            && TranscriptDocument.sidesKnown(meta: recording.meta)
+            && SpeakerLabels.microphoneOnlyVoices(lines: recording.lines, assigned: recording.result.assigned).contains(
+                voice)
+    }
+
     private func choose(_ voice: Int, person: String?, recording: inout Recording, store: inout VoiceStore) throws {
         guard recording.result.voices.contains(where: { $0.id == voice }) else {
             throw VoiceStore.StoreError.invalidExample
         }
         let old = recording.result.names[voice]
         let provenance = recording.result.provenance(for: voice)
-        if old == nil, let person, let example = recording.example(voice, minimumSeconds: parameters.minimumSeconds),
+        if let person, old?.caseInsensitiveCompare(person) != .orderedSame,
+            let example = recording.example(voice, minimumSeconds: parameters.minimumSeconds),
             let profile = store.people[person]
         {
             let score = VoiceMatching.similarity(example.print, to: profile, parameters: parameters)
@@ -191,9 +211,11 @@ public struct VoiceLibrary: Sendable {
                 // fills always kept a score, so migrate those missing values.
                 ?? parameters.microphoneScore
             try store.addNegative(example, for: old, similarity: score, parameters: parameters)
-            store.recordFeedback(
-                for: old, stamp: recording.stamp, voice: voice, similarity: score, confirmed: false,
-                parameters: parameters)
+            if !isMicrophone(provenance, voice: voice, recording: recording) {
+                store.recordFeedback(
+                    for: old, stamp: recording.stamp, voice: voice, similarity: score, confirmed: false,
+                    parameters: parameters)
+            }
 
         }
         recording.result.names[voice] = person
@@ -207,7 +229,7 @@ public struct VoiceLibrary: Sendable {
             }
             // Explicitly choosing an unchanged fill is a confirmation too.
             if old == person, provenance.origin != .person {
-                if provenance.origin == .filled,
+                if provenance.origin == .filled, !isMicrophone(provenance, voice: voice, recording: recording),
                     recording.example(voice, minimumSeconds: parameters.minimumSeconds) != nil,
                     let score = provenance.similarity
                 {
@@ -217,7 +239,7 @@ public struct VoiceLibrary: Sendable {
                 }
                 recording.result.provenance[voice] = .init(
                     origin: .confirmed, addedToWhoWasThere: provenance.addedToWhoWasThere,
-                    similarity: provenance.similarity)
+                    similarity: provenance.similarity, microphone: provenance.microphone)
             }
         }
     }
@@ -235,7 +257,7 @@ public struct VoiceLibrary: Sendable {
             var store = try editableStore()
             if let name = person { person = try canonicalPerson(name, store: store) }
             try choose(voice, person: person, recording: &recording, store: &store)
-            if confirmRemaining { try learnFills(&recording, store: &store) }
+            if confirmRemaining { try learnFills(&recording, store: &store, excluding: person) }
             var writes = try recording.writes() + [.file(VoiceStore.url(in: root), try JSONEncoder().encode(store))]
             if let person {
                 var people = try checkedPeople()
@@ -244,7 +266,7 @@ public struct VoiceLibrary: Sendable {
                     writes.append(.file(PeopleList.url(in: root), try Self.peopleData(people)))
                 }
             }
-            return try VoiceFiles.apply(writes)
+            return try VoiceFiles.apply(writes).reversingLabels(in: self)
         }
     }
 
@@ -255,14 +277,14 @@ public struct VoiceLibrary: Sendable {
         try VoiceFiles.withRootLock(root) {
             var people = try checkedPeople()
             var store = try editableStore()
-            let aliases = try pendingAliases()[person.lowercased()] ?? [person.lowercased()]
+            let aliases: Set<String> = [person.lowercased()]
             people.people.removeAll { aliases.contains($0.name.lowercased()) }
             if let you = people.you, aliases.contains(you.lowercased()) { people.you = nil }
             for name in store.people.keys where aliases.contains(name.lowercased()) { store.forgetPerson(name) }
             return try VoiceFiles.apply([
                 .file(VoiceStore.url(in: root), try JSONEncoder().encode(store)),
                 .file(PeopleList.url(in: root), try Self.peopleData(people)),
-            ])
+            ]).reversingLabels(in: self)
         }
     }
 
@@ -416,9 +438,9 @@ public struct VoiceLibrary: Sendable {
                     }
                 }
                 undo.include(try VoiceFiles.apply(writes))
-                return PastFillResult(changed: changed, skipped: skipped, undo: undo)
+                return PastFillResult(changed: changed, skipped: skipped, undo: undo.reversingLabels(in: self))
             } catch {
-                _ = try undo.restore()
+                _ = try undo.rollback()
                 throw error
             }
         }

@@ -176,13 +176,11 @@ public struct PeopleList: Sendable, Equatable {
     /// Like `load`, but throws when a file exists and cannot be read as a
     /// list, so callers never save over a list they failed to understand.
     public static func loadChecked(from root: URL) throws -> PeopleList {
-        try VoiceFiles.withRootLock(root) {
-            let data = try VoiceFiles.read(url(in: root))
-            var list = try loadData(data)
-            list.loadedData = data
-            list.wasLoaded = true
-            return list
-        }
+        let data = try VoiceFiles.read(url(in: root))
+        var list = try loadData(data)
+        list.loadedData = data
+        list.wasLoaded = true
+        return list
     }
 
     private static func loadData(_ data: Data?) throws -> PeopleList {

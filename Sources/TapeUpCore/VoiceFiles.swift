@@ -1,7 +1,7 @@
 import Foundation
 
-/// Undo restores a file only while it still contains this operation's bytes.
-/// Later edits, unreadable files and busy recordings are reported and left alone.
+/// User undo reverses domain changes on fresh data. Byte snapshots remain
+/// available for transactional failure rollback and operations without an inverse.
 public struct VoiceFileUndo: Sendable {
     struct File: Sendable {
         var root: URL
@@ -31,6 +31,11 @@ public struct VoiceFileUndo: Sendable {
             return RecordingLibrary(root: root).folder(withStamp: stamp)?.appendingPathComponent(name)
         }
 
+        var conflict: String? {
+            guard let stamp, RecordingLibrary(root: root).folders(withStamp: stamp).count > 1 else { return nil }
+            return "More than one recording has stamp \(stamp)."
+        }
+
         /// An absent recording is reported by its stamp; its former title is
         /// neither retained nor used to recreate a deleted folder.
         var url: URL {
@@ -44,27 +49,45 @@ public struct VoiceFileUndo: Sendable {
 
     var files: [File]
     var root: URL? = nil
+    var inverse: (@Sendable (Set<String>) throws -> RestoreResult)? = nil
     public var fileCount: Int { files.count }
 
     public struct RestoreResult: Sendable {
         public var restored: [URL] = []
         public var skipped: [URL] = []
+        public var failures: [URL: String] = [:]
+
+        public var problem: String? {
+            guard !skipped.isEmpty || !failures.isEmpty else { return nil }
+            let detail = failures.values.sorted().first ?? "Some later edits or busy recordings were kept."
+            return "Undo was incomplete. \(detail)"
+        }
     }
 
     @discardableResult
-    public func restore() throws -> RestoreResult {
-        if let root { return try VoiceFiles.withRootLock(root) { try restoreLocked() } }
-        return try VoiceFiles.locked { try restoreLocked() }
+    public func restore(busy: Set<String> = []) throws -> RestoreResult {
+        if let inverse { return try inverse(busy) }
+        return try rollback(busy: busy)
     }
 
-    private func restoreLocked() throws -> RestoreResult {
+    func rollback(busy: Set<String> = []) throws -> RestoreResult {
+        if let root { return try VoiceFiles.withRootLock(root) { try restoreLocked(busy: busy) } }
+        return try VoiceFiles.locked { try restoreLocked(busy: busy) }
+    }
+
+    private func restoreLocked(busy: Set<String>) throws -> RestoreResult {
         var result = RestoreResult()
         let groups = Dictionary(grouping: files, by: \.stamp)
         for (stamp, files) in groups {
             var held: FolderLock?
+            if let stamp, busy.contains(stamp) {
+                result.skipped += files.map(\.url)
+                continue
+            }
             if stamp != nil {
                 guard let folder = files.first?.resolved()?.deletingLastPathComponent() else {
                     result.skipped += files.map(\.url)
+                    for file in files { if let conflict = file.conflict { result.failures[file.url] = conflict } }
                     continue
                 }
                 held = FolderLock(folder: folder)
@@ -149,7 +172,9 @@ enum VoiceFiles {
         guard isRecordingStamp(stamp), folder.deletingLastPathComponent().lastPathComponent == String(stamp.prefix(4))
         else { return folder }
         let library = RecordingLibrary(root: root ?? folder.deletingLastPathComponent().deletingLastPathComponent())
-        guard let current = library.folder(withStamp: stamp) else { throw CocoaError(.fileNoSuchFile) }
+        let matches = library.folders(withStamp: stamp)
+        if matches.count > 1 { throw VoiceLibrary.Failure.ambiguousRecording(stamp) }
+        guard let current = matches.first else { throw CocoaError(.fileNoSuchFile) }
         return current
     }
 
@@ -237,7 +262,7 @@ enum VoiceFiles {
                     let file: VoiceFileUndo.File
                     switch write {
                     case .meta(let folder, let change):
-                        file = try MetaFile.withLock {
+                        file = try MetaFile.withLock(in: folder) { _ in
                             let before = try read(write.url)
                             var object = try self.object(write.url)
                             change(&object)
@@ -260,7 +285,12 @@ enum VoiceFiles {
                     }
                     return file
                 }
-                let file = try recordingFolder(for: target.url) == nil ? perform() : MetaFile.withLock(perform)
+                let file: VoiceFileUndo.File
+                if let folder = recordingFolder(for: target.url) {
+                    file = try MetaFile.withLock(in: folder) { _ in try perform() }
+                } else {
+                    file = try perform()
+                }
                 undo.include(.init(files: [file], root: undo.root))
             }
         } catch {
@@ -288,7 +318,10 @@ enum VoiceFiles {
             try put(file.data, at: url)
             return true
         }
-        if file.stamp != nil || file.name == "meta.json" { return try MetaFile.withLock(restore) }
+        if file.stamp != nil || file.name == "meta.json" {
+            guard let folder = file.resolved()?.deletingLastPathComponent() else { return false }
+            return try MetaFile.withLock(in: folder) { _ in try restore() }
+        }
         return try restore()
     }
 

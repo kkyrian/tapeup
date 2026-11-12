@@ -176,6 +176,7 @@ public struct RecordingLibrary: Sendable {
         return folders(in: root)
             .filter { $0.lastPathComponent.wholeMatch(of: /\d{4}/) != nil }
             .flatMap(folders(in:))
+            .filter(Self.hasMetadata)
             .sorted { $0.lastPathComponent > $1.lastPathComponent }
     }
 
@@ -261,13 +262,28 @@ public struct RecordingLibrary: Sendable {
         return folder
     }
 
-    /// The folder whose name starts with `stamp`, wherever a rename has put
-    /// it. Transcripts finish after the card may have renamed the folder.
+    /// Only real recording directories participate. An ambiguous stamp has no
+    /// winner; callers must report the conflict instead of trusting listing order.
+    public func folders(withStamp stamp: String) -> [URL] {
+        let year = root.appendingPathComponent(String(stamp.prefix(4)), isDirectory: true)
+        let urls =
+            (try? FileManager.default.contentsOfDirectory(
+                at: year,
+                includingPropertiesForKeys: [.isDirectoryKey])) ?? []
+        return urls.filter {
+            Self.stamp(of: $0) == stamp
+                && (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+                && Self.hasMetadata($0)
+        }.sorted { $0.lastPathComponent < $1.lastPathComponent }
+    }
+
+    private static func hasMetadata(_ folder: URL) -> Bool {
+        (try? MetaFile.url(in: folder).resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
+    }
 
     public func folder(withStamp stamp: String) -> URL? {
-        let year = root.appendingPathComponent(String(stamp.prefix(4)), isDirectory: true)
-        let names = (try? FileManager.default.contentsOfDirectory(atPath: year.path)) ?? []
-        return names.first { Self.stamp(of: $0) == stamp }.map { year.appendingPathComponent($0, isDirectory: true) }
+        let matches = folders(withStamp: stamp)
+        return matches.count == 1 ? matches[0] : nil
     }
 
     public static func stamp(of folder: URL) -> String { stamp(of: folder.lastPathComponent) }
@@ -283,8 +299,7 @@ public struct RecordingLibrary: Sendable {
             parent.lastPathComponent == String(stamp(of: folder).prefix(4))
             ? parent.deletingLastPathComponent() : parent
         return try VoiceFiles.withRootLock(root) {
-            try MetaFile.withLock {
-                let folder = try VoiceFiles.resolveRecording(folder)
+            try MetaFile.withLock(in: folder) { folder in
                 let trimmed = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                 try MetaFile.update(folder) { meta in
                     meta["title"] = trimmed.isEmpty ? nil : trimmed

@@ -25,6 +25,7 @@ final class Speakers {
     var voices: VoiceLibrary { VoiceLibrary(root: library.root) }
     /// Called after a name changes on disk, so who was there and the people list follow.
     var namesChanged: (String) -> Void = { _ in }
+    var showProblem: (String) -> Void = { _ in }
     /// After a filled name is corrected: earlier meetings where the same
     /// wrong name was filled in for a voice like this one, unchecked.
     private(set) var offer: PastFillOffer?
@@ -135,8 +136,8 @@ final class Speakers {
                 try voices.unname(voice, in: folder)
             }
         } catch {
-            // A file TapeUp cannot read is left as it is; the name still goes on the voice.
-            try? SpeakerLabels.name(voice, name, in: folder)
+            showProblem("Could not save the voice name: \(error.localizedDescription)")
+            return
         }
         version += 1
         namesChanged(stamp)
@@ -148,7 +149,9 @@ final class Speakers {
             let result = SpeakerLabels.result(in: folder), result.names[voice] != nil,
             result.provenance(for: voice).origin == .filled
         else { return }
-        _ = try? voices.confirm(voice, in: folder)
+        do { try voices.confirm(voice, in: folder) } catch {
+            showProblem("Could not confirm the voice: \(error.localizedDescription)")
+        }
         version += 1
     }
 
@@ -161,7 +164,12 @@ final class Speakers {
             if let folder = library.folder(withStamp: hit.stamp) { hit.recording = folder }
             return hit
         }
-        guard let result = try? voices.applyPastFills(hits, to: offer.to, busy: busy) else { return }
+        let result: VoiceLibrary.PastFillResult
+        do { result = try voices.applyPastFills(hits, to: offer.to, busy: busy) } catch {
+            showProblem("Could not change earlier fills: \(error.localizedDescription)")
+            return
+        }
+        if !result.skipped.isEmpty { showProblem("Some earlier fills were skipped because they changed or are busy.") }
         let changed = Set(result.changed.map { "\($0.stamp)/\($0.voice)" })
         let left = offer.hits.filter { !changed.contains("\($0.stamp)/\($0.voice)") && $0 != hit }
         self.offer =
@@ -176,8 +184,10 @@ final class Speakers {
 
     func undoOffer() {
         guard let done = offerDone else { return }
-        offerDone = nil
-        try? done.undo.restore()
+        do {
+            let result = try done.undo.restore(busy: busy)
+            if let problem = result.problem { showProblem(problem) } else { offerDone = nil }
+        } catch { showProblem("Could not undo the earlier changes: \(error.localizedDescription)") }
         version += 1
         namesChanged(done.stamp)
     }

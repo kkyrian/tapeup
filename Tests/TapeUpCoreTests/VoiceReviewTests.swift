@@ -4,18 +4,18 @@ import Testing
 @testable import TapeUpCore
 
 struct VoiceReviewTests {
-    @Test func undoPreservesLaterPeopleAndStoreEdits() throws {
+    @Test func undoReversesItsOwnPeopleAndStoreEditsOnly() throws {
         let f = try VoiceFixture()
         defer { f.remove() }
         let first = try f.recording("2026-01-01-1200")
         let second = try f.recording("2026-01-02-1200")
         let undo = try f.library.name(1, "Mei", in: first)
         try f.library.name(1, "Sam", in: second)
-        let people = try Data(contentsOf: PeopleList.url(in: f.root))
-        let store = try Data(contentsOf: VoiceStore.url(in: f.root))
+        let sam = VoiceStore.load(from: f.root).people["Sam"]
         try undo.restore()
-        #expect(try Data(contentsOf: PeopleList.url(in: f.root)) == people)
-        #expect(try Data(contentsOf: VoiceStore.url(in: f.root)) == store)
+        #expect(PeopleList.load(from: f.root).allNames == ["Sam"])
+        #expect(VoiceStore.load(from: f.root).people["Sam"] == sam)
+        #expect(VoiceStore.load(from: f.root).people["Mei"] == nil)
     }
 
     @Test func recordingLockIsRespectedWithoutCallerBusyHint() throws {
@@ -114,7 +114,7 @@ struct VoiceReviewTests {
         #expect(result.skipped.count == 1)
         #expect(SpeakerLabels.result(in: good)?.names[1] == "Ana")
     }
-    @Test func undoReportsTheFilesWhoseBytesChanged() throws {
+    @Test func undoKeepsAReplacementPeopleList() throws {
         let f = try VoiceFixture()
         defer { f.remove() }
         let folder = try f.recording()
@@ -122,8 +122,8 @@ struct VoiceReviewTests {
         let people = Data(#"{"format":"tapeup-people/1","people":["Sam"]}"#.utf8)
         try people.write(to: PeopleList.url(in: f.root))
         let result = try undo.restore()
-        #expect(result.skipped.contains { $0.lastPathComponent == PeopleList.fileName })
-        #expect(try Data(contentsOf: PeopleList.url(in: f.root)) == people)
+        #expect(result.problem == nil)
+        #expect(PeopleList.load(from: f.root).allNames == ["Sam"])
         #expect(!result.restored.isEmpty)
     }
 
@@ -230,7 +230,7 @@ struct VoiceReviewTests {
         #expect(names.last == PeopleList.fileName)
     }
 
-    @Test func busyCatchUpRemainsPendingAndUnreadableFolderCanBeRepaired() throws {
+    @Test func permanentFailureRetiresButAnExplicitRetryCanWaitForBusyWork() throws {
         let f = try VoiceFixture()
         defer { f.remove() }
         let folder = try f.recording(names: [1: "Mei"])
@@ -239,7 +239,9 @@ struct VoiceReviewTests {
         try Data("broken".utf8).write(to: url)
         let initial = try f.library.renamePerson("Mei", to: "Ana")
         #expect(initial.failures.count == 1)
+        #expect(try f.library.finishPendingRenames().isEmpty)
         try good.write(to: url)
+        _ = try f.library.renamePerson("Mei", to: "Ana", busy: [RecordingLibrary.stamp(of: folder)])
         let held = try #require(FolderLock(folder: folder))
         let stillBusy = try f.library.finishPendingRenames()
         #expect(stillBusy.first?.skipped.count == 1)
@@ -473,7 +475,7 @@ struct VoiceReviewTests {
         #expect(PeopleList.load(from: f.root).contains("Ana"))
     }
 
-    @Test func eventUndoPreservesLaterAppendsAndReportsThem() throws {
+    @Test func inverseRenamePreservesLaterEventsAndAppendsAudit() throws {
         let f = try VoiceFixture()
         defer { f.remove() }
         let folder = try f.recording(attendees: ["Mei"])
@@ -482,8 +484,8 @@ struct VoiceReviewTests {
         let events = folder.appendingPathComponent("events.jsonl")
         let bytes = try Data(contentsOf: events)
         let result = try rename.undo.restore()
-        #expect(result.skipped.contains { $0.lastPathComponent == "events.jsonl" })
-        #expect(try Data(contentsOf: events) == bytes)
+        #expect(result.skipped.isEmpty)
+        #expect(try Data(contentsOf: events).starts(with: bytes))
     }
 
     @Test func eventUndoPreservesAnExistingEventHandle() throws {
@@ -531,7 +533,7 @@ struct VoiceReviewTests {
         #expect(abs(VoiceMatching.bar(for: store.people["Mei"]!, parameters: p) - 0.77) < 0.001)
     }
 
-    @Test func corruptLabelRecoveryDiscardsCalibrationFromInvalidatedHistory() throws {
+    @Test func corruptLabelRecoveryKeepsCalibrationWithoutRetainedStampFeedback() throws {
         let f = try VoiceFixture()
         defer { f.remove() }
         try f.seed()
@@ -549,7 +551,7 @@ struct VoiceReviewTests {
         let heard = try #require(VoicePrints.read(in: folder))
         _ = try SpeakerLabels.relabel(heard, count: 1, in: folder)
         let recovered = try #require(VoiceStore.load(from: f.root).people["Mei"])
-        #expect(VoiceMatching.bar(for: recovered) == VoiceMatching.Parameters().bar)
+        #expect(VoiceMatching.bar(for: recovered) == VoiceMatching.bar(for: store.people["Mei"]!))
         #expect(recovered.feedback.count == 20)
     }
 

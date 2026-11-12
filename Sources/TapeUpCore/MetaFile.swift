@@ -7,10 +7,46 @@ import Foundation
 public enum MetaFile {
     private static let lock = NSRecursiveLock()
 
-    static func withLock<T>(_ operation: () throws -> T) rethrows -> T {
+    /// One stable inode serializes metadata read-modify-write across the app
+    /// and CLI. Nested patches reuse the flock; lock files are never unlinked.
+    static func withLock<T>(in folder: URL, _ operation: (URL) throws -> T) throws -> T {
         lock.lock()
         defer { lock.unlock() }
-        return try operation()
+        func currentFolder() throws -> URL {
+            let stamp = RecordingLibrary.stamp(of: folder)
+            if VoiceFiles.isRecordingStamp(stamp),
+                folder.deletingLastPathComponent().lastPathComponent == String(stamp.prefix(4))
+            {
+                let root = folder.deletingLastPathComponent().deletingLastPathComponent()
+                let matches = RecordingLibrary(root: root).folders(withStamp: stamp)
+                if matches.count > 1 { throw VoiceLibrary.Failure.ambiguousRecording(stamp) }
+                if let match = matches.first { return match }
+                // The recorder writes its first meta.json after making the directory.
+                if FileManager.default.fileExists(atPath: folder.path),
+                    !FileManager.default.fileExists(atPath: url(in: folder).path)
+                {
+                    return folder
+                }
+                throw CocoaError(.fileNoSuchFile)
+            }
+            return folder
+        }
+        let current = try currentFolder()
+        let stamp = RecordingLibrary.stamp(of: current)
+        let key = "TapeUpMetaLock:" + current.deletingLastPathComponent().path + ":" + stamp
+        if Thread.current.threadDictionary[key] != nil { return try operation(current) }
+        let descriptor = open(current.appendingPathComponent(".meta.lock").path, O_CREAT | O_RDWR, 0o600)
+        guard descriptor >= 0 else { throw POSIXError(.init(rawValue: errno) ?? .EIO) }
+        defer { close(descriptor) }
+        while flock(descriptor, LOCK_EX) != 0 {
+            if errno != EINTR { throw POSIXError(.init(rawValue: errno) ?? .EIO) }
+        }
+        Thread.current.threadDictionary[key] = true
+        defer {
+            Thread.current.threadDictionary.removeObject(forKey: key)
+            flock(descriptor, LOCK_UN)
+        }
+        return try operation(currentFolder())
     }
 
     public static func url(in folder: URL) -> URL { folder.appendingPathComponent("meta.json") }
@@ -21,14 +57,15 @@ public enum MetaFile {
     }
 
     public static func update(_ folder: URL, _ change: (inout [String: Any]) -> Void) throws {
-        lock.lock()
-        defer { lock.unlock() }
-        var meta = read(folder) ?? [:]
-        change(&meta)
-        let data = try JSONSerialization.data(
-            withJSONObject: meta, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
-        try data.write(to: url(in: folder), options: .atomic)
+        try withLock(in: folder) { current in
+            var meta = read(current) ?? [:]
+            change(&meta)
+            let data = try JSONSerialization.data(
+                withJSONObject: meta, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
+            try data.write(to: url(in: current), options: .atomic)
+        }
     }
+
 }
 
 /// An exclusive lock on a recording folder, held for as long as a recorder

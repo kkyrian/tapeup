@@ -192,6 +192,7 @@ struct TranscriptStateTests {
         let root = base.appendingPathComponent("here")
         let folder = root.appendingPathComponent("2026/2026-11-06-1000 Lab sync")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try Data("{}".utf8).write(to: MetaFile.url(in: folder))
         let library = RecordingLibrary(root: root)
         for name in ["2026-11-06-1000", "2026-11-06-1000 Lab sync", "2026/2026-11-06-1000", folder.path] {
             #expect(library.recording(name)?.lastPathComponent == folder.lastPathComponent, "\(name)")

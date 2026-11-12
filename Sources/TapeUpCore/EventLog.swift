@@ -52,8 +52,7 @@ public final class EventLog: @unchecked Sendable {
         capture: ((Data?, Data?) -> Void)?
     ) -> Bool {
         do {
-            return try MetaFile.withLock {
-                let folder = try VoiceFiles.resolveRecording(folder)
+            return try MetaFile.withLock(in: folder) { folder in
                 return try withAppendLock(in: folder) {
                     var entry = fields
                     entry["event"] = event
@@ -86,8 +85,7 @@ public final class EventLog: @unchecked Sendable {
     }
 
     static func restore(_ original: Data?, ifCurrentIs expected: Data?, in folder: URL) throws -> Bool {
-        try MetaFile.withLock {
-            let folder = try VoiceFiles.resolveRecording(folder)
+        try MetaFile.withLock(in: folder) { folder in
             return try withAppendLock(in: folder) {
                 let url = folder.appendingPathComponent("events.jsonl")
                 let exists = FileManager.default.fileExists(atPath: url.path)
@@ -95,14 +93,13 @@ public final class EventLog: @unchecked Sendable {
                 do { current = exists ? try Data(contentsOf: url) : nil } catch { return false }
                 guard current == expected else { return false }
                 if let original {
-                    if !exists {
-                        try original.write(to: url, options: .atomic)
-                    } else {
-                        // Keep an existing event handle attached to the same inode.
+                    guard exists, let current, current.starts(with: original) else { return false }
+                    do {
+                        // Undo only the appended suffix. A failed truncate leaves
+                        // the original prefix in place; no rewrite can empty it.
                         let handle = try FileHandle(forWritingTo: url)
                         defer { try? handle.close() }
-                        try handle.truncate(atOffset: 0)
-                        try handle.write(contentsOf: original)
+                        try handle.truncate(atOffset: UInt64(original.count))
                     }
                 } else if exists {
                     try FileManager.default.removeItem(at: url)

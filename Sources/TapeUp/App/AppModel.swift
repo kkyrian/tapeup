@@ -236,6 +236,7 @@ final class AppModel {
         transcription = Transcription(library: library)
         speakers = Speakers(library: library)
         titles = Titles(library: library)
+        speakers.showProblem = { [weak self] in self?.show(problem: $0) }
         refreshAccess()
         deviceObservation = AudioDevices.observeDefaults(queue: .main) { [weak self] in
             MainActor.assumeIsolated { self?.refreshDevices() }
@@ -532,8 +533,8 @@ final class AppModel {
     // MARK: - Library
 
     func reload() {
-        // A rename that skipped a busy recording finishes once it is free.
-        catchUpRenames()
+        // The durable journal is the only source of pending identity changes.
+        finishPendingRenames()
         allEntries = library.entries().filter { $0.folder != activeFolder }
         recent = Array(allEntries.prefix(5))
         loadPeople()
@@ -613,14 +614,14 @@ final class AppModel {
     /// Takes a person off the list; their remembered voice goes with them.
     /// Past recordings keep their name: they were there.
     func removePerson(_ name: String) {
-        changePeople { list in
-            list.remove(name)
-            return true
+        do {
+            try VoiceLibrary(root: root).forgetPerson(name)
+            voicesRevision += 1
+            loadPeople()
+            reload()
+        } catch {
+            show(problem: "Could not remove the person: \(error.localizedDescription)")
         }
-        var voices = VoiceStore.load(from: root)
-        guard voices.people.keys.contains(where: { $0.caseInsensitiveCompare(name) == .orderedSame }) else { return }
-        voices.forgetPerson(name)
-        try? voices.save(to: root)
     }
 
     /// Bumped when the remembered voices are forgotten, so Settings redraws.
@@ -629,7 +630,7 @@ final class AppModel {
     /// How many people's voices are remembered.
     var voicesRemembered: Int {
         _ = voicesRevision
-        return VoiceStore.load(from: root).count
+        return VoiceStore.count(in: root)
     }
 
     /// Forgets every remembered voice; names already given stay.
@@ -648,8 +649,6 @@ final class AppModel {
     private(set) var lastRename: (from: String, to: String, recordings: Int, undo: VoiceFileUndo)?
     /// A rename onto a name already listed, waiting for Merge or Cancel.
     private(set) var mergeAsk: (from: String, into: String, note: String?)?
-    /// Renames that skipped recordings busy at the time, to catch up later.
-    private var renamesBehind: [(from: String, to: String, folders: [URL])] = []
 
     /// Recordings being written, transcribed or labeled right now.
     private var busyStamps: Set<String> {
@@ -664,40 +663,36 @@ final class AppModel {
         do {
             let result = try VoiceLibrary(root: root).renamePerson(old, to: new, busy: busyStamps)
             lastRename = (old, new, result.changedRecordings.count, result.undo)
-            if !result.skipped.isEmpty { renamesBehind.append((old, new, result.skipped)) }
+            if let problem = result.problem { show(problem: problem) }
             loadPeople()
             reload()
             if let card { refreshQuietly(RecordingLibrary.stamp(of: card.entry.folder)) }
             return true
         } catch {
-            problem = "Could not rename \(old): \(error.localizedDescription)"
+            show(problem: "Could not rename \(old): \(error.localizedDescription)")
             return false
         }
     }
 
-    /// Renames the recordings a rename skipped while they were busy.
-    func catchUpRenames() {
-        guard !renamesBehind.isEmpty else { return }
-        let busy = busyStamps
-        var still: [(from: String, to: String, folders: [URL])] = []
-        for rename in renamesBehind {
-            let ready = rename.folders.filter { !busy.contains(RecordingLibrary.stamp(of: $0)) }
-            let waiting = rename.folders.filter { busy.contains(RecordingLibrary.stamp(of: $0)) }
-            if !ready.isEmpty {
-                _ = try? VoiceLibrary(root: root).renamePerson(rename.from, to: rename.to, busy: busy, only: ready)
+    /// Called by reload(), including the launch reload. A completed or undone
+    /// rename cannot be recreated from a separate in-memory catch-up list.
+    private func finishPendingRenames() {
+        do {
+            for result in try VoiceLibrary(root: root).finishPendingRenames(busy: busyStamps) {
+                if let problem = result.problem { show(problem: problem) }
             }
-            if !waiting.isEmpty { still.append((rename.from, rename.to, waiting)) }
+        } catch {
+            show(problem: "Could not finish pending renames: \(error.localizedDescription)")
         }
-        renamesBehind = still
     }
 
     func undoRename() {
         guard let lastRename else { return }
-        self.lastRename = nil
         do {
-            try lastRename.undo.restore()
+            let result = try lastRename.undo.restore(busy: busyStamps)
+            if let problem = result.problem { show(problem: problem) } else { self.lastRename = nil }
         } catch {
-            problem = "Could not undo the rename: \(error.localizedDescription)"
+            show(problem: "Could not undo the rename: \(error.localizedDescription)")
         }
         loadPeople()
         reload()

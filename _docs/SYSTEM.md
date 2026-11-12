@@ -108,7 +108,9 @@ TU-014, TU-019, TU-036).
   meeting took that person. The numbers come from 40 AMI meetings. A fill
   puts the person in who was there but never adds anyone to the People list
   and never teaches the store; playing that voice, or naming another voice
-  in the meeting, confirms it. Changing a fill records "not me", takes the
+  in the meeting, confirms it unless the chosen person is on that fill.
+  A microphone correction keeps its negative without changing the acoustic
+  bar. Changing a fill records "not me", takes the
   person out of who was there if the fill put them there, and offers the
   same fix for unchecked fills of that person in earlier meetings, nothing
   changed without a click. Removing a person forgets their voice; Settings
@@ -237,7 +239,11 @@ rows, and nowhere else, keeps a recording's audio (`keep_audio` in
 `meta.json`) and moves it to Locked (TU-038). Renaming a person
 on the People page renames them in every recording, the labeled
 transcripts and the voice store at once, with Undo; renaming onto a listed
-name asks to merge (TU-040).
+name asks to merge (TU-040). Undo applies the inverse to fresh data, preserving
+unrelated edits; label Undo also reverses learning for its recording and voice.
+Busy recordings catch up through a persistent journal at launch and reload.
+Unusable or ambiguous recording folders are reported and retired from that
+journal. Root mutations and metadata patches use stable cross-process locks.
 
 ## Design Decisions
 

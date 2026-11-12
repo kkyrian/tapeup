@@ -54,7 +54,9 @@ struct VoiceFixture {
         let enumerator = FileManager.default.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey])!
         var result: [String: Data] = [:]
         for case let url as URL in enumerator {
-            if [".lock", ".events.lock", VoiceFiles.rootLockName].contains(url.lastPathComponent) { continue }
+            if [".lock", ".events.lock", ".meta.lock", VoiceFiles.rootLockName].contains(url.lastPathComponent) {
+                continue
+            }
             if try url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true {
                 result[String(url.path.dropFirst(root.path.count))] = try Data(contentsOf: url)
             }
@@ -208,6 +210,7 @@ struct VoiceLibraryTests {
         try fixture.library.confirm(1, in: confirmed)
         try fixture.library.correct(1, to: "Ana", in: source)
         let before = try fixture.bytes()
+        let beforeStore = VoiceStore.load(from: fixture.root)
         let hits = try fixture.library.pastFills(of: "Mei", closeTo: voicePrint(), excluding: source)
         #expect(hits.count == 1)
         #expect(hits.first?.stamp == RecordingLibrary.stamp(of: first))
@@ -220,7 +223,9 @@ struct VoiceLibraryTests {
         #expect(RecordingLibrary.entry(at: first)?.people.names == ["Ana"])
         #expect(VoiceStore.load(from: fixture.root).people["Mei"]?.negatives.count == 2)
         try applied.undo.restore()
-        #expect(try fixture.bytes() == before)
+        #expect(VoiceStore.load(from: fixture.root) == beforeStore)
+        #expect(SpeakerLabels.result(in: first)?.names[1] == "Mei")
+        #expect(RecordingLibrary.entry(at: first)?.people.names == ["Mei"])
     }
 
     @Test func staleOrBusyPastFillsAreSkipped() throws {
