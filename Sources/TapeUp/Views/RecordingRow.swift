@@ -75,12 +75,8 @@ struct RecordingRow: View {
                             .frame(width: 16, height: 16)
                             .hoverHelp("Waiting to transcribe")
                     } else {
-                        // Audio is the rule; only its absence is marked, and keeping it.
+                        // Audio is the rule; only its absence is marked.
                         HStack(spacing: 3) {
-                            if keepable, entry.keepAudio, entry.hasAudio {
-                                Image(systemName: "lock.fill").font(.system(size: 10))
-                                    .foregroundStyle(Color.accentColor)
-                            }
                             if !entry.hasAudio, entry.status != "recording" {
                                 Image(systemName: "text.page").font(.system(size: 10))
                             }
@@ -90,24 +86,14 @@ struct RecordingRow: View {
                         .accessibilityElement(children: .combine)
                         .accessibilityLabel(
                             (size ?? Format.length(entry.duration)) + (entry.hasAudio ? "" : ", transcript only")
-                                + (keepable && entry.keepAudio && entry.hasAudio ? ", kept" : ""))
+                                + (keepable && entry.keepAudio ? ", kept" : ""))
                     }
                 }
                 .opacity(hovered || copied ? 0 : 1)
                 HStack(spacing: 0) {
                     IconButton(symbol: copied ? "checkmark" : "link", help: "Copy path", size: 22, action: copy)
                     IconButton(symbol: "folder", help: "Show in Finder", size: 22) { model.reveal(entry) }
-                    if keepable {
-                        let kept = entry.keepAudio
-                        IconButton(
-                            symbol: kept ? "lock.fill" : "lock.open",
-                            help: kept
-                                ? "Kept: Free up space leaves its audio. Click to stop keeping it"
-                                : "Keep its audio",
-                            size: 22, tinted: kept
-                        ) { model.setKeep(entry, !kept) }
-                        .clickTarget("keep " + RecordingLibrary.stamp(of: entry.folder))
-                    } else {
+                    if !keepable {
                         IconButton(symbol: "trash", help: "Move to Trash", size: 22) { model.trash(entry) }
                     }
                 }
@@ -117,6 +103,17 @@ struct RecordingRow: View {
             .frame(width: 68, alignment: .trailing)
             .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
             .animation(.easeOut(duration: 0.12), value: hovering)
+            if keepable {
+                // Always in sight on Free up space, where keeping is decided.
+                let kept = entry.keepAudio
+                IconButton(
+                    symbol: kept ? "lock.fill" : "lock.open",
+                    help: kept ? "Kept: click to allow removing its audio" : "Keep its audio",
+                    size: 22, tinted: kept
+                ) { model.setKeep(entry, !kept) }
+                .clickTarget("keep " + RecordingLibrary.stamp(of: entry.folder))
+                .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
+            }
         }
         .padding(.horizontal, 6)
         .padding(.vertical, look == .dense || look == .monthDay ? 2 : 6)

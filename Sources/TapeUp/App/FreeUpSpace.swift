@@ -9,9 +9,9 @@ struct SpaceFilter: Equatable {
         var title: String {
             switch self {
             case .all: "All"
-            case .month: "1 month+"
-            case .threeMonths: "3 months+"
-            case .year: "1 year+"
+            case .month: "Over 1 month"
+            case .threeMonths: "Over 3 months"
+            case .year: "Over 1 year"
             }
         }
 

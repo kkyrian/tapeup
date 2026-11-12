@@ -257,7 +257,8 @@ private struct MonthHeading: View {
 /// On, it turns dark grey (light in dark mode), never the accent.
 struct FilterChip: View {
     let title: String
-    let count: Int
+    /// Left out where the count would compete with a more important number.
+    let count: Int?
     let on: Bool
     let action: () -> Void
     @State private var hovering = false
@@ -266,9 +267,11 @@ struct FilterChip: View {
         Button(action: action) {
             HStack(spacing: 5) {
                 Text(title).font(.system(size: 12, weight: .medium)).lineLimit(1)
-                Text("\(count)").font(.system(size: 11, weight: .medium).monospacedDigit())
-                    .opacity(on ? 0.75 : 1)
-                    .foregroundStyle(on ? Color(nsColor: .windowBackgroundColor) : .secondary)
+                if let count {
+                    Text("\(count)").font(.system(size: 11, weight: .medium).monospacedDigit())
+                        .opacity(on ? 0.75 : 1)
+                        .foregroundStyle(on ? Color(nsColor: .windowBackgroundColor) : .secondary)
+                }
             }
             .padding(.horizontal, 9)
             .frame(height: 22)
@@ -279,7 +282,7 @@ struct FilterChip: View {
         .buttonStyle(Pressable())
         .onHover { hovering = $0 }
         .clickTarget(title)
-        .accessibilityLabel("\(title), \(count)")
+        .accessibilityLabel(count.map { "\(title), \($0)" } ?? title)
         .accessibilityAddTraits(on ? .isSelected : [])
     }
 

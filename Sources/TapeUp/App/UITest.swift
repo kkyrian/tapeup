@@ -1092,16 +1092,12 @@ enum UITest {
         let withAudio = model.spaceCandidates
         expect(!withAudio.isEmpty, "some recordings still hold audio (\(withAudio.count))")
         let keep = withAudio.first(where: { model.spaceGroup($0) == .ready }) ?? withAudio.first
-        // The click events carry no pointer move, so the row draws hovered
-        // from the start, its lock in place of its size.
-        RecordingRow.staged = keep?.id
         model.openFreeUpSpace()
         settle(1.0)
         check("free-up-space")
         if let keep {
             let stamp = RecordingLibrary.stamp(of: keep.folder)
             expect(click("keep " + stamp, in: panel), "the row's lock clicks")
-            RecordingRow.staged = nil
             settle(0.3)
             check("free-up-space-locked")
             let locked = model.library.folder(withStamp: stamp).flatMap(RecordingLibrary.entry(at:))

@@ -74,7 +74,8 @@ struct FreeUpSpaceView: View {
         FlowLayout(spacing: 6, lineSpacing: 6) {
             // Every chip always, so the rows never reflow as counts change.
             ForEach(SpaceFilter.Age.allCases, id: \.self) { age in
-                FilterChip(title: age.title, count: candidates.filter { age.matches($0) }.count, on: self.age == age) {
+                // No counts: the only numbers here are what loses its audio.
+                FilterChip(title: age.title, count: nil, on: self.age == age) {
                     model.spaceFilter = SpaceFilter(age: age)
                 }
             }
@@ -236,10 +237,10 @@ struct FreeUpSpaceView: View {
             let unnamed = ready.filter(model.hasUnnamedVoices).count
             let bytes = ready.reduce(0) { $0 + model.audioBytes($1) }
             Text(
-                "Remove audio from \(ready.count) (\(Format.size(bytes)))?\n"
-                    + (unnamed > 0
-                        ? "Transcripts stay; unnamed voices in \(unnamed) lose replay."
-                        : "Transcripts, names and voices stay."))
+                "Remove audio from \(ready.count) (\(Format.size(bytes)))? Transcripts stay.\n"
+                    + (unnamed == 0
+                        ? "Names and voices stay too."
+                        : "\(unnamed) have unnamed voices you won't be able to play."))
         case .trashUntranscribed where !untranscribed.isEmpty:
             Text(
                 "Move \(untranscribed.count) recording\(untranscribed.count == 1 ? "" : "s") to the Trash?\n"
@@ -257,13 +258,13 @@ struct FreeUpSpaceView: View {
                 }
             } else {
                 let waiting = (sections[.unlabeled]?.count ?? 0) + (sections[.untranscribed]?.count ?? 0)
-                Text(
-                    (waiting == 0
-                        ? "Transcripts, names and voices stay"
-                        : ready.isEmpty
-                            ? "Label or transcribe them first"
-                            : "\(waiting) more need speakers or a transcript first")
-                        + (ready.isEmpty || sections[.locked] != nil ? "" : "\nLock a row to keep its audio"))
+                let others = "\(waiting) other\(waiting == 1 ? "" : "s") wait: label speakers or transcribe first"
+                if ready.isEmpty {
+                    Text(waiting == 0 ? "" : others)
+                } else {
+                    let hint = sections[.locked] == nil ? "Lock a recording to keep its audio" : ""
+                    Text("Transcripts, names and voices stay.\n" + (waiting > 0 ? others : hint))
+                }
             }
         }
     }
