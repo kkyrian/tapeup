@@ -35,13 +35,13 @@ struct VoiceStoreTests {
     @Test func capsPositiveAndNegativeExamplesByTalkAndReplacesIdentity() throws {
         var store = VoiceStore()
         for index in 0..<25 {
-            try store.addExample(voiceExample("\(index)", seconds: Double(index + 1)), for: "Mei")
-            try store.addNegative(voiceExample("\(index)", seconds: Double(index + 1)), for: "Ana")
+            try store.addExample(voiceExample("\(index)", seconds: Double(index + 31)), for: "Mei")
+            try store.addNegative(voiceExample("\(index)", seconds: Double(index + 31)), for: "Ana")
         }
         #expect(store.people["Mei"]?.examples.count == 20)
-        #expect(store.people["Mei"]?.examples.last?.seconds == 6)
+        #expect(store.people["Mei"]?.examples.last?.seconds == 36)
         #expect(store.people["Ana"]?.negatives.count == 20)
-        #expect(store.people["Ana"]?.negatives.last?.seconds == 6)
+        #expect(store.people["Ana"]?.negatives.last?.seconds == 36)
         try store.addExample(voiceExample("24", seconds: 90), for: "Mei")
         #expect(store.people["Mei"]?.examples.first?.seconds == 90)
         #expect(store.people["Mei"]?.examples.count == 20)

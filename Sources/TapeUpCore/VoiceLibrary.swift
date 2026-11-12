@@ -20,9 +20,11 @@ public struct VoiceLibrary: Sendable {
         var meta: [String: Any]
         var originalMeta: [String: Any]
         var prints: [Int: [Float]]
+        var seconds: [Int: Double]
         var stamp: String { RecordingLibrary.stamp(of: folder) }
 
         init(_ folder: URL) throws {
+            let folder = try VoiceFiles.resolveRecording(folder)
             self.folder = folder
             guard let data = try VoiceFiles.read(folder.appendingPathComponent(SpeakerLabels.resultFileName)),
                 let lines = TranscriptDocument.lines(in: folder)
@@ -35,13 +37,14 @@ public struct VoiceLibrary: Sendable {
             self.lines = lines
             meta = try VoiceFiles.object(MetaFile.url(in: folder))
             originalMeta = meta
-            prints =
-                VoicePrints.read(in: folder).map { SpeakerLabels.prints(of: result, heard: $0, lines: lines) } ?? [:]
+            let heard = VoicePrints.read(in: folder)
+            prints = heard.map { SpeakerLabels.prints(of: result, heard: $0, lines: lines) } ?? [:]
+            seconds = heard.map { SpeakerLabels.diarizedSeconds(of: result, heard: $0, lines: lines) } ?? [:]
         }
 
-        func example(_ voice: Int) -> VoiceStore.Example? {
-            guard let print = prints[voice], let seconds = result.voices.first(where: { $0.id == voice })?.seconds,
-                seconds.isFinite, seconds > 0
+        func example(_ voice: Int, minimumSeconds: Double) -> VoiceStore.Example? {
+            guard let print = prints[voice], let seconds = seconds[voice],
+                seconds.isFinite, seconds >= minimumSeconds
             else { return nil }
             return .init(print: print, stamp: stamp, voice: voice, seconds: seconds)
         }
@@ -78,6 +81,7 @@ public struct VoiceLibrary: Sendable {
     @discardableResult
     public func fill(in folder: URL) throws -> [VoiceMatching.Fill] {
         try VoiceFiles.withRootLock(root) {
+            let folder = try VoiceFiles.resolveRecording(folder, in: root)
             guard let held = FolderLock(folder: folder) else { return [] }
             defer { held.release() }
             var recording = try Recording(folder)
@@ -85,7 +89,7 @@ public struct VoiceLibrary: Sendable {
             let people = try checkedPeople()
             let fills = VoiceMatching.match(
                 prints: recording.prints,
-                seconds: Dictionary(uniqueKeysWithValues: recording.result.voices.map { ($0.id, $0.seconds) }),
+                seconds: recording.seconds,
                 store: store, allowedPeople: Set(people.allNames),
                 headphones: TranscriptDocument.sidesKnown(meta: recording.meta),
                 microphoneOnlyVoices: SpeakerLabels.microphoneOnlyVoices(
@@ -96,7 +100,7 @@ public struct VoiceLibrary: Sendable {
                 let added = recording.attend(fill.person)
                 recording.result.names[fill.voice] = fill.person
                 recording.result.provenance[fill.voice] = .init(
-                    origin: .filled, addedToWhoWasThere: added, similarity: fill.microphone ? nil : fill.similarity)
+                    origin: .filled, addedToWhoWasThere: added, similarity: fill.similarity)
                 recording.result.suggested[fill.voice] = nil
             }
             _ = try VoiceFiles.apply(recording.writes())
@@ -133,6 +137,7 @@ public struct VoiceLibrary: Sendable {
 
     private func confirm(in folder: URL, voices: Set<Int>?) throws -> VoiceFileUndo {
         try VoiceFiles.withRootLock(root) {
+            let folder = try VoiceFiles.resolveRecording(folder, in: root)
             guard let held = FolderLock(folder: folder) else { throw VoiceLibrary.Failure.busyRecording }
             defer { held.release() }
             var recording = try Recording(folder)
@@ -148,11 +153,13 @@ public struct VoiceLibrary: Sendable {
             guard voices == nil || voices!.contains(voice), recording.result.provenance(for: voice).origin == .filled
             else { continue }
             var provenance = recording.result.provenance(for: voice)
-            if let example = recording.example(voice) { try store.addExample(example, for: person) }
-            if let similarity = provenance.similarity {
-                store.recordFeedback(
-                    for: person, stamp: recording.stamp, voice: voice, similarity: similarity, confirmed: true,
-                    parameters: parameters)
+            if let example = recording.example(voice, minimumSeconds: parameters.minimumSeconds) {
+                try store.addExample(example, for: person, parameters: parameters)
+                if let similarity = provenance.similarity {
+                    store.recordFeedback(
+                        for: person, stamp: recording.stamp, voice: voice, similarity: similarity, confirmed: true,
+                        parameters: parameters)
+                }
             }
             provenance.origin = .confirmed
             recording.result.provenance[voice] = provenance
@@ -165,7 +172,9 @@ public struct VoiceLibrary: Sendable {
         }
         let old = recording.result.names[voice]
         let provenance = recording.result.provenance(for: voice)
-        if old == nil, let person, let example = recording.example(voice), let profile = store.people[person] {
+        if old == nil, let person, let example = recording.example(voice, minimumSeconds: parameters.minimumSeconds),
+            let profile = store.people[person]
+        {
             let score = VoiceMatching.similarity(example.print, to: profile, parameters: parameters)
             if score > parameters.minimumBar, score < VoiceMatching.bar(for: profile, parameters: parameters) {
                 store.recordMiss(
@@ -173,16 +182,19 @@ public struct VoiceLibrary: Sendable {
             }
         }
         store.removeExample(stamp: recording.stamp, voice: voice)
-        if let old, old != person, provenance.origin != .person, let example = recording.example(voice) {
+        if let old, old != person, provenance.origin != .person,
+            let example = recording.example(voice, minimumSeconds: parameters.minimumSeconds)
+        {
             let score =
                 provenance.similarity
-                ?? store.people[old].map { VoiceMatching.similarity(example.print, to: $0, parameters: parameters) }
-            try store.addNegative(example, for: old)
-            if let score {
-                store.recordFeedback(
-                    for: old, stamp: recording.stamp, voice: voice, similarity: score, confirmed: false,
-                    parameters: parameters)
-            }
+                // Older microphone fills omitted their confidence. Acoustic
+                // fills always kept a score, so migrate those missing values.
+                ?? parameters.microphoneScore
+            try store.addNegative(example, for: old, similarity: score, parameters: parameters)
+            store.recordFeedback(
+                for: old, stamp: recording.stamp, voice: voice, similarity: score, confirmed: false,
+                parameters: parameters)
+
         }
         recording.result.names[voice] = person
         recording.result.provenance[voice] = person.map { _ in SpeakerProvenance(origin: .person) }
@@ -190,10 +202,15 @@ public struct VoiceLibrary: Sendable {
         if let old, old != person, provenance.addedToWhoWasThere { recording.removeAttendance(old) }
         if let person {
             _ = recording.attend(person)
-            if let example = recording.example(voice) { try store.addExample(example, for: person) }
+            if let example = recording.example(voice, minimumSeconds: parameters.minimumSeconds) {
+                try store.addExample(example, for: person, parameters: parameters)
+            }
             // Explicitly choosing an unchanged fill is a confirmation too.
             if old == person, provenance.origin != .person {
-                if provenance.origin == .filled, let score = provenance.similarity {
+                if provenance.origin == .filled,
+                    recording.example(voice, minimumSeconds: parameters.minimumSeconds) != nil,
+                    let score = provenance.similarity
+                {
                     store.recordFeedback(
                         for: person, stamp: recording.stamp, voice: voice, similarity: score, confirmed: true,
                         parameters: parameters)
@@ -211,6 +228,7 @@ public struct VoiceLibrary: Sendable {
         try VoiceFiles.withRootLock(root) {
             var person = person?.trimmingCharacters(in: .whitespacesAndNewlines)
             if person?.isEmpty == true { throw VoiceStore.StoreError.invalidExample }
+            let folder = try VoiceFiles.resolveRecording(folder, in: root)
             guard let held = FolderLock(folder: folder) else { throw VoiceLibrary.Failure.busyRecording }
             defer { held.release() }
             var recording = try Recording(folder)
@@ -282,7 +300,19 @@ public struct VoiceLibrary: Sendable {
     }
 
     public struct PastFill: Sendable, Equatable {
-        public var recording: URL
+        var root: URL
+        /// Resolve on access too, so callers can play/open a hit after titling.
+        public var recording: URL {
+            get {
+                RecordingLibrary(root: root).folder(withStamp: stamp)
+                    ?? root.appendingPathComponent(String(stamp.prefix(4))).appendingPathComponent(stamp)
+            }
+            set {
+                // Preserve source compatibility without caching a title/path.
+                root = newValue.deletingLastPathComponent().deletingLastPathComponent()
+                stamp = RecordingLibrary.stamp(of: newValue)
+            }
+        }
         public var stamp: String
         public var voice: Int
         public var person: String
@@ -311,7 +341,7 @@ public struct VoiceLibrary: Sendable {
                     let quote = zip(recording.lines, recording.result.assigned).first { $0.1 == voice }?.0.text ?? ""
                     hits.append(
                         PastFill(
-                            recording: folder, stamp: recording.stamp, voice: voice, person: person,
+                            root: root, stamp: recording.stamp, voice: voice, person: person,
                             similarity: similarity, quote: quote, print: candidate))
                 }
             }
@@ -347,9 +377,10 @@ public struct VoiceLibrary: Sendable {
             var skipped: [PastFill] = []
             var undo = VoiceFileUndo(files: [], root: root)
             do {
-                for folder in Set(hits.map(\.recording)).sorted(by: { $0.path < $1.path }) {
-                    let proposed = hits.filter { $0.recording == folder }
-                    guard !busy.contains(RecordingLibrary.stamp(of: folder)), let held = FolderLock(folder: folder)
+                for stamp in Set(hits.map(\.stamp)).sorted() {
+                    let proposed = hits.filter { $0.stamp == stamp }
+                    guard !busy.contains(stamp), let folder = RecordingLibrary(root: root).folder(withStamp: stamp),
+                        let held = FolderLock(folder: folder)
                     else {
                         skipped += proposed
                         continue
@@ -370,7 +401,7 @@ public struct VoiceLibrary: Sendable {
                         try choose(hit.voice, person: person, recording: &recording, store: &store)
                         changed.append(hit)
                     }
-                    if changed.contains(where: { $0.recording == folder }) {
+                    if changed.contains(where: { $0.stamp == stamp }) {
                         // This strip changes only the reviewed voices; other fills remain unchecked.
                         undo.include(try VoiceFiles.apply(recording.writes()))
                     }

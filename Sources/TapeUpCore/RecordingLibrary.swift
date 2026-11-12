@@ -278,20 +278,29 @@ public struct RecordingLibrary: Sendable {
     /// folder's new location; it stays put when the new name is taken.
     @discardableResult
     public static func save(title: String?, in folder: URL) throws -> URL {
-        let trimmed = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        try MetaFile.update(folder) { meta in
-            meta["title"] = trimmed.isEmpty ? nil : trimmed
-            // A name given settles the suggestion.
-            if !trimmed.isEmpty { meta["title_suggestion"] = nil }
-        }
-        let name = folderName(stamp: stamp(of: folder.lastPathComponent), title: trimmed)
-        guard name != folder.lastPathComponent else { return folder }
-        let renamed = folder.deletingLastPathComponent().appendingPathComponent(name, isDirectory: true)
-        do {
-            try FileManager.default.moveItem(at: folder, to: renamed)
-            return renamed
-        } catch CocoaError.fileWriteFileExists {
-            return folder
+        let parent = folder.deletingLastPathComponent()
+        let root =
+            parent.lastPathComponent == String(stamp(of: folder).prefix(4))
+            ? parent.deletingLastPathComponent() : parent
+        return try VoiceFiles.withRootLock(root) {
+            try MetaFile.withLock {
+                let folder = try VoiceFiles.resolveRecording(folder)
+                let trimmed = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                try MetaFile.update(folder) { meta in
+                    meta["title"] = trimmed.isEmpty ? nil : trimmed
+                    // A name given settles the suggestion.
+                    if !trimmed.isEmpty { meta["title_suggestion"] = nil }
+                }
+                let name = folderName(stamp: stamp(of: folder.lastPathComponent), title: trimmed)
+                guard name != folder.lastPathComponent else { return folder }
+                let renamed = folder.deletingLastPathComponent().appendingPathComponent(name, isDirectory: true)
+                do {
+                    try FileManager.default.moveItem(at: folder, to: renamed)
+                    return renamed
+                } catch CocoaError.fileWriteFileExists {
+                    return folder
+                }
+            }
         }
     }
 

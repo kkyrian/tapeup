@@ -4,10 +4,44 @@ import Foundation
 /// Later edits, unreadable files and busy recordings are reported and left alone.
 public struct VoiceFileUndo: Sendable {
     struct File: Sendable {
-        var url: URL
+        var root: URL
+        var stamp: String?
+        var name: String
         var data: Data?
         var written: Data?
+
+        init(url: URL, data: Data?, written: Data?) {
+            let folder = VoiceFiles.recordingFolder(for: url)
+            let candidate = folder.map(RecordingLibrary.stamp(of:))
+            stamp = candidate.flatMap {
+                VoiceFiles.isRecordingStamp($0)
+                    && folder?.deletingLastPathComponent().lastPathComponent == String($0.prefix(4)) ? $0 : nil
+            }
+            root =
+                (stamp == nil
+                ? url.deletingLastPathComponent() : folder!.deletingLastPathComponent().deletingLastPathComponent())
+                .standardizedFileURL
+            name = url.lastPathComponent
+            self.data = data
+            self.written = written
+        }
+
+        func resolved() -> URL? {
+            guard let stamp else { return root.appendingPathComponent(name) }
+            return RecordingLibrary(root: root).folder(withStamp: stamp)?.appendingPathComponent(name)
+        }
+
+        /// An absent recording is reported by its stamp; its former title is
+        /// neither retained nor used to recreate a deleted folder.
+        var url: URL {
+            resolved()
+                ?? root.appendingPathComponent(String(stamp!.prefix(4))).appendingPathComponent(stamp!)
+                .appendingPathComponent(name)
+        }
+
+        func sameTarget(as other: File) -> Bool { root == other.root && stamp == other.stamp && name == other.name }
     }
+
     var files: [File]
     var root: URL? = nil
     public var fileCount: Int { files.count }
@@ -25,10 +59,14 @@ public struct VoiceFileUndo: Sendable {
 
     private func restoreLocked() throws -> RestoreResult {
         var result = RestoreResult()
-        let groups = Dictionary(grouping: files, by: { VoiceFiles.recordingFolder(for: $0.url) })
-        for (folder, files) in groups {
+        let groups = Dictionary(grouping: files, by: \.stamp)
+        for (stamp, files) in groups {
             var held: FolderLock?
-            if let folder {
+            if stamp != nil {
+                guard let folder = files.first?.resolved()?.deletingLastPathComponent() else {
+                    result.skipped += files.map(\.url)
+                    continue
+                }
                 held = FolderLock(folder: folder)
                 guard held != nil else {
                     result.skipped += files.map(\.url)
@@ -50,7 +88,7 @@ public struct VoiceFileUndo: Sendable {
     mutating func include(_ next: VoiceFileUndo) {
         if root == nil { root = next.root }
         for file in next.files {
-            if let index = files.firstIndex(where: { $0.url == file.url }) {
+            if let index = files.firstIndex(where: { $0.sameTarget(as: file) }) {
                 files[index].written = file.written
             } else {
                 files.append(file)
@@ -101,16 +139,33 @@ enum VoiceFiles {
         }
     }
 
-    static func withRecordingLock<T>(_ folder: URL, _ operation: () throws -> T) throws -> T {
-        let key = "TapeUpVoiceFolder:" + folder.standardizedFileURL.resolvingSymlinksInPath().path
-        if Thread.current.threadDictionary[key] != nil { return try operation() }
+    static func isRecordingStamp(_ stamp: String) -> Bool {
+        stamp.wholeMatch(of: /\d{4}-\d{2}-\d{2}-\d{4}(-\d+)?/) != nil
+    }
+
+    static func resolveRecording(_ folder: URL, in root: URL? = nil) throws -> URL {
+        let stamp = RecordingLibrary.stamp(of: folder)
+        // Standalone transcript utilities also accept folders outside a library.
+        guard isRecordingStamp(stamp), folder.deletingLastPathComponent().lastPathComponent == String(stamp.prefix(4))
+        else { return folder }
+        let library = RecordingLibrary(root: root ?? folder.deletingLastPathComponent().deletingLastPathComponent())
+        guard let current = library.folder(withStamp: stamp) else { throw CocoaError(.fileNoSuchFile) }
+        return current
+    }
+
+    static func withRecordingLock<T>(_ folder: URL, _ operation: (URL) throws -> T) throws -> T {
+        let folder = try resolveRecording(folder)
+        let stamp = RecordingLibrary.stamp(of: folder)
+        let identity = isRecordingStamp(stamp) ? folder.deletingLastPathComponent().path + ":" + stamp : folder.path
+        let key = "TapeUpVoiceFolder:" + identity
+        if Thread.current.threadDictionary[key] != nil { return try operation(folder) }
         guard let held = FolderLock(folder: folder) else { throw VoiceLibrary.Failure.busyRecording }
         Thread.current.threadDictionary[key] = true
         defer {
             Thread.current.threadDictionary.removeObject(forKey: key)
             held.release()
         }
-        return try operation()
+        return try operation(folder)
     }
 
     static func recordingFolder(for url: URL) -> URL? {
@@ -150,6 +205,19 @@ enum VoiceFiles {
             case .event(let folder, _, _): return folder.appendingPathComponent("events.jsonl")
             }
         }
+
+        func resolved() throws -> Write {
+            switch self {
+            case .file(let url, let data):
+                guard let folder = VoiceFiles.recordingFolder(for: url) else { return self }
+                return .file(
+                    try VoiceFiles.resolveRecording(folder).appendingPathComponent(url.lastPathComponent), data)
+            case .meta(let folder, let patch): return .meta(try VoiceFiles.resolveRecording(folder), patch)
+            case .event(let folder, let event, let fields):
+                return .event(try VoiceFiles.resolveRecording(folder), event, fields)
+            }
+        }
+
     }
 
     struct RollbackError: Error {
@@ -161,32 +229,38 @@ enum VoiceFiles {
     static func apply(_ writes: [Write], beforeWrite: (URL) throws -> Void = { _ in }) throws -> VoiceFileUndo {
         var undo = VoiceFileUndo(files: [], root: Thread.current.threadDictionary[activeKey] as? URL)
         do {
-            for write in writes {
-                try beforeWrite(write.url)
-                let file: VoiceFileUndo.File
-                switch write {
-                case .meta(let folder, let change):
-                    file = try MetaFile.withLock {
-                        let before = try read(write.url)
-                        var object = try self.object(write.url)
-                        change(&object)
-                        let after = try json(object)
-                        if before != after { try put(after, at: MetaFile.url(in: folder)) }
-                        return .init(url: write.url, data: before, written: after)
+            for target in writes {
+                try beforeWrite(target.resolved().url)
+                let perform = { () throws -> VoiceFileUndo.File in
+                    // Resolve after acquiring the same lock that covers titling.
+                    let write = try target.resolved()
+                    let file: VoiceFileUndo.File
+                    switch write {
+                    case .meta(let folder, let change):
+                        file = try MetaFile.withLock {
+                            let before = try read(write.url)
+                            var object = try self.object(write.url)
+                            change(&object)
+                            let after = try json(object)
+                            if before != after { try put(after, at: MetaFile.url(in: folder)) }
+                            return .init(url: write.url, data: before, written: after)
+                        }
+                    case .file(let url, let after):
+                        let before = try read(url)
+                        if before != after { try put(after, at: url) }
+                        file = .init(url: url, data: before, written: after)
+                    case .event(let folder, let event, let fields):
+                        var captured: VoiceFileUndo.File?
+                        let appended = EventLog.append(event, fields, in: folder) { before, after in
+                            captured = .init(url: write.url, data: before, written: after)
+                        }
+                        if let captured { undo.include(.init(files: [captured], root: undo.root)) }
+                        guard appended, let captured else { throw CocoaError(.fileWriteUnknown) }
+                        file = captured
                     }
-                case .file(let url, let after):
-                    let before = try read(url)
-                    if before != after { try put(after, at: url) }
-                    file = .init(url: url, data: before, written: after)
-                case .event(let folder, let event, let fields):
-                    var captured: VoiceFileUndo.File?
-                    let appended = EventLog.append(event, fields, in: folder) { before, after in
-                        captured = .init(url: write.url, data: before, written: after)
-                    }
-                    if let captured { undo.include(.init(files: [captured], root: undo.root)) }
-                    guard appended, let captured else { throw CocoaError(.fileWriteUnknown) }
-                    file = captured
+                    return file
                 }
+                let file = try recordingFolder(for: target.url) == nil ? perform() : MetaFile.withLock(perform)
                 undo.include(.init(files: [file], root: undo.root))
             }
         } catch {
@@ -203,17 +277,18 @@ enum VoiceFiles {
     }
 
     static func restore(_ file: VoiceFileUndo.File) throws -> Bool {
-        if file.url.lastPathComponent == "events.jsonl" {
-            return try EventLog.restore(file.data, ifCurrentIs: file.written, in: file.url.deletingLastPathComponent())
-        }
         let restore = {
+            guard let url = file.resolved() else { return false }
+            if file.name == "events.jsonl" {
+                return try EventLog.restore(file.data, ifCurrentIs: file.written, in: url.deletingLastPathComponent())
+            }
             let current: Data?
-            do { current = try read(file.url) } catch { return false }
+            do { current = try read(url) } catch { return false }
             guard current == file.written else { return false }
-            try put(file.data, at: file.url)
+            try put(file.data, at: url)
             return true
         }
-        if file.url.lastPathComponent == "meta.json" { return try MetaFile.withLock(restore) }
+        if file.stamp != nil || file.name == "meta.json" { return try MetaFile.withLock(restore) }
         return try restore()
     }
 
@@ -288,8 +363,10 @@ enum VoiceFiles {
 extension SpeakerLabels {
     /// Fold and renumber prints exactly as the saved labels were made. A
     /// mismatch yields no prints rather than teaching a different voice.
-    public static func prints(of result: SpeakerResult, heard: VoicePrints, lines: [TranscriptLine]) -> [Int: [Float]] {
-        guard lines.count == result.assigned.count else { return [:] }
+    private static func numberedGroups(of result: SpeakerResult, heard: VoicePrints, lines: [TranscriptLine]) -> [Int:
+        Int]?
+    {
+        guard lines.count == result.assigned.count else { return nil }
         let found = max(1, result.count)
         let counts: [Int?] =
             result.estimated
@@ -301,22 +378,44 @@ extension SpeakerLabels {
             let turns = heard.turns.map { VoiceTurn(start: $0.start, end: $0.end, voice: groups[$0.voice] ?? $0.voice) }
             let (raw, number) = numbered(lines: lines, turns: turns)
             guard raw.map({ $0.flatMap { number[$0] } }) == result.assigned else { continue }
-            var sums: [Int: [Double]] = [:]
-            for turn in heard.turns {
-                guard let voice = number[groups[turn.voice] ?? turn.voice], let print = heard.prints[turn.voice],
-                    VoiceStore.validPrint(print), turn.end > turn.start
-                else { continue }
-                let length = sqrt(print.reduce(Double(0)) { $0 + Double($1) * Double($1) })
-                var sum = sums[voice] ?? Array(repeating: 0, count: VoiceStore.dimensions)
-                for i in sum.indices { sum[i] += Double(print[i]) / length * (turn.end - turn.start) }
-                sums[voice] = sum
-            }
-            return sums.compactMapValues { sum in
-                let length = sqrt(sum.reduce(0) { $0 + $1 * $1 })
-                return length > 0 ? sum.map { Float($0 / length) } : nil
-            }
+            return groups.compactMapValues { number[$0] }
         }
-        return [:]
+        return nil
+    }
+
+    public static func prints(of result: SpeakerResult, heard: VoicePrints, lines: [TranscriptLine]) -> [Int: [Float]] {
+        guard let groups = numberedGroups(of: result, heard: heard, lines: lines) else { return [:] }
+        var sums: [Int: [Double]] = [:]
+        for turn in heard.turns {
+            guard let voice = groups[turn.voice], let print = heard.prints[turn.voice],
+                VoiceStore.validPrint(print), turn.start.isFinite, turn.end.isFinite, turn.end > turn.start
+            else { continue }
+            let length = sqrt(print.reduce(Double(0)) { $0 + Double($1) * Double($1) })
+            var sum = sums[voice] ?? Array(repeating: 0, count: VoiceStore.dimensions)
+            for i in sum.indices { sum[i] += Double(print[i]) / length * (turn.end - turn.start) }
+            sums[voice] = sum
+        }
+        return sums.compactMapValues { sum in
+            let length = sqrt(sum.reduce(0) { $0 + $1 * $1 })
+            return length > 0 ? sum.map { Float($0 / length) } : nil
+        }
+    }
+
+    /// Sum the original diarization turns after folding and display numbering.
+    /// Transcript spans can include silence or omit speech; never use them as
+    /// a fallback for recognition or enrollment when the saved labels mismatch.
+    public static func diarizedSeconds(of result: SpeakerResult, heard: VoicePrints, lines: [TranscriptLine]) -> [Int:
+        Double]
+    {
+        guard let groups = numberedGroups(of: result, heard: heard, lines: lines) else { return [:] }
+        var seconds: [Int: Double] = [:]
+        for turn in heard.turns {
+            guard let voice = groups[turn.voice], turn.start.isFinite, turn.end.isFinite, turn.end > turn.start else {
+                continue
+            }
+            seconds[voice, default: 0] += turn.end - turn.start
+        }
+        return seconds
     }
 
     public static func microphoneOnlyVoices(lines: [TranscriptLine], assigned: [Int?]) -> Set<Int> {

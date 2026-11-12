@@ -11,6 +11,8 @@ public struct VoiceStore: Sendable, Equatable, Codable {
         public var stamp: String
         public var voice: Int
         public var seconds: Double
+        /// On a negative, the score of the corrected fill, before penalization.
+        public var correctionScore: Float? = nil
 
         public init(print: [Float], stamp: String, voice: Int, seconds: Double) {
             self.print = print
@@ -56,9 +58,12 @@ public struct VoiceStore: Sendable, Equatable, Codable {
             && print.reduce(Double(0)) { $0 + Double($1) * Double($1) } > 0
     }
 
-    public mutating func addExample(_ example: Example, for person: String) throws {
+    public mutating func addExample(
+        _ example: Example, for person: String, parameters: VoiceMatching.Parameters = .init()
+    ) throws {
         let person = key(person)
         try validate(example, person: person)
+        guard example.seconds >= parameters.minimumSeconds else { throw StoreError.invalidExample }
         // A voice can teach only one person, even after a manual rename.
         removeExample(stamp: example.stamp, voice: example.voice)
         var entry = people[person] ?? Person()
@@ -73,10 +78,21 @@ public struct VoiceStore: Sendable, Equatable, Codable {
         }
     }
 
-    public mutating func addNegative(_ example: Example, for person: String) throws {
+    public mutating func addNegative(
+        _ example: Example, for person: String,
+        similarity: Float? = nil, parameters: VoiceMatching.Parameters = .init()
+    ) throws {
         let person = key(person)
         try validate(example, person: person)
+        guard example.seconds >= parameters.minimumSeconds, similarity?.isFinite != false else {
+            throw StoreError.invalidExample
+        }
         var entry = people[person] ?? Person()
+        var example = example
+        example.correctionScore =
+            similarity
+            ?? (entry.examples.isEmpty
+                ? nil : VoiceMatching.similarity(example.print, to: entry, parameters: parameters))
         entry.examples.removeAll { $0.stamp == example.stamp && $0.voice == example.voice }
         entry.negatives = Self.retained(entry.negatives + [example])
         people[person] = entry
@@ -110,6 +126,11 @@ public struct VoiceStore: Sendable, Equatable, Codable {
         entry.threshold = VoiceMatching.updatedBar(
             VoiceMatching.bar(for: entry, parameters: parameters),
             similarity: similarity, confirmed: confirmed, missed: missed, parameters: parameters)
+        if !confirmed, !missed,
+            let index = entry.negatives.firstIndex(where: { $0.stamp == stamp && $0.voice == voice })
+        {
+            entry.negatives[index].correctionScore = similarity
+        }
         entry.feedback.removeAll { $0.stamp == stamp && $0.voice == voice }
         entry.feedback.append(
             Feedback(
@@ -236,7 +257,8 @@ public struct VoiceStore: Sendable, Equatable, Codable {
 
     private func validate(_ example: Example, person: String) throws {
         guard !person.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-            !example.stamp.isEmpty, Self.validPrint(example.print), example.seconds.isFinite, example.seconds > 0
+            !example.stamp.isEmpty, Self.validPrint(example.print), example.seconds.isFinite, example.seconds > 0,
+            example.correctionScore?.isFinite != false
         else { throw StoreError.invalidExample }
     }
 

@@ -253,7 +253,7 @@ public struct SpeakerProvenance: Sendable, Equatable, Codable {
     public enum Origin: String, Sendable, Codable { case person, filled, confirmed }
     public var origin: Origin
     public var addedToWhoWasThere: Bool
-    /// Acoustic score at fill time, before the store learns this example.
+    /// Acoustic score or microphone confidence at fill time, before learning.
     public var similarity: Float?
 
     public init(origin: Origin, addedToWhoWasThere: Bool = false, similarity: Float? = nil) {
@@ -321,7 +321,7 @@ extension SpeakerLabels {
     public static func save(_ result: SpeakerResult, lines: [TranscriptLine], in folder: URL) throws {
         let root = folder.deletingLastPathComponent().deletingLastPathComponent()
         try VoiceFiles.withRootLock(root) {
-            try VoiceFiles.withRecordingLock(folder) {
+            try VoiceFiles.withRecordingLock(folder) { folder in
                 let meta = try VoiceFiles.object(MetaFile.url(in: folder))
                 var updated = meta
                 var labels = meta["speaker_labels"] as? [String: Any] ?? [:]
@@ -358,7 +358,7 @@ extension SpeakerLabels {
     public static func relabel(_ heard: VoicePrints, count: Int?, in folder: URL) throws -> SpeakerResult {
         let root = folder.deletingLastPathComponent().deletingLastPathComponent()
         return try VoiceFiles.withRootLock(root) {
-            try VoiceFiles.withRecordingLock(folder) {
+            try VoiceFiles.withRecordingLock(folder) { folder in
                 guard let lines = TranscriptDocument.lines(in: folder) else { throw CocoaError(.fileNoSuchFile) }
                 var labeled = label(lines: lines, heard: heard, count: count)
                 var writes: [VoiceFiles.Write] = []
@@ -440,7 +440,7 @@ extension SpeakerLabels {
     public static func name(_ voice: Int, _ name: String?, in folder: URL) throws {
         let root = folder.deletingLastPathComponent().deletingLastPathComponent()
         try VoiceFiles.withRootLock(root) {
-            try VoiceFiles.withRecordingLock(folder) {
+            try VoiceFiles.withRecordingLock(folder) { folder in
                 guard var result = result(in: folder), let lines = TranscriptDocument.lines(in: folder) else {
                     throw CocoaError(.fileNoSuchFile)
                 }
@@ -457,7 +457,7 @@ extension SpeakerLabels {
     public static func suggest(_ names: [Int: String], in folder: URL) throws {
         let root = folder.deletingLastPathComponent().deletingLastPathComponent()
         try VoiceFiles.withRootLock(root) {
-            try VoiceFiles.withRecordingLock(folder) {
+            try VoiceFiles.withRecordingLock(folder) { folder in
                 guard var result = result(in: folder), let lines = TranscriptDocument.lines(in: folder) else {
                     throw CocoaError(.fileNoSuchFile)
                 }
@@ -477,7 +477,7 @@ extension SpeakerLabels {
     public static func acceptSuggested(in folder: URL) throws {
         let root = folder.deletingLastPathComponent().deletingLastPathComponent()
         try VoiceFiles.withRootLock(root) {
-            try VoiceFiles.withRecordingLock(folder) {
+            try VoiceFiles.withRecordingLock(folder) { folder in
                 guard var result = result(in: folder), let lines = TranscriptDocument.lines(in: folder) else {
                     throw CocoaError(.fileNoSuchFile)
                 }

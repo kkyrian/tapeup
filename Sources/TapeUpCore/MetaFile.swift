@@ -5,7 +5,7 @@ import Foundation
 /// edit the same file, so neither may rebuild it from scratch, and one lock
 /// keeps their read-modify-write cycles from interleaving.
 public enum MetaFile {
-    private static let lock = NSLock()
+    private static let lock = NSRecursiveLock()
 
     static func withLock<T>(_ operation: () throws -> T) rethrows -> T {
         lock.lock()

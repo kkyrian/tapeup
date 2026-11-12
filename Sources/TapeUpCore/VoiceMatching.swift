@@ -3,14 +3,14 @@ import Foundation
 public enum VoiceMatching {
     /// Tuning changes one value type; no model weights are changed.
     public struct Parameters: Sendable, Equatable {
-        public var bar: Float = 0.65
-        public var margin: Float = 0.15
-        public var minimumSeconds: Double = 60
+        public var bar: Float = 0.50
+        public var margin: Float = 0.25
+        public var minimumSeconds: Double = 30
         public var topK: Int = 3
         public var negativeStart: Float = 0.5
         public var negativeWeight: Float = 0.5
         public var minimumBar: Float = 0.5
-        public var maximumBar: Float = 0.9
+        public var maximumBar: Float = 0.85
         public var feedbackStep: Float = 0.2
         public var feedbackPadding: Float = 0.05
         public var pastFillSimilarity: Float = 0.8
@@ -50,12 +50,30 @@ public enum VoiceMatching {
     public static func similarity(
         _ print: [Float], to person: VoiceStore.Person, parameters p: Parameters = Parameters()
     ) -> Float {
-        guard VoiceStore.validPrint(print), !person.examples.isEmpty else { return -1 }
-        let scores = person.examples.map { cosine(print, $0.print) }.sorted(by: >).prefix(max(1, p.topK))
+        let examples = person.examples.filter { $0.seconds >= p.minimumSeconds }
+        guard VoiceStore.validPrint(print), !examples.isEmpty else { return -1 }
+        let scores = examples.map { cosine(print, $0.print) }.sorted(by: >).prefix(max(1, p.topK))
         let positive = scores.reduce(0, +) / Float(scores.count)
-        let negative = person.negatives.map { cosine(print, $0.print) }.max() ?? -1
+        let negative =
+            person.negatives.filter { $0.seconds >= p.minimumSeconds }.map { cosine(print, $0.print) }.max() ?? -1
         let penalty = max(0, negative - p.negativeStart) / max(Float.ulpOfOne, 1 - p.negativeStart)
         return max(-1, positive - penalty * p.negativeWeight)
+    }
+
+    /// A correction whose required bar exceeds the ceiling remains a scoped
+    /// veto for that voice, rather than accepting it at a clamped threshold.
+    /// Reuse the past-fill closeness gate to identify the corrected voice.
+    static func rejectedAtCeiling(_ print: [Float], by person: VoiceStore.Person, parameters p: Parameters) -> Bool {
+        person.negatives.contains { negative in
+            guard negative.seconds >= p.minimumSeconds else { return false }
+            let score =
+                negative.correctionScore
+                ?? person.feedback.last {
+                    $0.stamp == negative.stamp && $0.voice == negative.voice && !$0.confirmed
+                }?.similarity
+            guard let score, score + p.feedbackPadding > p.maximumBar else { return false }
+            return cosine(print, negative.print) >= p.pastFillSimilarity
+        }
     }
 
     /// Confirmations can only lower the bar. A correction at score s raises
@@ -102,7 +120,11 @@ public enum VoiceMatching {
         if headphones, microphoneOnlyVoices.count == 1, let voice = microphoneOnlyVoices.first,
             named[voice] == nil, let you, allowed.contains(you.lowercased()), !you.isEmpty,
             !taken.contains(you.lowercased()),
-            let talk = seconds[voice], talk.isFinite, talk > 0
+            let talk = seconds[voice], talk.isFinite, talk >= p.minimumSeconds,
+            !(prints[voice].flatMap { print in
+                store.people.first { $0.key.caseInsensitiveCompare(you) == .orderedSame }
+                    .map { rejectedAtCeiling(print, by: $0.value, parameters: p) }
+            } ?? false)
         {
             fills.append(Fill(voice: voice, person: you, similarity: p.microphoneScore, microphone: true))
             taken.insert(you.lowercased())
@@ -129,7 +151,9 @@ public enum VoiceMatching {
             for (column, person) in people.enumerated() {
                 let score = scores.first { $0.0 == person }!.1
                 let runnerUp = scores.first { $0.0 != person }?.1 ?? -1
-                if score >= bar(for: store.people[person]!, parameters: p), score - runnerUp >= p.margin {
+                if score >= bar(for: store.people[person]!, parameters: p), score - runnerUp >= p.margin,
+                    !rejectedAtCeiling(prints[voice]!, by: store.people[person]!, parameters: p)
+                {
                     eligible[row, default: [:]][column] = score
                     weights[row][column] = Double(score)
                 } else {

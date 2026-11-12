@@ -14,7 +14,7 @@ struct VoiceMatchingTests {
     @Test func clearMatchFillsAndShortOrUnknownVoicesStayEmpty() throws {
         let store = try store()
         let fills = VoiceMatching.match(
-            prints: [1: voicePrint(), 2: voicePrint(0, 1), 3: voicePrint(-1)], seconds: [1: 60, 2: 59, 3: 100],
+            prints: [1: voicePrint(), 2: voicePrint(0, 1), 3: voicePrint(-1)], seconds: [1: 30, 2: 29, 3: 100],
             store: store, allowedPeople: ["Mei", "Ana", "Sam"])
         #expect(fills.map(\.person) == ["Mei"])
         #expect(
@@ -67,7 +67,7 @@ struct VoiceMatchingTests {
     @Test func microphoneShortcutRequiresHeadphonesAndExactlyOneVoice() {
         func match(_ headphones: Bool, _ voices: Set<Int>) -> [VoiceMatching.Fill] {
             VoiceMatching.match(
-                prints: [:], seconds: [1: 10, 2: 10], store: VoiceStore(), allowedPeople: ["Sam"],
+                prints: [:], seconds: [1: 30, 2: 30], store: VoiceStore(), allowedPeople: ["Sam"],
                 headphones: headphones,
                 microphoneOnlyVoices: voices, you: "Sam")
         }
@@ -91,6 +91,7 @@ struct VoiceMatchingTests {
 
     @Test func confirmedFeedbackLowersBarAndCorrectionsRaiseItWithinBounds() throws {
         var store = try store()
+        store.recordFeedback(for: "Mei", stamp: "raised", voice: 1, similarity: 0.6, confirmed: false)
         let initial = VoiceMatching.bar(for: store.people["Mei"]!)
         for index in 0..<30 {
             store.recordFeedback(for: "Mei", stamp: "\(index)", voice: 1, similarity: 0.55, confirmed: true)
@@ -101,7 +102,7 @@ struct VoiceMatchingTests {
             store.recordFeedback(for: "Mei", stamp: "\(index)", voice: 1, similarity: 1, confirmed: false)
         }
         #expect(VoiceMatching.bar(for: store.people["Mei"]!) > initial)
-        #expect(VoiceMatching.bar(for: store.people["Mei"]!) <= 0.9)
+        #expect(VoiceMatching.bar(for: store.people["Mei"]!) <= 0.85)
     }
 
     @Test func cosineNormalizesAndRejectsMalformedPrints() {
