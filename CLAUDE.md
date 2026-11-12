@@ -103,7 +103,14 @@ artifact is encountered.
 Generated files, upstream-owned files, licensed non-editable files, and
 finished output documents are exempt. So is `README.md`: it is the GitHub
 homepage, written for people trying the app; keep its command list aligned
-with `TapeUp help` and leave the details to the help and the agents guide. Raw source captures are also exempt:
+with `TapeUp help` and leave the details to the help and the agents guide.
+
+Write the README, release notes and UI text for people without our context,
+the way people write. Say directly what TapeUp does and what they get, with
+no justifying. Use one idea per sentence and don't chop sentences with
+commas. Put steps in the order the user takes them, and introduce anything
+before using it. Keep it plain but not flat, and keep technical facts. Name
+agents as "your agent (for example, Claude Code or Codex)". Raw source captures are also exempt:
 preserve them verbatim and add
 `> Raw source material — exempt from artifact rules; consumed by: <link(s)>`
 when a consuming artifact exists.

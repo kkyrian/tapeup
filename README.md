@@ -4,18 +4,17 @@
 
 <h1 align="center">TapeUp</h1>
 
-<p align="center">TapeUp is a meeting recorder for Mac, built for you and your AI agent.</p>
+<p align="center">A meeting recorder for Mac, built for you and your AI agent.</p>
 
 <p align="center">
-  <b>Record any meeting on your Mac. Get a transcript you and your AI agent can use.</b><br>
-  A click records both sides of the call: your voice and everything your Mac plays.<br>
+  <b>Record any meeting. Get a transcript you and your AI agent can use.</b><br>
+  One click records your voice and everything your Mac plays.<br>
   TapeUp transcribes it on your Mac while you talk.
 </p>
 
 <p align="center">
-  <a href="https://github.com/kkyrian/tapeup/releases/latest/download/TapeUp.dmg"><b>Download for Mac</b></a>
-  &nbsp;·&nbsp; free, MIT license &nbsp;·&nbsp; Apple silicon, tested on macOS 27<br>
-  <sub>First time? macOS asks once before TapeUp opens: <a href="#first-launch">see First launch</a>.</sub>
+  <a href="#install"><b>Download for Mac</b></a>
+  &nbsp;·&nbsp; free and open source &nbsp;·&nbsp; Apple silicon, tested on macOS 27
 </p>
 
 ```bash
@@ -33,48 +32,36 @@ brew install kkyrian/tap/tapeup
   </picture>
 </p>
 
-<p align="center">Record a call, or bring in recordings you already have.<br>Both are transcribed on your Mac.</p>
+<p align="center">Record a call, or import recordings you already have.<br>Both are transcribed on your Mac.</p>
 
-<br>
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset=".github/images/who-was-there-dark.gif">
-  <img align="left" width="380" src=".github/images/who-was-there.gif" alt="A 31-minute call is stopped. On the saved recording, a tap on 4 sets how many were there, and typing “pr”, “jo” and “an” adds Priya Shah, José Ortiz and Ana from suggestions.">
-</picture>
-
-### Say who was there
-
-When you stop, tap how many people were on the call and type a few
-letters of each name. TapeUp suggests the people you meet with.
-
-It's optional, and it's what a transcript can't know on its own.
-
-<br clear="all">
 <br>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset=".github/images/speakers-dark.gif">
-  <img align="right" width="380" src=".github/images/speakers.gif" alt="On a saved recording, Label speakers finds four voices, each with how long it talked and a line it said. Play on the first voice turns to Stop, and its line changes to each thing that voice said as it plays. It is named Priya Shah from a menu, then stopped.">
+  <img align="left" width="380" src=".github/images/speakers.gif" alt="On a saved recording with four people, Label speakers finds four voices. Voice 1 is already named Priya Shah, filled in from her voice, and the help says to pick someone else if it's wrong. Voice 1 plays her lines and the name stays. Voice 4 plays and is named José Ortiz from a menu.">
 </picture>
 
 ### Know who said what
 
-Once the transcript is ready, TapeUp finds each voice in the recording,
-on your Mac. Each one comes with a line it said and a button to hear it,
-so naming it takes a second.
+When you stop recording, tap how many people were on the call. Once the
+transcript is ready, TapeUp finds that many voices and shows a line each
+one said. Play a voice to hear who it is, then pick their name.
 
-Name a voice once and later meetings fill that name in by themselves.
-The voices TapeUp remembers stay on your Mac and never go to your agent.
+TapeUp remembers the voices you name. The next time you meet the same
+people, it fills in their names for you. Voices stay on your Mac and are
+never sent to your agent.
 
-With headphones on, your own lines are marked from the start.
+If you wear headphones, TapeUp marks your own lines as yours from the start.
 
 <br clear="all">
 <br>
 
 ### Hand it to your agent
 
-Press **Copy path**, paste it into Claude Code or Codex, and ask.
-That answer is Claude Code's own, unedited.
+Each recording is a folder with its audio and transcript. Click **Copy
+path** and paste it into your agent of choice (for example, Claude Code or
+Codex). Your agent reads the transcript and can answer anything about the
+meeting.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset=".github/images/handoff-dark.gif">
@@ -84,99 +71,84 @@ That answer is Claude Code's own, unedited.
 <br>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset=".github/images/settings-dark.gif">
-  <img align="right" width="380" src=".github/images/settings.gif" alt="From the ··· menu, Settings… opens Settings. Under Your AI, Claude Code is picked instead of Off.">
-</picture>
-
-### Let your AI do the titles
-
-Pick Claude Code or Codex in Settings, the one you're signed in to,
-and it titles each recording.
-
-It stays off until you pick one. Without it, Apple Intelligence titles
-recordings where your Mac has it.
-
-<br clear="all">
-<br>
-
-<picture>
   <source media="(prefers-color-scheme: dark)" srcset=".github/images/all-recordings-dark.gif">
-  <img align="left" width="380" src=".github/images/all-recordings.gif" alt="Show all, under the recent recordings, opens every recording by month. The No transcript chip lists the ones without a transcript, and Transcribe 25 recordings starts them: the first one's ring fills while the rest wait. Then a search for “thursday” finds the meetings where it was said, each with the words around it.">
+  <img align="right" width="380" src=".github/images/all-recordings.gif" alt="Show all, under the recent recordings, opens every recording by month. The No transcript chip lists the ones without a transcript, and Transcribe 25 recordings starts them: the first one's ring fills while the rest wait. Then a search for “thursday” finds the meetings where it was said, each with the words around it.">
 </picture>
 
 ### Find any meeting
 
 **Show all** lists every recording by month. Search the titles, the
-names, or the words said.
+people in them, or anything that was said.
 
-**No transcript** and **No names yet** show what is missing. The missing
-transcripts start in one click.
-
-<br clear="all">
-<br>
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset=".github/images/people-dark.gif">
-  <img align="right" width="380" src=".github/images/people.gif" alt="From the ··· menu, People… opens the list of people: Sam, Priya Shah, José Ortiz, Ana and Mei, each with a note. Nora Quinn is added with the note “sales”.">
-</picture>
-
-### Keep a list of who you meet
-
-Names with a word on who they are. Add them here, or press
-**Fill from your AI** and your agent writes the list.
-
-The list feeds the name suggestions, and transcripts spell those names
-right. Rename someone and every recording follows.
+Filters show the recordings that have no transcript or no names yet. One click
+transcribes all the ones that need it.
 
 <br clear="all">
 <br>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset=".github/images/floating-dark.gif">
-  <img align="left" width="380" src=".github/images/floating.gif" alt="In a video call in another app, ⌥⌘R starts recording, and small controls float under the menu bar with the time, Pause and Stop. The panel opens, and the call’s words arrive in its Transcript row a few at a time. Stop on the floating controls saves: the recording drops from the menu bar and names itself “Beta launch plan”.">
+  <source media="(prefers-color-scheme: dark)" srcset=".github/images/space-dark.gif">
+  <img align="left" width="380" src=".github/images/space.gif" alt="From the ··· menu, Free Up Space… lists the recordings that still have audio. Over 3 months shows four that will lose their audio. Locking User interview moves it to Locked, and the button drops from 4 recordings to 3. Remove audio asks to confirm, then the audio of the 3 moves to the Trash, with Undo.">
 </picture>
 
-### Record from any app
+### Free up space
 
-Press **⌥⌘R** mid-call. Small controls float over your windows to
-pause or stop. Click the cassette in the menu bar to read the words as
-they're said.
+Remove the audio from old meetings and keep their transcripts, names and
+voices. In the TapeUp panel, choose **Free Up Space…** from the ··· menu. It
+shows which recordings will lose their audio before you confirm. Each
+recording there has a lock: lock it to keep its audio.
 
 <br clear="all">
 
 ## Also
 
-- **Any app.** Zoom, Meet in a browser, Teams, a video. No bot joins the call.
-- **Switch devices.** AirPods in or out mid-call, and it keeps recording.
-- **Nothing lost.** Audio is written as it records, so a crash keeps the meeting.
-- **Free up space.** Clear the audio of old meetings in one go, transcripts kept.
-  Lock the ones whose audio you want to keep.
-- **Private.** Recording and transcription run on your Mac, in 52 languages.
-  Only the agent you pick sees a transcript.
+- **Any app.** Zoom, Google Meet, Teams or a video. No bot joins your call.
+  Press **⌥⌘R** in any app to start recording. Small controls float over your
+  windows so you can pause or stop.
+- **AI titles.** Choose Claude Code or Codex in Settings, and it titles each
+  recording. Until you choose one, Apple Intelligence writes the titles on
+  Macs that have it.
+- **Your people list.** Add the people you meet, each with a short note, or let
+  your agent write the list. TapeUp uses it to suggest names and to spell
+  them right in transcripts. Rename someone, and the name changes in every recording.
+- **Switch devices.** Connect or disconnect AirPods mid-call, and TapeUp keeps
+  recording.
+- **Nothing lost.** Audio is saved as it records, so you keep the meeting
+  even if TapeUp crashes.
+- **52 languages.** TapeUp transcribes meetings in 52 languages.
+- **Private.** Recording and transcription run on your Mac. Only the agent
+  you choose sees a transcript.
 
 Recording people may need their consent where you live.
 
 ## The folder
 
-Every recording is a folder of plain files. `AGENTS.md` tells agents what
-each one means, and TapeUp has a command line they can use.
+Your recordings are plain files in `~/TapeUp`. `AGENTS.md` there tells
+agents what each file is.
 
 ```
 ~/TapeUp/
 ├── AGENTS.md         what everything here means
 ├── people.json       who you meet with
 └── 2026/2026-11-07-1400 Beta launch plan/
-    ├── audio.m4a     your mic left, your Mac right
+    ├── audio.m4a     your mic on the left, your Mac on the right
     ├── transcript.md
     └── meta.json     when, how long, who was there
 ```
 
 ## Command line
 
-Your agent can do on saved recordings what you do in the app: import,
-transcribe, label speakers, name voices, keep the people list, free up
-space. Its `help` starts with examples, and its results say what to run
-next.
+Your agent can also run TapeUp from the command line. It can import files,
+transcribe them, name voices, edit your people list, and remove or lock
+audio. Recording starts only from the app.
+
+In the commands below, `TapeUp` stands for
+`/Applications/TapeUp.app/Contents/MacOS/TapeUp`. To see every command with
+examples, run:
+
+```bash
+TapeUp help
+```
 
 ```text
 TapeUp folder [<path> [--move]]
@@ -195,16 +167,22 @@ TapeUp keep <recording>
 TapeUp agent [off] [--model M] [--effort E]
 ```
 
-`TapeUp` is `/Applications/TapeUp.app/Contents/MacOS/TapeUp`. A recording
-is its folder, its start time (`2026-11-06-1430`) or `latest`. While the
-app is open, commands go through it, so its list and Undo keep up.
-
+Wherever a command takes `<recording>`, give its folder, its start time
+(`2026-11-06-1430`) or `latest`. `agent` picks the AI that writes titles.
 Your agent names a voice only after you tell it who that is. It can lock
-a recording's audio but never unlock it. Recordings start in the app.
+audio, and only you can unlock it.
 
-## First launch
+## Install
 
-TapeUp is free and isn't notarized by Apple, so macOS stops it once:
+Download [TapeUp.dmg](https://github.com/kkyrian/tapeup/releases/latest/download/TapeUp.dmg),
+open it and drag TapeUp to Applications. Or install it with Homebrew:
+
+```bash
+brew install kkyrian/tap/tapeup
+```
+
+TapeUp isn't notarized by Apple yet, so macOS blocks it the first time you
+open it. To open it:
 
 1. Open TapeUp. When macOS says it can't verify it, click **Done**.
 2. In **System Settings › Privacy & Security**, scroll to Security and click
@@ -216,24 +194,23 @@ TapeUp is free and isn't notarized by Apple, so macOS stops it once:
   <img src=".github/images/first-launch-open-anyway.png" width="480" alt="System Settings, Privacy &amp; Security, Security: “TapeUp.app” was blocked to protect your Mac, with an Open Anyway button beside it.">
 </p>
 
-3. Click the cassette in the menu bar. TapeUp downloads its speech model once
-   (2.3 GB, or 680 MB on Macs with less than 16 GB of memory).
+3. Click the cassette in the menu bar. TapeUp downloads its speech model
+   once (2.3 GB, or 680 MB on Macs with less than 16 GB of memory).
 
-After that, TapeUp updates itself. It checks once a day and never installs
-while you record; **Check for Updates…** is in the ··· menu.
+After that, TapeUp updates itself. It checks once a day and never updates
+while you record. **Check for Updates…** is in the ··· menu.
 
 ## Models
 
 TapeUp runs open models on your Mac with [speech-swift](https://github.com/soniqo/speech-swift) on MLX:
 
-- **Transcripts:** [Qwen3-ASR 1.7B](https://huggingface.co/aufklarer/Qwen3-ASR-1.7B-MLX-8bit), 8-bit,
-  or [0.6B](https://huggingface.co/aufklarer/Qwen3-ASR-0.6B-MLX-4bit), 4-bit, on Macs with less than
-  16 GB of memory, with [Silero](https://huggingface.co/aufklarer/Silero-VAD-v6.2.1-MLX) to find the pauses.
+- **Transcripts:** [Qwen3-ASR 1.7B](https://huggingface.co/aufklarer/Qwen3-ASR-1.7B-MLX-8bit) (8-bit).
+  Macs with less than 16 GB of memory use [0.6B](https://huggingface.co/aufklarer/Qwen3-ASR-0.6B-MLX-4bit) (4-bit).
+  [Silero](https://huggingface.co/aufklarer/Silero-VAD-v6.2.1-MLX) finds the pauses.
 - **Speakers:** [Nemotron 3 Diarization](https://huggingface.co/aufklarer/Nemotron-3-Diarization-100M-MLX-INT8)
   and [WeSpeaker](https://huggingface.co/aufklarer/WeSpeaker-ResNet34-LM-MLX) voice prints.
-- **Titles and who was there:** the Claude Code or Codex you pick, with the
-  model it is set to. Without one, Apple Intelligence's model on your Mac
-  writes the titles.
+- **Titles:** Claude Code or Codex if you choose one, with the model it is
+  set to. Otherwise, Apple Intelligence on your Mac.
 
 ## Build
 
