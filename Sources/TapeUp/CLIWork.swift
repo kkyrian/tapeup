@@ -196,7 +196,7 @@ enum CLIWork {
                 "voice": voice.id, "name": result.names[voice.id] as Any? ?? NSNull(),
                 "provenance": result.names[voice.id].map { _ in result.provenance(for: voice.id).origin.rawValue }
                     as Any? ?? NSNull(),
-                "seconds": (voice.seconds * 10).rounded() / 10, "quote": voice.quote,
+                "seconds": Int(voice.seconds.rounded()), "quote": voice.quote,
             ]
         }
         let text = result.voices.map { voice in

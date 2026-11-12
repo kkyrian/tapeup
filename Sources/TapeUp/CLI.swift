@@ -282,7 +282,20 @@ enum CLI {
                     naming
                     ? rest.count == 3
                     : rest.count == 1
-                guard valid else { fail("usage", "Run TapeUp help for \(command).") }
+                if command == "keep", rest.count == 2, rest[1].lowercased() == "off" {
+                    fail(
+                        "usage", "keep only locks audio; unlocking is the user's.",
+                        suggestion: "If the user wants it gone, they unlock it on Free up space in TapeUp.")
+                }
+                guard valid else {
+                    let usage =
+                        switch (command, naming) {
+                        case ("voices", true): "voices name <recording> <voice> <person>"
+                        case ("voices", false): "voices <recording>"
+                        default: "\(command) <recording>"
+                        }
+                    fail("usage", "Usage: \(usage)", suggestion: "Run \(CLIWork.executable) help for every command.")
+                }
                 if naming { do { try CLIWork.validatePerson(rest[2], allowEmpty: true) } catch { failure(error) } }
                 request["recording"] = recording(rest[0]).path
                 if naming {
