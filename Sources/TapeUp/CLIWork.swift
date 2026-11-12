@@ -196,7 +196,7 @@ enum CLIWork {
                 "voice": voice.id, "name": result.names[voice.id] as Any? ?? NSNull(),
                 "provenance": result.names[voice.id].map { _ in result.provenance(for: voice.id).origin.rawValue }
                     as Any? ?? NSNull(),
-                "seconds": voice.seconds, "quote": voice.quote,
+                "seconds": (voice.seconds * 10).rounded() / 10, "quote": voice.quote,
             ]
         }
         let text = result.voices.map { voice in
@@ -207,7 +207,7 @@ enum CLIWork {
                 case .confirmed: "confirmed"
                 }
             return
-                "Voice \(voice.id): \(result.names[voice.id].map { "\($0) (\(origin))" } ?? "none"), \(voice.seconds) seconds; \(voice.quote)"
+                "Voice \(voice.id): \(result.names[voice.id].map { "\($0) (\(origin))" } ?? "none"), talks \(Format.length(voice.seconds)); \(voice.quote)"
         }.joined(separator: "\n")
         let nextCommand = result.voices.first { result.names[$0.id] == nil }.map {
             "Ask the user who the unnamed voices are; after they identify Voice \($0.id), use TapeUp voices name \(RecordingLibrary.stamp(of: folder)) \($0.id) \"<name>\"."
