@@ -5,6 +5,24 @@ import Foundation
 /// the same id, first that it took the request, then with the outcome.
 /// Both sides run as the same user on the same Mac.
 enum CommandLink {
+    static let version = "2"
+    private static let prefix = "cli2:"
+
+    static func wireRequest(_ request: [String: String]) -> [String: String] {
+        var request = request
+        request["command"] = prefix + (request["command"] ?? "")
+        return request
+    }
+
+    static func accepts(_ reply: [String: String]) -> Bool { reply["protocol"] == version }
+
+    static func appRequest(_ request: [String: String]) -> [String: String]? {
+        guard let command = request["command"], command.hasPrefix(prefix) else { return nil }
+        var request = request
+        request["command"] = String(command.dropFirst(prefix.count))
+        return request
+    }
+
     static let request = Notification.Name("app.tapeup.request")
     static let reply = Notification.Name("app.tapeup.reply")
 
@@ -17,14 +35,23 @@ enum CommandLink {
                 // Another copy of TapeUp, on another recordings folder, answers its own.
                 guard request["root"] == model.root.standardizedFileURL.path else { return }
                 // Moving recordings can take minutes; the command waits once it knows.
-                send(["id": id, "taken": "1"])
+                guard let request = appRequest(request) else {
+                    send([
+                        "id": id, "protocol": version, "error": "app_outdated",
+                        "message": "This CLI uses an older command protocol.",
+                        "suggestion": "Use help from the running app's executable and run its command again.",
+                        "retryable": "0",
+                    ])
+                    return
+                }
+                send(["id": id, "protocol": version, "taken": "1"])
                 model.handle(
                     request,
                     progress: { progress in
-                        send(["id": id, "progress": progress])
+                        send(["id": id, "protocol": version, "progress": progress])
                     }
                 ) { refusal, folder, output in
-                    var answer = ["id": id]
+                    var answer = ["id": id, "protocol": version]
                     if let refusal {
                         answer["stamp"] = refusal.stamp
                         answer["error"] = refusal.code

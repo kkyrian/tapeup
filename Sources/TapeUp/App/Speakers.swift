@@ -73,15 +73,29 @@ final class Speakers {
 
     /// Labels a transcribed recording with `count` voices, or the estimate.
     func label(_ entry: RecordingEntry, count: Int?) {
+        do { try ensureLabels(entry, count: count) } catch {
+            showProblem("Could not start speaker labels: \(error.localizedDescription)")
+        }
+    }
+
+    func ensureLabels(_ entry: RecordingEntry, count: Int?) throws {
         let stamp = RecordingLibrary.stamp(of: entry.folder)
+        if let current = work[stamp], current != .failed {
+            wanted[stamp] = .some(count)
+            return
+        }
+        try library.withLock {
+            guard RecordingWork.foreignOwner(in: entry.folder) == nil else { throw VoiceLibrary.Failure.busyRecording }
+            guard let held = FolderLock(folder: entry.folder) else { throw VoiceLibrary.Failure.busyRecording }
+            defer { held.release() }
+            try SpeakerLabels.mark("finding", in: entry.folder)
+        }
         wanted[stamp] = .some(count)
-        if let current = work[stamp], current != .failed { return }
         if let heard = VoicePrints.read(in: entry.folder) {
             save(stamp: stamp, heard: heard)
             return
         }
         work[stamp] = SpeakerFinder.isDownloaded() ? .listening : .downloading(0)
-        try? SpeakerLabels.mark("finding", in: entry.folder)
         let previous = listening
         listening = Task { [weak self] in
             // One recording at a time: the model holds a few gigabytes.
@@ -139,6 +153,13 @@ final class Speakers {
             showProblem("Could not save the voice name: \(error.localizedDescription)")
             return
         }
+        version += 1
+        namesChanged(stamp)
+    }
+
+    /// Disk edits from a command refresh rows without invoking the panel's
+    /// separate rule for confirming the remaining fills.
+    func refreshNames(_ stamp: String) {
         version += 1
         namesChanged(stamp)
     }
@@ -205,10 +226,7 @@ final class Speakers {
     /// finding them after a launch.
     nonisolated static func clearInterrupted(_ folders: [URL]) {
         for folder in folders {
-            let labels = MetaFile.read(folder)?["speaker_labels"] as? [String: Any]
-            if labels?["status"] as? String == "finding" {
-                try? SpeakerLabels.mark("failed", error: "TapeUp quit while finding voices", in: folder)
-            }
+            _ = try? RecordingWork.recover(in: folder, resumeTranscripts: true)
         }
     }
 

@@ -81,7 +81,10 @@ public final class FolderLock: @unchecked Sendable {
         descriptor = open(path, O_CREAT | O_RDWR, 0o644)
         guard descriptor >= 0 else { return nil }
         guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else {
+            let failure = errno
             close(descriptor)
+            descriptor = -1
+            errno = failure
             return nil
         }
     }

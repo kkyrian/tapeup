@@ -328,6 +328,7 @@ extension SpeakerLabels {
                 var updated = meta
                 var labels = meta["speaker_labels"] as? [String: Any] ?? [:]
                 labels["status"] = "done"
+                labels["pid"] = nil
                 labels["file"] = fileName
                 labels["voices"] = result.count
                 labels["voices_estimated"] = result.estimated
@@ -348,6 +349,7 @@ extension SpeakerLabels {
         }
         try MetaFile.update(folder) { meta in
             var labels: [String: Any] = ["status": status]
+            if status == "finding" { labels["pid"] = getpid() }
             if let error { labels["error"] = error }
             more(&labels)
             meta["speaker_labels"] = labels
@@ -418,6 +420,7 @@ extension SpeakerLabels {
                 var updated = meta
                 var labels = updated["speaker_labels"] as? [String: Any] ?? [:]
                 labels["status"] = "done"
+                labels["pid"] = nil
                 labels["file"] = fileName
                 labels["voices"] = labeled.count
                 labels["voices_estimated"] = labeled.estimated

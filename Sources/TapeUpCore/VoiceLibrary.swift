@@ -1,10 +1,11 @@
+import CryptoKit
 import Foundation
 
 /// Synchronous disk operations for the integrator; run on a serial background
 /// queue. A fill never teaches the store; only label actions below do.
 public struct VoiceLibrary: Sendable {
     public enum Failure: Error, Equatable {
-        case busyRecording, concurrentChange
+        case busyRecording, concurrentChange, staleFill
         case ambiguousRecording(String)
     }
 
@@ -117,6 +118,31 @@ public struct VoiceLibrary: Sendable {
     @discardableResult
     public func name(_ voice: Int, _ person: String?, in folder: URL) throws -> VoiceFileUndo {
         try change(voice, to: person, in: folder, confirmRemaining: person != nil)
+    }
+
+    /// Commands teach only the voice the user identified. An offered past
+    /// correction can also require the exact still-unchecked fill it reviewed.
+    @discardableResult
+    public func nameOnly(_ voice: Int, _ person: String?, in folder: URL, expectedFill: String? = nil) throws
+        -> VoiceFileUndo
+    {
+        try change(voice, to: person, in: folder, confirmRemaining: false, expectedFill: expectedFill)
+    }
+
+    public func fillToken(_ voice: Int, in folder: URL) throws -> String? {
+        try VoiceFiles.withRootLock(root) { try token(voice, recording: Recording(folder)) }
+    }
+
+    private func token(_ voice: Int, recording: Recording) throws -> String? {
+        guard let person = recording.result.names[voice], recording.result.provenance(for: voice).origin == .filled,
+            let print = recording.prints[voice]
+        else { return nil }
+        let data = try VoiceFiles.json([
+            "voice": voice, "name": person, "print": print,
+            "lines": recording.result.assigned.enumerated().compactMap { $0.element == voice ? $0.offset : nil },
+            "count": recording.result.count,
+        ])
+        return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
     @discardableResult
@@ -244,7 +270,9 @@ public struct VoiceLibrary: Sendable {
         }
     }
 
-    private func change(_ voice: Int, to person: String?, in folder: URL, confirmRemaining: Bool) throws
+    private func change(
+        _ voice: Int, to person: String?, in folder: URL, confirmRemaining: Bool, expectedFill: String? = nil
+    ) throws
         -> VoiceFileUndo
     {
         try VoiceFiles.withRootLock(root) {
@@ -254,6 +282,7 @@ public struct VoiceLibrary: Sendable {
             guard let held = FolderLock(folder: folder) else { throw VoiceLibrary.Failure.busyRecording }
             defer { held.release() }
             var recording = try Recording(folder)
+            if let expectedFill, try token(voice, recording: recording) != expectedFill { throw Failure.staleFill }
             var store = try editableStore()
             if let name = person { person = try canonicalPerson(name, store: store) }
             try choose(voice, person: person, recording: &recording, store: &store)

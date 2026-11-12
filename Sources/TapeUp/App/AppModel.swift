@@ -242,6 +242,7 @@ final class AppModel {
             MainActor.assumeIsolated { self?.refreshDevices() }
         }
         reload()
+        transcription.showProblem = { [weak self] in self?.show(problem: $0) }
         transcription.finished = { [weak self] stamp in self?.transcriptFinished(stamp) }
         transcription.names = { [weak self] in self?.nameHints() }
         speakers.makeRoom = { [weak self] in self?.transcription.releaseIfIdle() ?? true }
@@ -1033,10 +1034,9 @@ final class AppModel {
     /// Moves a recording's folder to the Trash, where it can still be restored.
     func trash(_ entry: RecordingEntry) {
         do {
-            var location: NSURL?
-            try FileManager.default.trashItem(at: entry.folder, resultingItemURL: &location)
+            let location = try Trash.move(entry.folder)
             if card?.entry.folder == entry.folder { card = nil }
-            trashed = location.map { (entry, $0 as URL) }
+            trashed = (entry, location)
             reload()
         } catch {
             problem = "Could not move the recording to the Trash: \(error.localizedDescription)"
@@ -1098,17 +1098,20 @@ final class AppModel {
     /// Moves the recording's audio to the Trash and keeps everything else.
     func removeAudio(_ entry: RecordingEntry) {
         guard canRemoveAudio(entry) else { return }
-        let stamp = RecordingLibrary.stamp(of: entry.folder)
-        speakers.player.stop()
-        do {
-            var location: NSURL?
-            try FileManager.default.trashItem(at: entry.audio, resultingItemURL: &location)
-            EventLog.append("audio removed", in: entry.folder)
-            removedAudio = location.map { (stamp, $0 as URL) }
-            refreshQuietly(stamp)
-        } catch {
+        do { _ = try removeAudioForCommand(entry) } catch {
             problem = "Could not move the audio to the Trash: \(error.localizedDescription)"
         }
+    }
+
+    @discardableResult
+    func removeAudioForCommand(_ entry: RecordingEntry) throws -> URL {
+        speakers.player.stop()
+        let stamp = RecordingLibrary.stamp(of: entry.folder)
+        let location = try Trash.move(entry.audio)
+        EventLog.append("audio removed", in: entry.folder)
+        removedAudio = (stamp, location)
+        refreshQuietly(stamp)
+        return location
     }
 
     /// Puts the audio removed last back in its recording.
@@ -1277,13 +1280,14 @@ extension AppModel {
             guard root.standardizedFileURL == requestedRoot else {
                 throw Refusal(
                     "folder_changed", "TapeUp switched recordings folders before import began.",
-                    suggestion: "Run TapeUp folder, then import again.", retryable: true)
+                    suggestion: "Check TapeUp folder before choosing where to import.")
             }
             progress("Inspecting the import…")
-            let candidate = try await RecordingImport.inspect(file)
+            let candidate = try await CLIWork.inspect(file)
             guard root.standardizedFileURL == requestedRoot else {
                 throw Refusal(
-                    "folder_changed", "TapeUp switched recordings folders during inspection.", retryable: true)
+                    "folder_changed", "TapeUp switched recordings folders during inspection.",
+                    suggestion: "Check TapeUp folder before choosing where to import.")
             }
             progress("Importing…")
             let copy = try await importRecording(
@@ -1293,7 +1297,9 @@ extension AppModel {
             progress("Recording \(id): \(copy.folder.path)")
             func current() throws -> RecordingEntry {
                 guard root.standardizedFileURL == requestedRoot else {
-                    throw Refusal("folder_changed", "TapeUp switched recordings folders.", retryable: true)
+                    throw Refusal(
+                        "folder_changed", "TapeUp switched recordings folders.",
+                        suggestion: "Check TapeUp folder before choosing the recording again.")
                 }
                 guard let folder = library.folder(withStamp: id), let entry = RecordingLibrary.entry(at: folder) else {
                     throw Refusal("not_found", "The imported recording is no longer there.")
@@ -1301,31 +1307,47 @@ extension AppModel {
                 return entry
             }
             var entry = try current()
+            while RecordingWork.foreignOwner(in: entry.folder) != nil {
+                try await Task.sleep(for: .milliseconds(100))
+                entry = try current()
+            }
+            try RecordingWork.recover(in: entry.folder, appBusy: busyStamps.contains(id))
+            entry = try current()
             if entry.transcript != .done {
+                try CLIWork.requireAudio(entry)
                 progress("Transcribing…")
-                if !transcription.working.contains(id) { makeTranscript(entry) }
+                try transcription.ensure(entry)  // makes a queued, disabled transcript explicit too
                 while entry.transcript != .done || transcription.working.contains(id) {
                     if entry.transcript == .failed, !transcription.working.contains(id) {
-                        throw Refusal("transcription_failed", "The transcript could not be made.", retryable: true)
+                        throw Refusal(
+                            "transcription_failed", "The transcript could not be made.",
+                            suggestion: "Check the recording audio and model before retrying.")
                     }
                     try await Task.sleep(for: .milliseconds(100))
                     entry = try current()
                 }
             }
+            while RecordingWork.foreignOwner(in: entry.folder) != nil {
+                try await Task.sleep(for: .milliseconds(100))
+                entry = try current()
+            }
             if !CLIWork.labelsCurrent(entry.folder, count: nil) {
+                try CLIWork.requireAudio(entry)
                 progress("Labeling speakers…")
-                if !speakers.busy.contains(id) { speakers.label(entry, count: nil) }
+                if !speakers.busy.contains(id) { try speakers.ensureLabels(entry, count: nil) }
                 while !CLIWork.labelsCurrent(entry.folder, count: nil) {
                     if (MetaFile.read(entry.folder)?["speaker_labels"] as? [String: Any])?["status"] as? String
                         == "failed", !speakers.busy.contains(id)
                     {
-                        throw Refusal("labels_failed", "Speakers could not be labeled.", retryable: true)
+                        throw Refusal(
+                            "labels_failed", "Speakers could not be labeled.",
+                            suggestion: "Check the audio, voice files and model before retrying.")
                     }
                     try await Task.sleep(for: .milliseconds(100))
                     entry = try current()
                 }
             }
-            return CLIWork.imported(entry.folder, copied: copy.imported)
+            return CLIWork.imported(entry.folder, copied: copy.imported, requestedTitle: title)
         } catch {
             if let stamp { throw CLIWork.importFailure(error, stamp: stamp, file: file, title: title) }
             throw error
@@ -1340,22 +1362,15 @@ extension AppModel {
         reply: @escaping @MainActor @Sendable (Refusal?, URL?, String?) -> Void
     ) {
         func done(_ refusal: Refusal?, _ folder: URL?) { reply(refusal, folder, nil) }
-        func failed(_ error: Error) {
-            if let refusal = error as? Refusal { return done(refusal, nil) }
-            let busy =
-                error as? VoiceLibrary.Failure == .busyRecording || error as? VoiceLibrary.Failure == .concurrentChange
-            if let failure = error as? RecordingImport.Failure {
-                return done(
-                    Refusal(
-                        "unreadable", "Could not import the file: \(failure).",
-                        suggestion: "Give a readable audio or video file."), nil)
-            }
+        func failed(_ error: Error) { done(CLIWork.refusal(error), nil) }
+        let command = request["command"] ?? ""
+        if command == "keep", request["value"] == "off" {
             done(
                 Refusal(
-                    busy ? "busy" : "write_failed", "Could not complete the command: \(error.localizedDescription)",
-                    retryable: true), nil)
+                    "usage", "TapeUp keep takes only a recording.",
+                    suggestion: "Only the user unlocks audio in Free up space."), nil)
+            return
         }
-        let command = request["command"] ?? ""
         if command == "folder" {
             let destination = URL(fileURLWithPath: request["value"] ?? root.path)
             let moving = request["move"] == "1"
@@ -1365,7 +1380,12 @@ extension AppModel {
                     // The folder changed; some recordings stayed behind.
                     done(Refusal("partly_moved", problem, suggestion: "Move or rename them by hand."), self?.root)
                 } else {
-                    done(Refusal("busy", problem, retryable: true), nil)
+                    done(
+                        Refusal(
+                            "busy", problem,
+                            suggestion:
+                                "Wait for a current move to finish, or ask the user to stop recording before changing folders.",
+                            retryable: self?.movingRecordings == true), nil)
                 }
             }
             return
@@ -1411,7 +1431,7 @@ extension AppModel {
             done(
                 Refusal(
                     "recording", "That recording is still running.", suggestion: "Try again after it stops.",
-                    retryable: true), nil)
+                    retryable: false), nil)
             return
         }
         let stamp = RecordingLibrary.stamp(of: folder)
@@ -1420,48 +1440,50 @@ extension AppModel {
             do {
                 let outcome: CommandOutcome = try library.withLock {
                     var held: FolderLock?
-                    if command == "keep" || command == "remove-audio" {
-                        held = FolderLock(folder: folder)
-                        guard held != nil else { throw Refusal("busy", "That recording is in use.", retryable: true) }
-                    }
                     defer { held?.release() }
-                    guard let entry = RecordingLibrary.entry(at: folder) else {
-                        throw Refusal("not_found", "That recording no longer exists.")
+                    guard var entry = RecordingLibrary.entry(at: folder) else {
+                        throw Refusal(
+                            "not_found", "That recording was removed or moved from this library.",
+                            suggestion: "Check TapeUp folder and choose its full stamp again.")
                     }
                     let outcome: CommandOutcome
                     if command == "voices", request["action"] != "name" {
                         outcome = try CLIWork.voices(folder)
                     } else {
+                        if command == "remove-audio", entry.keepAudio { try CLIWork.removeCheck(entry) }
                         let needsIdle = command != "keep" && (command != "remove-audio" || entry.hasAudio)
-                        try CLIWork.check(entry, busy: busyStamps.contains(stamp), needsIdle: needsIdle)
+                        if needsIdle, transcription.isSuspended(stamp) {
+                            throw Refusal(
+                                "busy", "Transcription is queued but turned off in the app.",
+                                suggestion:
+                                    "If the user wants that work, run TapeUp transcribe \(stamp) to request it explicitly."
+                            )
+                        }
+                        entry = try CLIWork.check(entry, busy: busyStamps.contains(stamp), needsIdle: needsIdle)
+                        if command == "keep" || command == "remove-audio" { held = try CLIWork.lock(folder) }
                         switch command {
                         case "voices":
-                            let before = try CLIWork.result(folder)
-                            let voice = try CLIWork.voice(request["voice"] ?? "", in: before)
-                            let value = (request["value"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                            if let error = speakers.name(voice, value.isEmpty ? nil : value, in: entry, strict: true) {
-                                throw error
-                            }
-                            outcome = try CLIWork.named(
-                                folder, voice: voice, before: before, root: root, busy: busyStamps)
+                            outcome = try CLIWork.alone(request, root: root)
+                            speakers.refreshNames(stamp)
                         case "keep":
-                            let keep = request["value"] != "off"
-                            if entry.keepAudio != keep { setKeep(entry, keep) }
-                            guard RecordingLibrary.entry(at: folder)?.keepAudio == keep else {
+                            if !entry.keepAudio { setKeep(entry, true) }
+                            guard RecordingLibrary.entry(at: folder)?.keepAudio == true else {
                                 throw CocoaError(.fileWriteUnknown)
                             }
-                            outcome = CLIWork.kept(folder, keep: keep)
+                            outcome = CLIWork.kept(folder)
                         default:
                             try CLIWork.removeCheck(entry)
                             let hadAudio = entry.hasAudio
+                            var location: URL?
                             if hadAudio {
                                 guard canRemoveAudio(entry) else {
-                                    throw Refusal("busy", "That recording is in use.", retryable: true)
+                                    throw Refusal(
+                                        "busy", "The app is transcribing or labeling this recording.",
+                                        suggestion: "Wait for the app's work to finish.", retryable: true)
                                 }
-                                removeAudio(entry)
-                                guard !entry.hasAudio else { throw CocoaError(.fileWriteUnknown) }
+                                location = try removeAudioForCommand(entry)
                             }
-                            outcome = CLIWork.removed(folder, removed: hadAudio)
+                            outcome = CLIWork.removed(folder, removed: hadAudio, trash: location)
                         }
                     }
                     return outcome
@@ -1480,8 +1502,11 @@ extension AppModel {
                 done(Refusal("write_failed", "Could not save the title: \(error.localizedDescription)"), nil)
             }
         case "transcribe":
-            makeTranscript(entry)
-            done(nil, folder)
+            do {
+                try CLIWork.requireAudio(entry)
+                try transcription.ensure(entry)
+                done(nil, folder)
+            } catch { failed(error) }
         case "speakers":
             let count = request["voices"].flatMap(Int.init)
             if CLIWork.labelsCurrent(folder, count: count) {
@@ -1495,8 +1520,11 @@ extension AppModel {
                         suggestion: "Run TapeUp transcribe \(stamp) first."), nil)
                 return
             }
-            speakers.label(entry, count: count)
-            done(nil, folder)
+            do {
+                try CLIWork.requireAudio(entry)
+                try speakers.ensureLabels(entry, count: count)
+                done(nil, folder)
+            } catch { failed(error) }
         default:
             done(Refusal("usage", "TapeUp does not know the command \(command)."), nil)
         }

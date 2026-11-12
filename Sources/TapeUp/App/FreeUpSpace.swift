@@ -115,11 +115,10 @@ extension AppModel {
         var moved: [String: URL] = [:]
         var failed = 0
         for entry in ready {
-            var location: NSURL?
             do {
-                try FileManager.default.trashItem(at: entry.audio, resultingItemURL: &location)
+                let location = try Trash.move(entry.audio)
                 EventLog.append("audio removed", in: entry.folder)
-                if let location { moved[RecordingLibrary.stamp(of: entry.folder)] = location as URL }
+                moved[RecordingLibrary.stamp(of: entry.folder)] = location
             } catch {
                 failed += 1
             }
@@ -162,12 +161,7 @@ extension AppModel {
         speakers.player.stop()
         var moved: [(entry: RecordingEntry, location: URL)] = []
         for entry in gone {
-            var location: NSURL?
-            if (try? FileManager.default.trashItem(at: entry.folder, resultingItemURL: &location)) != nil,
-                let location
-            {
-                moved.append((entry, location as URL))
-            }
+            if let location = try? Trash.move(entry.folder) { moved.append((entry, location)) }
         }
         freedAudio = nil
         freedRecordings = moved.isEmpty ? nil : moved

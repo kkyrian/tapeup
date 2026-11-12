@@ -30,11 +30,13 @@ public enum RecordingImport {
     public enum Failure: Error, Equatable, CustomStringConvertible {
         case noSound
         case unreadable
+        case inProgress(String)
 
         public var description: String {
             switch self {
             case .noSound: "No sound in this file"
             case .unreadable: "Can't read this file"
+            case .inProgress(let stamp): "Another process is importing \(stamp)"
             }
         }
     }
@@ -102,7 +104,10 @@ public enum RecordingImport {
     public static func imported(in library: RecordingLibrary) -> Set<String> {
         Set(
             library.recordingFolders().compactMap { folder in
-                (MetaFile.read(folder)?["imported"] as? [String: Any])?["fingerprint"] as? String
+                MetaFile.read(folder).flatMap { meta in
+                    meta["status"] as? String == "importing"
+                        ? nil : (meta["imported"] as? [String: Any])?["fingerprint"] as? String
+                }
             })
     }
 
@@ -152,22 +157,49 @@ public enum RecordingImport {
         _ candidate: Candidate, into library: RecordingLibrary, plan: Plan,
         progress: @escaping @Sendable (Double) -> Void = { _ in }
     ) async throws -> (folder: URL, imported: Bool) {
-        func existing() -> URL? {
-            guard imported(in: library).contains(candidate.fingerprint) else { return nil }
-            return library.recordingFolders().first {
-                (MetaFile.read($0)?["imported"] as? [String: Any])?["fingerprint"] as? String == candidate.fingerprint
+        func existing() throws -> URL? {
+            for folder in library.recordingFolders() {
+                guard let meta = MetaFile.read(folder), let imported = meta["imported"] as? [String: Any],
+                    imported["fingerprint"] as? String == candidate.fingerprint
+                else { continue }
+                if meta["status"] as? String != "importing" { return folder }
+                if let pid = imported["pid"] as? Int32, RecordingWork.isAlive(pid) {
+                    throw Failure.inProgress(RecordingLibrary.stamp(of: folder))
+                }
+                guard let held = FolderLock(folder: folder) else {
+                    throw Failure.inProgress(RecordingLibrary.stamp(of: folder))
+                }
+                defer { held.release() }
+                try FileManager.default.removeItem(at: folder)
             }
+            return nil
         }
-        if let folder = try library.withLock({ existing() }) { return (folder, false) }
-        let folder = try library.withLock { try library.newFolder(at: candidate.started) }
+        let (folder, held, copied): (URL, FolderLock?, Bool) = try library.withLock {
+            if let prior = try existing() { return (prior, nil, false) }
+            let folder = try library.newFolder(at: candidate.started)
+            guard let held = FolderLock(folder: folder) else {
+                throw Failure.inProgress(RecordingLibrary.stamp(of: folder))
+            }
+            do {
+                try MetaFile.update(folder) {
+                    $0 = [
+                        "status": "importing", "started": ISO8601DateFormatter().string(from: candidate.started),
+                        "imported": ["file": candidate.name, "fingerprint": candidate.fingerprint, "pid": getpid()],
+                    ]
+                }
+            } catch {
+                held.release()
+                try? FileManager.default.removeItem(at: folder)
+                throw error
+            }
+            return (folder, held, true)
+        }
+        guard copied else { return (folder, false) }
+        defer { held?.release() }
         do {
             let audio = folder.appendingPathComponent("audio.m4a")
             try await encode(candidate.url, to: audio, duration: candidate.duration, progress: progress)
             return try library.withLock {
-                if let prior = existing() {
-                    try FileManager.default.removeItem(at: folder)
-                    return (prior, false)
-                }
                 let meta: [String: Any] = [
                     "format": "tapeup-recording/0", "channels": ["left": "imported", "right": "imported"],
                     "status": "recorded", "audio": "audio.m4a", "duration_seconds": candidate.duration.rounded(),

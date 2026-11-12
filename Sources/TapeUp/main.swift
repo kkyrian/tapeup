@@ -19,6 +19,12 @@ import TapeUpCore
 
 let arguments = CommandLine.arguments
 let command = arguments.count > 1 ? arguments[1] : ""
+if ![
+    "snapshot", "shots", "film", "recordings-gallery", "import-gallery", "uitest", "permissions", "time-transcribe",
+    "time-speakers", "record",
+].contains(command) {
+    MainActor.assumeIsolated { CLI.prepareOutput(arguments) }
+}
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
 

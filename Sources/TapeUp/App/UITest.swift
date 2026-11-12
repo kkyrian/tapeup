@@ -555,7 +555,7 @@ enum UITest {
 
         // Exercise app-routed requests directly. Staged CLI subprocesses must
         // always work alone, so they cannot contact the user's running app.
-        func command(_ request: [String: String]) -> (status: Int32, out: String) {
+        func command(_ request: [String: String], timeout: TimeInterval = 120) -> (status: Int32, out: String) {
             var finished = false
             var refusal: Refusal?
             var folder: URL?
@@ -566,16 +566,57 @@ enum UITest {
                 output = result
                 finished = true
             }
-            let deadline = Date().addingTimeInterval(120)
+            let deadline = Date().addingTimeInterval(timeout)
             while !finished && Date() < deadline { settle(0.1) }
             guard finished else { return (1, "app request timed out") }
             if output == nil, refusal == nil, let folder, request["command"] == "transcribe" {
                 while RecordingLibrary.entry(at: folder)?.transcript == .pending && Date() < deadline { settle(0.1) }
                 if RecordingLibrary.entry(at: folder)?.transcript == .failed { return (1, "transcription_failed") }
             }
-            if let refusal { return (1, refusal.code + ": " + refusal.message) }
+            if let refusal { return (refusal.code == "usage" ? 2 : 1, refusal.code + ": " + refusal.message) }
             return (0, output ?? folder?.path ?? "")
         }
+        do {
+            _ = try CLIWork.decode(nil)
+            expect(false, "an old app's missing output is refused")
+        } catch let refusal as Refusal {
+            expect(
+                refusal.code == "app_outdated" && !refusal.retryable && refusal.suggestion != nil,
+                "old app output has a permanent, actionable refusal")
+        } catch { expect(false, "old app output uses a CLI refusal") }
+        expect(!CommandLink.accepts(["output": "{}"]), "a valid-looking legacy reply cannot bypass the safety protocol")
+        expect(CommandLink.accepts(["protocol": CommandLink.version]), "the current reply protocol is recognized")
+        do {
+            let foreign = try model.importLibrary.newFolder(at: Date().addingTimeInterval(3600))
+            let worker = Process()
+            worker.executableURL = URL(fileURLWithPath: "/bin/sleep")
+            worker.arguments = ["30"]
+            try worker.run()
+            defer {
+                worker.terminate()
+                worker.waitUntilExit()
+                try? FileManager.default.removeItem(at: foreign)
+            }
+            try MetaFile.update(foreign) {
+                $0 = [
+                    "status": "recorded", "started": ISO8601DateFormatter().string(from: Date()),
+                    "transcript": ["status": "waiting", "pid": worker.processIdentifier],
+                ]
+            }
+            let entry = RecordingLibrary.entry(at: foreign)!
+            model.transcription.start(pending: [entry])
+            expect(
+                !model.transcription.working.contains(RecordingLibrary.stamp(of: foreign)),
+                "startup does not adopt a live CLI worker")
+            do {
+                try model.transcription.ensure(entry)
+                expect(false, "live transcription owner must be respected")
+            } catch { expect(true, "an explicit request cannot steal a live CLI transcript") }
+            do {
+                try model.speakers.ensureLabels(entry, count: nil)
+                expect(false, "live worker must be respected")
+            } catch { expect(true, "speaker work cannot steal a live CLI recording") }
+        } catch { expect(false, "the live worker ownership fixture can be created") }
         if let target = model.recent.first(where: { $0.title == nil && $0.transcript == .none }) {
             let stamp = RecordingLibrary.stamp(of: target.folder)
             let named = command(["command": "title", "recording": stamp, "value": "Budget review"])
@@ -585,9 +626,16 @@ enum UITest {
             let absent = command(["command": "speakers", "recording": stamp])
             expect(
                 absent.status == 1 && absent.out.contains("no_transcript"), "app-routed speakers requires a transcript")
+            // The seed has an empty audio file. Remove that fixture file to
+            // exercise the missing-audio preflight rather than a decoder error.
+            if let current = model.importLibrary.folder(withStamp: stamp),
+                let audio = RecordingLibrary.entry(at: current)?.audio
+            {
+                try? FileManager.default.removeItem(at: audio)
+            }
             let transcribed = command(["command": "transcribe", "recording": stamp])
             expect(
-                transcribed.status == 1 && transcribed.out.contains("transcription_failed"),
+                transcribed.status == 1 && transcribed.out.contains("no_audio"),
                 "app-routed transcription reports missing audio")
             let home = model.root
             let away = home.deletingLastPathComponent().appendingPathComponent("moved-by-command")
@@ -628,6 +676,16 @@ enum UITest {
                 "import ensures transcript and labels")
             let again = command(["command": "import", "value": cliSource.path])
             expect(again.status == 0 && again.out.contains("false"), "app-routed import retry reuses the recording")
+            let wasEnabled = model.transcription.enabled
+            if wasEnabled { model.transcription.toggle() }
+            try? RecordingLibrary.markTranscript("waiting", in: entry.folder)
+            if let pending = RecordingLibrary.entry(at: entry.folder) { model.transcription.start(pending: [pending]) }
+            expect(model.transcription.working.contains(stamp), "a disabled pending transcript is queued")
+            let resumed = command(["command": "import", "value": cliSource.path], timeout: 30)
+            expect(
+                resumed.status == 0 && RecordingLibrary.entry(at: entry.folder)?.transcript == .done,
+                "import makes a disabled queued transcript explicit and finishes")
+            if wasEnabled { model.transcription.toggle() }
             let lines = [TranscriptLine(start: 0, end: 1, text: "A short interview.")]
             try? TranscriptDocument.render(lines: lines, labeled: false, model: "test").write(
                 to: entry.folder.appendingPathComponent(TranscriptDocument.fileName), atomically: true, encoding: .utf8)
@@ -638,6 +696,52 @@ enum UITest {
                 SpeakerLabels.label(lines: lines, heard: heard, count: 1), lines: lines, in: entry.folder)
             let listed = command(["command": "voices", "recording": stamp])
             expect(listed.status == 0 && listed.out.contains("A short interview."), "app route lists voices")
+            let wire = CommandLink.wireRequest([
+                "command": "voices", "action": "name", "recording": stamp, "voice": "1", "value": "Mei",
+            ])
+            let legacy = command(wire)  // an old handler sees an unknown command, never 'voices'
+            expect(
+                legacy.status != 0 && SpeakerLabels.result(in: entry.folder)?.names[1] == nil,
+                "old handlers reject the versioned mutation without changing a voice")
+            expect(
+                CommandLink.appRequest(["command": "voices"]) == nil
+                    && CommandLink.appRequest(wire)?["command"] == "voices",
+                "only versioned requests enter the app bridge")
+            do {
+                let center = DistributedNotificationCenter.default()
+                let listener = CommandLink.listen(model)
+                defer { center.removeObserver(listener) }
+                func bridge(_ request: [String: String]) -> [String: String]? {
+                    let id = UUID().uuidString
+                    var answer: [String: String]?
+                    let observer = center.addObserver(forName: CommandLink.reply, object: nil, queue: .main) { note in
+                        guard let reply = note.userInfo as? [String: String], reply["id"] == id,
+                            reply["taken"] == nil, reply["progress"] == nil
+                        else { return }
+                        MainActor.assumeIsolated { answer = reply }
+                    }
+                    defer { center.removeObserver(observer) }
+                    var message = request
+                    message["id"] = id
+                    message["root"] = model.root.standardizedFileURL.path
+                    center.postNotificationName(
+                        CommandLink.request, object: nil, userInfo: message, deliverImmediately: true)
+                    let deadline = Date().addingTimeInterval(5)
+                    while answer == nil && Date() < deadline { settle(0.1) }
+                    return answer
+                }
+                let bridged = bridge(CommandLink.wireRequest(["command": "voices", "recording": stamp]))
+                expect(
+                    bridged.map(CommandLink.accepts) == true
+                        && bridged?["output"]?.contains("A short interview.") == true,
+                    "the versioned notification bridge decodes and answers the CLI request")
+                let rejected = bridge([
+                    "command": "voices", "action": "name", "recording": stamp, "voice": "1", "value": "Mei",
+                ])
+                expect(
+                    rejected?["error"] == "app_outdated" && SpeakerLabels.result(in: entry.folder)?.names[1] == nil,
+                    "the real notification listener refuses a legacy mutation before it reaches the model")
+            }
             let named = command([
                 "command": "voices", "action": "name", "recording": stamp, "voice": "1", "value": "José Ortiz",
             ])
@@ -674,7 +778,10 @@ enum UITest {
             let refused = command(["command": "remove-audio", "recording": stamp])
             expect(refused.status == 1 && refused.out.contains("kept"), "app route respects kept audio")
             let unlocked = command(["command": "keep", "recording": stamp, "value": "off"])
-            expect(unlocked.status == 0, "app route unlocks audio")
+            expect(
+                unlocked.status == 2 && RecordingLibrary.entry(at: entry.folder)?.keepAudio == true,
+                "app route cannot unlock audio")
+            model.setKeep(entry, false)  // represents the user's Free up space action
             if let held = FolderLock(folder: entry.folder) {
                 let busy = command(["command": "remove-audio", "recording": stamp])
                 expect(
@@ -683,6 +790,21 @@ enum UITest {
                 held.release()
             } else {
                 expect(false, "the CLI fixture can be locked")
+            }
+            let savedTrash = Settings.store.object(forKey: "fixtureTrash")
+            let badTrash = base.appendingPathComponent("trash-is-a-file")
+            try? Data("fixture".utf8).write(to: badTrash)
+            Settings.store.set(badTrash.path, forKey: "fixtureTrash")
+            var trashFailure: Refusal?
+            model.handle(["command": "remove-audio", "recording": stamp]) { refusal, _, _ in trashFailure = refusal }
+            expect(
+                trashFailure?.code == "write_failed" && trashFailure?.retryable == false
+                    && trashFailure?.suggestion != nil && entry.hasAudio,
+                "a failed Trash move gives its cause and does not promise a blind retry")
+            if let savedTrash {
+                Settings.store.set(savedTrash, forKey: "fixtureTrash")
+            } else {
+                Settings.store.removeObject(forKey: "fixtureTrash")
             }
             let audio = command(["command": "remove-audio", "recording": stamp])
             expect(audio.status == 0 && !entry.hasAudio, "app route moves audio to the Trash")

@@ -9,45 +9,52 @@ import TapeUpSpeech
 /// model loads; otherwise the command does the work itself.
 @MainActor
 enum CLI {
-    static let help = """
-        TapeUp: work on saved recordings. Recordings are started in the app.
+    static var help: String {
+        let tool = CLIWork.executable
+        return """
+            TapeUp: work on saved recordings. Start recordings in the app.
+            Usage: \(tool) <command>
 
-        Examples:
-          TapeUp import "Mei interview.m4a"
-          TapeUp voices latest; TapeUp voices name latest 1 "Mei"
-          TapeUp people rename "Mei" "Nora Quinn"
+            Examples:
+              \(tool) import "interview.m4a"
+              After the user says who Voice 2 is:
+              \(tool) voices name 2026-11-06-1430 2 "Mei"
+              \(tool) people rename "Mei" "Nora Quinn"
 
-          TapeUp folder [<path> [--move]]        show or change the folder; --move takes recordings
-          TapeUp import <file> [--title T]       copy, transcribe and label speakers; safe to retry
-          TapeUp title <recording> <title>      set a recording's title (its folder is renamed); "" clears it
-          TapeUp transcribe <recording>         make transcript.md again, on this Mac
-          TapeUp speakers <recording> [--voices N]
-                                                ensure labels; a different N refolds the voices
-          TapeUp voices <recording>             list voices, names, talk time and a quote
-          TapeUp voices name <recording> <voice> <person>
-                                                name a voice; "" clears it
-          TapeUp people                         list people, you first
-          TapeUp people add <name> [--context C] add a person or update their context
-          TapeUp people rename <old> <new> [--merge]
-                                                rename everywhere; --merge joins listed people
-          TapeUp people remove <name>           forget a person; recordings keep the name
-          TapeUp remove-audio <recording>        Trash unlocked audio; keep the transcript
-          TapeUp keep <recording> [off]          lock audio against removal; off unlocks it
-          TapeUp agent [off] [--model M] [--effort E]
-                                                show, disable or configure the title-suggesting agent
+            Commands:
+              folder [<path> [--move]]             show or change the recordings folder
+              import <file> [--title T]            copy, transcribe and label; retry missing stages
+              title <recording> <title>            set a recording's title (its folder is renamed); "" clears it
+              transcribe <recording>               make transcript.md again
+              speakers <recording> [--voices N]    keep labels; a different N refolds voices
+              voices <recording>                  list voices, names, talk time and quotes
+              voices name <recording> <voice> <person>
+                                                  name only this voice; "" clears it
+              people                              list people, you first
+              people add <name> [--context C]      add a person or update their context
+              people rename <old> <new> [--merge]  rename everywhere; ask before merging
+              people remove <name>                forget their voice for good; ask first
+              remove-audio <recording>             Trash audio only after complete transcript and labels
+              keep <recording>                     lock audio; only the user unlocks in Free up space
+              agent [off] [--model M] [--effort E]  show, disable or configure the title agent
+              help                                show this guide
 
-        <recording> is a folder, folder name, start stamp (2026-11-06-1430),
-        or latest: the most recent saved recording, never one still recording.
-        <voice> is its number or current name. Name it only when the user said
-        who it is: TapeUp learns that person's voice from it.
-        import, transcribe and speakers wait; progress goes to stderr. The first
-        run may download models. Follow Next: in results; ask before fixing past fills.
-        Use --json when branching in code; plain output when reading or telling the user.
-        JSON is one object on stdout, or error, message, suggestion and retryable
-        on stderr. Usage errors exit 2; other failures exit 1.
-        Change people with TapeUp people. Only the user enables an agent in Settings.
+            <recording>: folder, folder name, start stamp (2026-11-06-1430), or latest:
+            the recording that started most recently, excluding one still recording.
+            latest is not the last import. Use the real stamp the import prints.
+            <voice>: its number or current name. Ask the user who it is before naming;
+            never infer a person from a file name, quote or placeholder.
+            Past-fill commands have a stale-fill guard and change only the reviewed voice.
+            Long work can take many minutes: allow a long timeout or run in the background.
+            Retrying an interrupted import continues missing stages; a transcript restarts.
+            Next: is a suggestion; run it only if it serves what the user asked.
+            Use --json when branching in code; plain output when telling the user.
+            JSON mode suppresses progress: one object on stdout, or one error object
+            on stderr (error, message, suggestion, retryable). Usage exits 2; others 1.
+            Merge and remove cannot be undone from the CLI. Only the user enables an agent.
 
-        """
+            """
+    }
 
     static let commands: Set = [
         "folder", "title", "transcribe", "speakers", "agent", "help", "import", "voices", "people",
@@ -56,16 +63,40 @@ enum CLI {
 
     private static var json = false
     private static var output = FileHandle.standardOutput
+    private static var errorOutput = FileHandle.standardError
+    private static var outputPrepared = false
+
+    /// Before AppKit/preferences can emit diagnostics, reserve the result streams.
+    static func prepareOutput(_ arguments: [String]) {
+        json = arguments.contains("--json")
+        if json {
+            routeModelOutput()
+            outputPrepared = true
+        }
+    }
 
     /// Upstream model loaders print to stdout. Keep the original stream for
     /// the result and route their diagnostics to stderr for the whole command.
     private static func routeModelOutput() {
         fflush(nil)
         let descriptor = dup(STDOUT_FILENO)
-        guard descriptor >= 0 else { fail("write_failed", "Could not prepare command output.", retryable: true) }
-        guard dup2(STDERR_FILENO, STDOUT_FILENO) >= 0 else {
+        guard descriptor >= 0 else {
+            fail("write_failed", "Could not prepare command output.", suggestion: "Check the terminal output stream.")
+        }
+        if json {
+            let errors = dup(STDERR_FILENO)
+            let sink = open("/dev/null", O_WRONLY)
+            guard errors >= 0, sink >= 0 else {
+                close(descriptor)
+                fail("write_failed", "Could not prepare JSON output.", suggestion: "Check the terminal output streams.")
+            }
+            errorOutput = FileHandle(fileDescriptor: errors, closeOnDealloc: true)
+            dup2(sink, STDERR_FILENO)
+            dup2(sink, STDOUT_FILENO)
+            close(sink)
+        } else if dup2(STDERR_FILENO, STDOUT_FILENO) < 0 {
             close(descriptor)
-            fail("write_failed", "Could not prepare command output.", retryable: true)
+            fail("write_failed", "Could not prepare command output.", suggestion: "Check the terminal output streams.")
         }
         output = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
     }
@@ -79,10 +110,10 @@ enum CLI {
         let command = words.first ?? "help"
         var rest = Array(words.dropFirst())
         if ["help", "--help", "-h"].contains(command) {
-            print(help, terminator: "")
+            output.write(Data(help.utf8))
             exit(0)
         }
-        if ["import", "transcribe", "speakers"].contains(command) { routeModelOutput() }
+        if !outputPrepared, ["import", "transcribe", "speakers"].contains(command) { routeModelOutput() }
         switch command {
         case "folder":
             let moving = rest.contains("--move")
@@ -106,7 +137,7 @@ enum CLI {
                     text += "\n\(left) recording\(left == 1 ? "" : "s") made earlier stay in \(previous)."
                     object["recordings_left_behind"] = left
                 }
-                report(try? CLIWork.next(CommandOutcome(text: text, value: object), "TapeUp people").encoded())
+                report(try? CommandOutcome(text: text, value: object).encoded())
             }
             send(["command": "folder", "value": destination.path, "move": moving ? "1" : "0"]) { folder, _ in
                 done(folder)
@@ -132,7 +163,7 @@ enum CLI {
                             return try RecordingLibrary.save(title: title, in: current)
                         })
                 } catch {
-                    fail("write_failed", "Could not save the title: \(error.localizedDescription)", retryable: true)
+                    failure(error)
                 }
             }
         case "transcribe":
@@ -196,7 +227,7 @@ enum CLI {
                     var stamp: String?
                     do {
                         note("Inspecting the import…")
-                        let candidate = try await RecordingImport.inspect(file)
+                        let candidate = try await CLIWork.inspect(file)
                         let copy = try await RecordingImport.copyOnce(
                             candidate, into: library,
                             plan: .init(transcribe: true, labelSpeakers: true, title: title))
@@ -209,7 +240,7 @@ enum CLI {
                         if !CLIWork.labelsCurrent(folder, count: nil) {
                             folder = try await speakersWork(folder, count: nil).folder
                         }
-                        report(try CLIWork.imported(folder, copied: copy.imported).encoded())
+                        report(try CLIWork.imported(folder, copied: copy.imported, requestedTitle: title).encoded())
                     } catch {
                         if let stamp { failure(CLIWork.importFailure(error, stamp: stamp, file: file, title: title)) }
                         failure(error, importing: true)
@@ -236,8 +267,13 @@ enum CLI {
                 if rest.count > 2 { request["new"] = rest[2] }
                 request["merge"] = merge ? "1" : "0"
             } else {
+                let expectedFill = option("if-fill", in: &rest)
                 refuseFlags(rest, usage: "TapeUp \(command) <recording>")
                 let naming = command == "voices" && rest.first == "name"
+                if expectedFill != nil && !naming {
+                    fail("usage", "--if-fill is only for an offered voice correction.", suggestion: "Run TapeUp help.")
+                }
+                request["if-fill"] = expectedFill
                 if naming {
                     rest.removeFirst()
                     request["action"] = "name"
@@ -245,14 +281,15 @@ enum CLI {
                 let valid =
                     naming
                     ? rest.count == 3
-                    : command == "keep" ? (rest.count == 1 || (rest.count == 2 && rest[1] == "off")) : rest.count == 1
+                    : rest.count == 1
                 guard valid else { fail("usage", "Run TapeUp help for \(command).") }
+                if naming { do { try CLIWork.validatePerson(rest[2], allowEmpty: true) } catch { failure(error) } }
                 request["recording"] = recording(rest[0]).path
                 if naming {
                     request["voice"] = rest[1]
                     request["value"] = rest[2]
                 }
-                if command == "keep" { request["value"] = rest.count == 2 ? "off" : "on" }
+                if command == "keep" { request["value"] = "on" }
             }
             let work = request
             send(work) { _, output in
@@ -294,7 +331,7 @@ enum CLI {
                         suggestion: "The user picks one in TapeUp's Settings, under Your AI.")
                 }
                 let outcome = CommandOutcome(text: "Agent: off", value: ["agent": NSNull()])
-                report(try? CLIWork.next(outcome, rest == ["off"] ? "TapeUp folder" : nil).encoded())
+                report(try? CLIWork.next(outcome, nil).encoded())
             }
             for (name, value) in changes {
                 let key = "agent\(name)-\(kind.rawValue)"
@@ -315,7 +352,7 @@ enum CLI {
                             "agent": kind.rawValue,
                             "model": Agents.setting("Model", for: kind) ?? (kind == .claude ? "sonnet" : NSNull()),
                             "effort": effort,
-                        ]), changes.isEmpty ? nil : "TapeUp folder"
+                        ]), nil
                 ).encoded())
         default:
             fail("usage", "TapeUp has no command \(command).", suggestion: "Run TapeUp help.")
@@ -333,33 +370,17 @@ enum CLI {
     }
 
     private static func report(_ output: String?) -> Never {
-        guard let output, let data = output.data(using: .utf8),
-            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let text = object["text"],
-            let value = object["value"]
-        else { fail("write_failed", "TapeUp returned no result.", retryable: true) }
-        succeed(String(describing: text), value)
+        do {
+            let result = try CLIWork.decode(output)
+            succeed(result.text, result.value)
+        } catch { failure(error) }
     }
 
     private static func failure(_ error: Error, importing: Bool = false) -> Never {
-        if let refusal = error as? Refusal {
-            fail(
-                refusal.code, refusal.message, suggestion: refusal.suggestion, retryable: refusal.retryable,
-                stamp: refusal.stamp)
-        }
-        if error as? VoiceLibrary.Failure == .busyRecording || error as? VoiceLibrary.Failure == .concurrentChange {
-            fail(
-                "busy", "Another process is changing this recording or library.",
-                suggestion: "Try again when it finishes.", retryable: true)
-        }
-        if importing, let failure = error as? RecordingImport.Failure {
-            fail(
-                "unreadable", "Could not import the file: \(failure).",
-                suggestion: "Give a readable audio or video file.")
-        }
+        let refusal = CLIWork.refusal(error)
         fail(
-            "write_failed",
-            "Could not \(importing ? "import the file" : "save the change"): \(error.localizedDescription)",
-            retryable: true)
+            refusal.code, refusal.message, suggestion: refusal.suggestion, retryable: refusal.retryable,
+            stamp: refusal.stamp)
     }
 
     private static func refuseFlags(_ words: [String], usage: String) {
@@ -383,6 +404,7 @@ enum CLI {
                 "not_found", "No recording \(argument) in \(root.path).",
                 suggestion: "Give its folder, folder name or start time, such as 2026-11-06-1430.")
         }
+        do { try RecordingWork.recover(in: folder, appBusy: !Settings.isStaged && appRunning) } catch { failure(error) }
         return folder
     }
 
@@ -416,7 +438,7 @@ enum CLI {
                 }
             }
         }
-        var message = request
+        var message = CommandLink.wireRequest(request)
         message["id"] = id
         message["root"] = root.standardizedFileURL.path
         center.postNotificationName(CommandLink.request, object: nil, userInfo: message, deliverImmediately: true)
@@ -428,14 +450,23 @@ enum CLI {
         guard let reply = answer.reply else {
             if answer.taken {
                 fail(
-                    "app_quit", "TapeUp quit before it finished.", suggestion: "Open TapeUp and run the command again.",
+                    "app_quit", "TapeUp quit before it finished.",
+                    suggestion: "Run the same command again; it can work without the app.",
                     retryable: true)
             }
             fail(
                 "no_answer", "TapeUp is running but did not answer for \(root.path).",
                 suggestion:
-                    "It may still be starting: run the command again in a few seconds. Do not quit TapeUp; it may be recording.",
-                retryable: true)
+                    "Check the recordings folder with TapeUp folder and ask the user to use the same folder in the app. Do not quit it while recording.",
+                retryable: false)
+        }
+        guard CommandLink.accepts(reply) else {
+            failure(
+                Refusal(
+                    "app_outdated",
+                    "The running app does not support the command's safety protocol; no change was requested using its older commands.",
+                    suggestion:
+                        "Ask the user to relaunch the updated app when not recording, or quit it and rerun alone."))
         }
         if let code = reply["error"] {
             fail(
@@ -459,12 +490,14 @@ enum CLI {
         var said = ""
         while true {
             guard appRunning else {
-                fail("app_quit", quitMessage, suggestion: "Open TapeUp and run the command again.", retryable: true)
+                fail(
+                    "app_quit", quitMessage, suggestion: "Run the same command again; it can work without the app.",
+                    retryable: true)
             }
             guard root.path == watched else {
                 fail(
                     "folder_changed", "TapeUp switched to another recordings folder before it finished.",
-                    suggestion: "Run TapeUp folder, then the command again.", retryable: true)
+                    suggestion: "Check TapeUp folder and choose the recording in the current library before retrying.")
             }
             guard let folder = library.folder(withStamp: stamp) else {
                 fail("not_found", "The recording \(stamp) is no longer in \(watched).")
@@ -497,7 +530,7 @@ enum CLI {
                 let meta = MetaFile.read(folder)?["transcript"] as? [String: Any]
                 fail(
                     "transcription_failed", meta?["error"] as? String ?? "The transcript could not be made.",
-                    retryable: true)
+                    suggestion: "Check the audio and model are readable before retrying.")
             default: break
             }
         }
@@ -513,7 +546,9 @@ enum CLI {
             switch labels?["status"] as? String {
             case "done": reportSpeakers(folder)
             case "failed":
-                fail("labels_failed", labels?["error"] as? String ?? "Speakers could not be labeled.", retryable: true)
+                fail(
+                    "labels_failed", labels?["error"] as? String ?? "Speakers could not be labeled.",
+                    suggestion: "Check the audio, voice files and model are readable before retrying.")
             default: break
             }
         }
@@ -538,7 +573,10 @@ enum CLI {
                     suggestion: "Move or rename them by hand.")
             }
         } catch {
-            fail("move_failed", "Could not move the recordings: \(error.localizedDescription)", retryable: true)
+            fail(
+                "move_failed", "Could not move the recordings: \(error.localizedDescription)",
+                suggestion: "Check both folders' permissions and free space before retrying.",
+                retryable: CLIWork.retryable(error))
         }
     }
 
@@ -550,10 +588,14 @@ enum CLI {
             guard let current = library.folder(withStamp: RecordingLibrary.stamp(of: folder)),
                 let entry = RecordingLibrary.entry(at: current)
             else { throw Refusal("not_found", "That recording no longer exists.") }
-            try CLIWork.check(entry, needsIdle: false)
-            guard let held = FolderLock(folder: current) else {
-                throw Refusal("busy", "That recording is in use.", retryable: true)
+            let fresh = try CLIWork.check(entry, needsIdle: false)
+            try CLIWork.requireAudio(fresh)
+            if let pid = RecordingWork.foreignOwner(in: current) {
+                throw Refusal(
+                    "busy", "Process \(pid) owns work on this recording.",
+                    suggestion: "Wait for that process to finish, then retry.", retryable: true)
             }
+            let held = try CLIWork.lock(current)
             do {
                 if command == "transcribe" {
                     try RecordingLibrary.markTranscript("waiting", in: current)
@@ -606,7 +648,9 @@ enum CLI {
                     lines: outcome.lines, failures: outcome.failures, pieces: outcome.pieces, model: engine.model,
                     in: current)
                 guard RecordingLibrary.entry(at: current)?.transcript == .done else {
-                    throw Refusal("transcription_failed", "No passages could be transcribed.", retryable: true)
+                    throw Refusal(
+                        "transcription_failed", "The model failed on every passage.",
+                        suggestion: "Keep the audio; check the recording and model before trying again.")
                 }
                 return current
             }
@@ -617,8 +661,10 @@ enum CLI {
                 }
             }
             throw Refusal(
-                "transcription_failed", "The transcript could not be made: \(error.localizedDescription)",
-                retryable: true)
+                "transcription_failed",
+                "The transcript could not be made: \((error as? Refusal)?.message ?? error.localizedDescription)",
+                suggestion: (error as? Refusal)?.suggestion
+                    ?? "Check the audio and model are readable before retrying.", retryable: CLIWork.retryable(error))
         }
     }
 
@@ -661,7 +707,8 @@ enum CLI {
                 guard let current = library.folder(withStamp: stamp) else { throw CocoaError(.fileNoSuchFile) }
                 if listened { try heard.save(in: current) }
                 held.release()
-                try SpeakerLabels.relabel(heard, count: count, in: current)
+                let result = try SpeakerLabels.relabel(heard, count: count, in: current)
+                if !result.voices.isEmpty { try VoiceLibrary(root: library.root).fill(in: current) }
                 return (current, true)
             }
         } catch {
@@ -669,7 +716,9 @@ enum CLI {
                 try? library.withLock { try SpeakerLabels.mark("failed", error: "\(error)", in: current) }
             }
             throw Refusal(
-                "labels_failed", "Speakers could not be labeled: \(error.localizedDescription)", retryable: true)
+                "labels_failed", "Speakers could not be labeled: \(error.localizedDescription)",
+                suggestion: "Check the audio, voice files and model are readable before retrying.",
+                retryable: CLIWork.retryable(error))
         }
     }
 
@@ -681,7 +730,7 @@ enum CLI {
             try? CLIWork.next(
                 CommandOutcome(
                     text: title.map { "Title set to \"\($0)\": \(folder.path)" } ?? "Title cleared: \(folder.path)",
-                    value: ["folder": folder.path, "title": title as Any? ?? NSNull()]), CLIWork.afterRecording(folder)
+                    value: ["folder": folder.path, "title": title as Any? ?? NSNull()]), nil
             ).encoded())
     }
 
@@ -702,7 +751,8 @@ enum CLI {
     }
 
     private static func note(_ text: String) {
-        FileHandle.standardError.write(Data((text + "\n").utf8))
+        guard !json else { return }
+        errorOutput.write(Data((text + "\n").utf8))
     }
 
     private static func succeed(_ text: String, _ object: Any) -> Never {
@@ -722,13 +772,14 @@ enum CLI {
         if json {
             var object: [String: Any] = ["error": type, "message": message, "retryable": retryable]
             object["stamp"] = stamp
-            object["suggestion"] = suggestion
+            object["suggestion"] = CLIWork.runnable(suggestion ?? "Run TapeUp help and check the requested operation.")
             if let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]) {
-                FileHandle.standardError.write(data + Data("\n".utf8))
+                errorOutput.write(data + Data("\n".utf8))
             }
         } else {
-            FileHandle.standardError.write(
-                Data(([message, suggestion].compactMap { $0 }.joined(separator: " ") + "\n").utf8))
+            errorOutput.write(
+                Data(
+                    ([message, suggestion.map(CLIWork.runnable)].compactMap { $0 }.joined(separator: " ") + "\n").utf8))
         }
         exit(type == "usage" ? 2 : 1)
     }

@@ -79,6 +79,7 @@ final class Transcription {
     func start(pending: [RecordingEntry]) {
         if enabled { fetchIfNeeded() }
         for entry in pending.reversed() where entry.transcript == .pending {
+            guard RecordingWork.foreignOwner(in: entry.folder) == nil else { continue }
             enqueue(RecordingLibrary.stamp(of: entry.folder))
         }
     }
@@ -303,9 +304,24 @@ final class Transcription {
     /// One click: make a transcript for a recording that has none or whose
     /// transcript failed. Works with transcripts off; the click is the ask.
     /// Without `announce`, the caller refreshes the list itself, once for many.
+    var showProblem: (String) -> Void = { _ in }
+
+    func isSuspended(_ stamp: String) -> Bool { queue.contains(stamp) && !enabled && !explicit.contains(stamp) }
+
     func make(_ entry: RecordingEntry, announce: Bool = true) {
+        do { try ensure(entry, announce: announce) } catch {
+            showProblem("Could not start transcription: \(error.localizedDescription)")
+        }
+    }
+
+    func ensure(_ entry: RecordingEntry, announce: Bool = true) throws {
         let stamp = RecordingLibrary.stamp(of: entry.folder)
-        try? RecordingLibrary.markTranscript("waiting", model: model.name, in: entry.folder)
+        try library.withLock {
+            guard RecordingWork.foreignOwner(in: entry.folder) == nil else { throw VoiceLibrary.Failure.busyRecording }
+            guard let held = FolderLock(folder: entry.folder) else { throw VoiceLibrary.Failure.busyRecording }
+            defer { held.release() }
+            try RecordingLibrary.markTranscript("waiting", model: model.name, in: entry.folder)
+        }
         explicit.insert(stamp)
         enqueue(stamp)
         if announce { finished(stamp) }

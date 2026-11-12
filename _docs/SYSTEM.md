@@ -108,7 +108,8 @@ TU-014, TU-019, TU-036).
   meeting took that person. The numbers come from 40 AMI meetings. A fill
   puts the person in who was there but never adds anyone to the People list
   and never teaches the store; playing that voice, or naming another voice
-  in the meeting, confirms it unless the chosen person is on that fill.
+  in the panel, confirms it unless the chosen person is on that fill. CLI
+  naming changes and teaches only its named voice, leaving other fills unchecked.
   A microphone correction keeps its negative without changing the acoustic
   bar. Changing a fill records "not me", takes the
   person out of who was there if the fill put them there, and offers the
@@ -177,13 +178,21 @@ TU-014, TU-019, TU-036).
   and ensures transcription and speaker labels, waiting for completion and
   resuming missing stages on retry. `speakers` leaves completed labels alone
   unless a different voice count is requested. `latest` resolves the most
-  recent saved recording, excluding active recordings. Successful commands
-  orient agents with a copyable next step, and describe reversal where possible.
+  recent recording by start time, excluding active recordings, not the last
+  import. Results use real stamps and runnable executable paths; next steps are
+  suggestions and never infer a person. JSON emits one object without progress.
+  Person names starting with `<` are refused. Reversal is described where possible.
   Staged settings domains always work alone, so tests cannot reach the user's
   app. Voice names require the user's identification; correcting a fill lists earlier similar fills for
   review and never changes them automatically. Audio removal requires a
-  transcript, idle audio and no keep lock. `keep` sets or clears that lock.
-  Concurrent file edits use the existing library and recording locks.
+  complete transcript, completed labels, idle audio and no keep lock, and reports
+  its exact Trash path. CLI `keep` only sets that lock; only the user unlocks
+  in Free up space. Staged tests use a fixture Trash. Pending jobs record their
+  process ID; dead owners are recovered, live foreign workers are not adopted.
+  Imports reserve a fingerprint-bearing `importing` folder before encoding, so
+  a retry can clean a dead partial copy. Versioned command requests prevent an
+  older app from applying newer naming semantics. Concurrent file edits use
+  the existing library and recording locks.
   The binary also keeps `record`, `snapshot`, `uitest`, and timed
   `time-transcribe` and `time-speakers` runs for testing. (TU-018)
 - **Import:** Import… in ··· and files dropped on the menu-bar icon open a
