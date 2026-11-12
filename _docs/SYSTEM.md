@@ -227,13 +227,14 @@ from a row's right-click menu); the card then says Transcript only, a row
 marks it with a page glyph before its length, Copy path leaves out the
 audio line, and what needs sound (playing a voice, labeling speakers)
 hides (TU-037). Who was there (a count, optional names suggested from past
-recordings) is optional and never delays saving. A lock beside Remove
-audio keeps a recording's audio (`keep_audio` in `meta.json`). Free up
+recordings) is optional and never delays saving. Free up
 space, from ···, lists recordings that still hold audio by age, in three
 groups: ready, speakers not labeled (label first), and no transcript
 (transcribe first, or move the whole recording to the Trash after one
 more click). One action removes the ready ones' audio after a confirming
-click, with Undo; kept recordings are left out (TU-038). Renaming a person
+click, with Undo. A lock on each of its rows, and nowhere else, keeps a
+recording's audio (`keep_audio` in `meta.json`); locked rows stay in place
+and are left out (TU-038). Renaming a person
 on the People page renames them in every recording, the labeled
 transcripts and the voice store at once, with Undo; renaming onto a listed
 name asks to merge (TU-040).

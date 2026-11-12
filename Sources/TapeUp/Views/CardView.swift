@@ -93,20 +93,6 @@ struct CardView: View {
             }
             .padding(.leading, -6)
             if !card.finishing {
-                if card.entry.hasAudio {
-                    let kept = card.entry.keepAudio
-                    IconButton(
-                        symbol: kept ? "lock.fill" : "lock.open",
-                        help: kept
-                            ? "Kept: Free up space leaves its audio. Click to stop keeping it"
-                            : "Keep the audio: Free up space leaves it alone",
-                        tinted: kept
-                    ) {
-                        model.setKeep(card.entry, !kept)
-                    }
-                    .clickTarget("Keep audio")
-                    .padding(.leading, 4)
-                }
                 if model.canRemoveAudio(card.entry) {
                     IconButton(symbol: "waveform.badge.minus", help: "Remove audio, keep the transcript") {
                         model.removeAudio(card.entry)

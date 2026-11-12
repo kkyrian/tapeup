@@ -1086,25 +1086,32 @@ enum UITest {
         expect(!model.showingAllRecordings, "Back returns to Recent")
         expect(abs(panel.window.frame.height - recentHeight) <= 1, "at the height it had")
 
-        // Free up space: a kept recording is left out; the rest that are
-        // ready lose their audio after one confirming click, and Undo puts it back.
+        // Free up space: a recording locked on its row stays in place and is
+        // left out; the rest that are ready lose their audio after one
+        // confirming click, and Undo puts it back.
         let withAudio = model.spaceCandidates
         expect(!withAudio.isEmpty, "some recordings still hold audio (\(withAudio.count))")
-        if let keep = withAudio.first {
-            model.open(keep)
-            settle(1.0)
-            expect(click("Keep audio", in: panel), "the card's Keep lock clicks")
-            settle(0.2)
-            check("card-kept")
-            expect(
-                model.card?.entry.keepAudio == true,
-                "and keeps the recording's audio (\(model.problem ?? "no problem"), meta \(MetaFile.read(model.card?.entry.folder ?? keep.folder)?["keep_audio"] ?? "none"))"
-            )
-            model.closeCard()
-        }
+        let keep = withAudio.first(where: { model.spaceGroup($0) == .ready }) ?? withAudio.first
+        // The click events carry no pointer move, so the row draws hovered
+        // from the start, its lock in place of its size.
+        RecordingRow.staged = keep?.id
         model.openFreeUpSpace()
-        settle(0.3)
+        settle(1.0)
         check("free-up-space")
+        if let keep {
+            let stamp = RecordingLibrary.stamp(of: keep.folder)
+            expect(click("keep " + stamp, in: panel), "the row's lock clicks")
+            RecordingRow.staged = nil
+            settle(0.3)
+            check("free-up-space-locked")
+            let locked = model.library.folder(withStamp: stamp).flatMap(RecordingLibrary.entry(at:))
+            expect(
+                locked?.keepAudio == true,
+                "and keeps the recording's audio (\(model.problem ?? "no problem"))")
+            expect(
+                model.spaceCandidates.contains { RecordingLibrary.stamp(of: $0.folder) == stamp },
+                "the locked row stays on the page")
+        }
         let spaceHeight = panel.window.frame.height
         let kept = model.spaceCandidates.filter(\.keepAudio)
         let ready = model.spaceCandidates.filter {

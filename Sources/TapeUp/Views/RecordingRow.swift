@@ -4,7 +4,7 @@ import TapeUpCore
 
 /// A recording in a list: when it was, its title over who was there, and
 /// its length, which gives way to copy, Finder and Trash on hover. Click
-/// opens its card. Recent and All recordings share it.
+/// opens its card. Recent, All recordings and Free up space share it.
 struct RecordingRow: View {
     enum Look: Equatable {
         /// The time of day, under a day heading.
@@ -25,9 +25,9 @@ struct RecordingRow: View {
     var excerpt: RecordingSearch.Excerpt?
     /// In place of the length at rest: the audio's size, on Free up space.
     var size: String?
-    /// Off where moving the whole recording to the Trash would surprise:
-    /// Free up space, which clears audio only.
-    var trashable = true
+    /// On Free up space, which clears audio only: a lock that keeps the
+    /// audio takes the place of the Trash.
+    var keepable = false
     /// Set by the gallery: the row for this folder draws as if hovered.
     @MainActor static var staged: String?
     @State private var hovering = false
@@ -77,8 +77,9 @@ struct RecordingRow: View {
                     } else {
                         // Audio is the rule; only its absence is marked, and keeping it.
                         HStack(spacing: 3) {
-                            if entry.keepAudio, entry.hasAudio {
-                                Image(systemName: "lock.fill").font(.system(size: 9))
+                            if keepable, entry.keepAudio, entry.hasAudio {
+                                Image(systemName: "lock.fill").font(.system(size: 10))
+                                    .foregroundStyle(Color.accentColor)
                             }
                             if !entry.hasAudio, entry.status != "recording" {
                                 Image(systemName: "text.page").font(.system(size: 10))
@@ -89,14 +90,24 @@ struct RecordingRow: View {
                         .accessibilityElement(children: .combine)
                         .accessibilityLabel(
                             (size ?? Format.length(entry.duration)) + (entry.hasAudio ? "" : ", transcript only")
-                                + (entry.keepAudio && entry.hasAudio ? ", kept" : ""))
+                                + (keepable && entry.keepAudio && entry.hasAudio ? ", kept" : ""))
                     }
                 }
                 .opacity(hovered || copied ? 0 : 1)
                 HStack(spacing: 0) {
                     IconButton(symbol: copied ? "checkmark" : "link", help: "Copy path", size: 22, action: copy)
                     IconButton(symbol: "folder", help: "Show in Finder", size: 22) { model.reveal(entry) }
-                    if trashable {
+                    if keepable {
+                        let kept = entry.keepAudio
+                        IconButton(
+                            symbol: kept ? "lock.fill" : "lock.open",
+                            help: kept
+                                ? "Kept: Free up space leaves its audio. Click to stop keeping it"
+                                : "Keep its audio",
+                            size: 22, tinted: kept
+                        ) { model.setKeep(entry, !kept) }
+                        .clickTarget("keep " + RecordingLibrary.stamp(of: entry.folder))
+                    } else {
                         IconButton(symbol: "trash", help: "Move to Trash", size: 22) { model.trash(entry) }
                     }
                 }
@@ -120,7 +131,7 @@ struct RecordingRow: View {
             Button("Show in Finder") { model.reveal(entry) }
             Button("Rename…") { model.open(entry) }
             Divider()
-            if entry.hasAudio {
+            if keepable, entry.hasAudio {
                 Button(entry.keepAudio ? "Stop Keeping Audio" : "Keep Audio") { model.setKeep(entry, !entry.keepAudio) }
             }
             if model.canRemoveAudio(entry) {
@@ -130,7 +141,7 @@ struct RecordingRow: View {
                     model.removeAudio(entry)
                 }
             }
-            if trashable { Button("Move to Trash") { model.trash(entry) } }
+            if !keepable { Button("Move to Trash") { model.trash(entry) } }
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(

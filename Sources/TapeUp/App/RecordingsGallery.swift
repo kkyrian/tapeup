@@ -88,9 +88,10 @@ enum RecordingsGallery {
         model.freeAudio(model.spaceCandidates)
         shoot("s6-space-removed")
         model.undoFreeAudio()
-        if let kept = model.allEntries.first(where: \.keepAudio) { model.open(kept) }
-        shoot("s7-card-kept")
-        model.closeCard()
+        // A row under the pointer: its lock, open, in place of the Trash.
+        RecordingRow.staged = model.spaceCandidates.first { !$0.keepAudio }?.id
+        shoot("s7-space-row-lock")
+        RecordingRow.staged = nil
         model.closeFreeUpSpace()
         model.openAllRecordings()
         model.recordingsFilter = RecordingFilter(noTranscript: true)
