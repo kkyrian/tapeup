@@ -14,7 +14,8 @@
 
 <p align="center">
   <a href="https://github.com/kkyrian/tapeup/releases/latest/download/TapeUp.dmg"><b>Download for Mac</b></a>
-  &nbsp;·&nbsp; free, MIT license &nbsp;·&nbsp; Apple silicon, tested on macOS 27
+  &nbsp;·&nbsp; free, MIT license &nbsp;·&nbsp; Apple silicon, tested on macOS 27<br>
+  <sub>First time? macOS asks once before TapeUp opens: <a href="#first-launch">see First launch</a>.</sub>
 </p>
 
 ```bash
@@ -170,7 +171,15 @@ each one means, and TapeUp has a command line they can use.
 TapeUp is free and isn't notarized by Apple, so macOS stops it once:
 
 1. Open TapeUp. When macOS says it can't verify it, click **Done**.
-2. In **System Settings › Privacy & Security**, click **Open Anyway** next to TapeUp.
+2. In **System Settings › Privacy & Security**, scroll to Security and click
+   **Open Anyway** next to TapeUp.
+
+<p align="center">
+  <img src=".github/images/first-launch-warning.png" width="160" alt="macOS says “TapeUp.app” Not Opened: Apple could not verify it is free of malware. The buttons are Move to Trash and Done.">
+  &nbsp;
+  <img src=".github/images/first-launch-open-anyway.png" width="480" alt="System Settings, Privacy &amp; Security, Security: “TapeUp.app” was blocked to protect your Mac, with an Open Anyway button beside it.">
+</p>
+
 3. Click the cassette in the menu bar. TapeUp downloads its speech model once
    (2.3 GB, or 680 MB on Macs with less than 16 GB of memory).
 
