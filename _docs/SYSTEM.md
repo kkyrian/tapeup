@@ -150,7 +150,12 @@ TU-014, TU-019, TU-036).
   Settings and All recordings, one at a time. ··· (and right-click on the menu-bar icon)
   holds People…, Settings… and Quit. Settings holds the recordings folder,
   Your AI, and the app switches (floating controls, open at login, which
-  starts on at an installed app's first launch). (TU-004, TU-008, TU-021, TU-036)
+  starts on at an installed app's first launch). Red means recording:
+  Record is a fixed blue at rest, whatever the system accent, and turns
+  red as Stop. A recording's row shows Copy path, Trash and ··· on hover;
+  ··· holds the right-click menu, which always lists Remove Audio for a
+  recording with audio, greyed until it can go. Recent's header has
+  Import beside the folder. (TU-004, TU-008, TU-021, TU-036, TU-041)
 - **All recordings:** reached by Show all under Recent when there are more
   recordings than Recent shows; browse first, search second. Chips for the
   five people named at the most recordings, then No transcript (with one
@@ -195,7 +200,7 @@ TU-014, TU-019, TU-036).
   the existing library and recording locks.
   The binary also keeps `record`, `snapshot`, `uitest`, and timed
   `time-transcribe` and `time-speakers` runs for testing. (TU-018)
-- **Import:** Import… in ··· and files dropped on the menu-bar icon open a
+- **Import:** the import button in Recent's header, Import… in ···, and files dropped on the menu-bar icon open a
   small movable window that stays on top: a drop area with Choose Files…, a
   list with name, date, length and size, and one Import button. Files are
   copied into the library as ordinary recording folders and the originals

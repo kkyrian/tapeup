@@ -32,6 +32,7 @@ struct RecentView: View {
                     SectionLabel(text: first.day)
                 }
                 Spacer()
+                IconButton(symbol: "square.and.arrow.down", help: "Import recordings") { model.openImport([]) }
                 IconButton(symbol: "folder", help: "Open in Finder", action: model.openRoot)
                 MoreMenu(model: model)
             }

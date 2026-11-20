@@ -11,13 +11,16 @@ enum Style {
     static let textEdge: CGFloat = 40
     static let corner: CGFloat = 8
     static let red = Color(nsColor: .systemRed)
+    /// Ready to record, whatever the system accent: only recording is red.
+    /// The default accent's blue, so it matches the switches beside it.
+    static let blue = Color(.sRGB, red: 0, green: 122 / 255, blue: 1)
     static let fill = Color.primary.opacity(0.07)
     static let fillHover = Color.primary.opacity(0.11)
 }
 
 /// A full-width flat button.
 struct FlatButton<Label: View>: View {
-    enum Kind { case primary, destructive, plain }
+    enum Kind { case primary, ready, destructive, plain }
 
     let kind: Kind
     let action: () -> Void
@@ -41,6 +44,7 @@ struct FlatButton<Label: View>: View {
     private var fill: Color {
         switch kind {
         case .primary: Color.accentColor.opacity(hovering ? 0.88 : 1)
+        case .ready: Style.blue.opacity(hovering ? 0.88 : 1)
         case .destructive: Style.red.opacity(hovering ? 0.88 : 1)
         case .plain: hovering ? Style.fillHover : Style.fill
         }

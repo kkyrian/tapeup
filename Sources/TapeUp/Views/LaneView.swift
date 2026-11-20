@@ -47,7 +47,7 @@ struct LaneView: View {
             Spacer(minLength: 8)
             // The meter has a place of its own in the row, so nothing moves
             // when listening starts; it is empty until there is something to show.
-            LevelBars(levels: Array(levels.suffix(13)), tint: recording ? Style.red : .accentColor)
+            LevelBars(levels: Array(levels.suffix(13)), tint: recording ? Style.red : Style.blue)
                 .frame(width: 44, height: 16)
                 .opacity(live && on ? 1 : 0)
                 .animation(.easeOut(duration: 0.2), value: live && on)

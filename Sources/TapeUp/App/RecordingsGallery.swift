@@ -4,7 +4,7 @@ import TapeUpCore
 
 /// `TapeUp recordings-gallery --out <dir>`: pictures of the All recordings
 /// page, light and dark, over a made-up library of a few months: at rest,
-/// hovered, chips on, the No transcript action and its queue at work,
+/// hovered (and Recent hovered), chips on, the No transcript action and its queue at work,
 /// searches with and without a match, and Recent with its Show all link.
 @MainActor
 enum RecordingsGallery {
@@ -32,6 +32,9 @@ enum RecordingsGallery {
         }
 
         shoot("00-recent-show-all")
+        RecordingRow.staged = model.recent[1].id
+        shoot("00-recent-hover")
+        RecordingRow.staged = nil
         model.openAllRecordings()
         shoot("01-many")
         RecordingRow.staged = model.allEntries[1].id

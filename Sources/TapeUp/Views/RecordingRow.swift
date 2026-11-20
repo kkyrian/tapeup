@@ -3,7 +3,7 @@ import SwiftUI
 import TapeUpCore
 
 /// A recording in a list: when it was, its title over who was there, and
-/// its length, which gives way to copy, Finder and Trash on hover. Click
+/// its length, which gives way to copy, Trash and ··· on hover. Click
 /// opens its card. Recent, All recordings and Free up space share it.
 struct RecordingRow: View {
     enum Look: Equatable {
@@ -92,11 +92,14 @@ struct RecordingRow: View {
                 .opacity(hovered || copied ? 0 : 1)
                 HStack(spacing: 0) {
                     IconButton(symbol: copied ? "checkmark" : "link", help: "Copy path", size: 22, action: copy)
-                    IconButton(symbol: "folder", help: "Show in Finder", size: 22) { model.reveal(entry) }
                     if !keepable {
                         IconButton(symbol: "trash", help: "Move to Trash", size: 22) { model.trash(entry) }
                     }
+                    // The right-click menu, for anyone who never right-clicks.
+                    MoreButton(help: "More") { actions }
                 }
+                // Under the header's own icons.
+                .offset(x: 4)
                 .opacity(hovered || copied ? 1 : 0)
                 .allowsHitTesting(hovered || copied)
             }
@@ -123,23 +126,7 @@ struct RecordingRow: View {
         .onHover { hovering = $0 }
         .onTapGesture { model.open(entry) }
         .clickTarget("row " + RecordingLibrary.stamp(of: entry.folder))
-        .contextMenu {
-            Button("Copy Path", action: copy)
-            Button("Show in Finder") { model.reveal(entry) }
-            Button("Rename…") { model.open(entry) }
-            Divider()
-            if keepable, entry.hasAudio {
-                Button(entry.keepAudio ? "Stop Keeping Audio" : "Keep Audio") { model.setKeep(entry, !entry.keepAudio) }
-            }
-            if model.canRemoveAudio(entry) {
-                // On its card, where Undo shows.
-                Button("Remove Audio, Keep Transcript") {
-                    model.open(entry)
-                    model.removeAudio(entry)
-                }
-            }
-            if !keepable { Button("Move to Trash") { model.trash(entry) } }
-        }
+        .contextMenu { actions }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(
             [entry.title, Format.when(entry.started), Format.spokenDuration(entry.duration)].compactMap { $0 }
@@ -149,6 +136,27 @@ struct RecordingRow: View {
         .accessibilityAction(named: "Show in Finder") { model.reveal(entry) }
         .accessibilityAction(named: "Open") { model.open(entry) }
         .accessibilityAction(named: "Move to Trash") { model.trash(entry) }
+    }
+
+    /// The same items on right-click and under ···.
+    @ViewBuilder private var actions: some View {
+        Button("Copy Path", action: copy)
+        Button("Show in Finder") { model.reveal(entry) }
+        Button("Rename…") { model.open(entry) }
+        Divider()
+        if keepable, entry.hasAudio {
+            Button(entry.keepAudio ? "Stop Keeping Audio" : "Keep Audio") { model.setKeep(entry, !entry.keepAudio) }
+        }
+        if entry.hasAudio, entry.folder != model.activeFolder {
+            // Listed even before the transcript is done, so people know it is there.
+            Button("Remove Audio, Keep Transcript") {
+                // On its card, where Undo shows.
+                model.open(entry)
+                model.removeAudio(entry)
+            }
+            .disabled(!model.canRemoveAudio(entry))
+        }
+        if !keepable { Button("Move to Trash") { model.trash(entry) } }
     }
 
     /// The title, then who was there in grey, on one line. The names

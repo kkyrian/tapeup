@@ -61,7 +61,8 @@ struct RecordButton: View {
     @Bindable var model: AppModel
 
     var body: some View {
-        FlatButton(kind: .destructive, action: model.toggle) {
+        // Red only while recording, so a glance at the idle panel never reads as live.
+        FlatButton(kind: model.phase == .idle ? .ready : .destructive, action: model.toggle) {
             HStack(spacing: 7) {
                 Image(systemName: model.phase == .idle ? "circle.fill" : "stop.fill")
                     .font(.system(size: 8, weight: .bold))
