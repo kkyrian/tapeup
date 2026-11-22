@@ -4,6 +4,16 @@
         <title>TapeUp</title>
         <link>https://github.com/kkyrian/tapeup</link>
         <item>
+            <title>TapeUp 0.1.6</title>
+            <pubDate>Sun, 22 Nov 2026 22:26:58 GMT</pubDate>
+            <sparkle:version>0.1.6</sparkle:version>
+            <sparkle:shortVersionString>0.1.6</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[<h3>What's new</h3><ul><li><b>The Record button is blue until you start recording.</b> It turns red as Stop only while TapeUp is recording. A red button in the panel now always means a recording is on.</li><li><b>A ··· button on every recording.</b> Hover over a recording to find it. It has the same actions as right-click, including Remove Audio. Show in Finder moved there from the hover buttons. Remove Audio is always listed for a recording with audio. It is greyed out until the transcript and speaker labels are done.</li><li><b>Import from the panel.</b> A new import button sits next to the folder button above your recordings.</li></ul><h3>Install</h3><p>Download <b>TapeUp.dmg</b> below and drag TapeUp to Applications, or:</p><pre>brew install kkyrian/tap/tapeup
+</pre><p>Already on TapeUp? It updates itself when you're not recording, or use <b>Check for Updates…</b> in the ··· menu.</p>]]></description>
+            <enclosure url="https://github.com/kkyrian/tapeup/releases/download/v0.1.6/TapeUp.dmg" type="application/octet-stream" sparkle:edSignature="1i5nBBMXtpIhl1hwUTPNQ0EY0PZgo9Dd9rgwVLAyoAmxYqDaEhjcyYdQPtAFL0rkxTdjSciy2FRdgVM3fbcuDA==" length="50423262"/>
+        </item>
+        <item>
             <title>TapeUp 0.1.5</title>
             <pubDate>Thu, 12 Nov 2026 17:49:45 GMT</pubDate>
             <sparkle:version>0.1.5</sparkle:version>
