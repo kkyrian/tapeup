@@ -205,10 +205,11 @@ TU-014, TU-019, TU-036).
   list with name, date, length and size, and one Import button. Files are
   copied into the library as ordinary recording folders and the originals
   stay; m4a, mp3, wav, aiff and the audio of mp4 and mov are read, at 48 kHz
-  stereo. Duplicates are skipped, the date comes from the file, and each file
+  stereo. Sound already in 48 kHz stereo AAC is copied without encoding, and
+  up to four files copy at once. Duplicates are skipped, the date comes from the file, and each file
   keeps its own name as its title. Switches for Transcribe and Label speakers
   (with a voice count per row) apply after the copy, and each row then
-  follows its recording through every stage (TU-023, TU-024, TU-033).
+  follows its recording through every stage (TU-023, TU-024, TU-033, TU-042).
 - **Updates:** Sparkle 2 (`App/Updates.swift`). Once a day it reads
   `appcast.xml` from the latest GitHub release, downloads a newer
   `TapeUp.dmg` in the background and checks its EdDSA signature against

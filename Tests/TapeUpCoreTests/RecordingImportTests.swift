@@ -71,6 +71,92 @@ struct RecordingImportTests {
         #expect(try RecordingImport.fingerprint(of: source) == before)
     }
 
+    /// Different sound in each ear, as 48 kHz stereo AAC.
+    private func stereoAAC(_ name: String, seconds: Double = 2) throws -> URL {
+        let url = base.appendingPathComponent(name)
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let format = try #require(AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 2))
+        let frames = AVAudioFrameCount(seconds * 48_000)
+        let buffer = try #require(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames))
+        buffer.frameLength = frames
+        let data = try #require(buffer.floatChannelData)
+        for index in 0..<Int(frames) {
+            data[0][index] = 0.4 * sin(Float(index) * 2 * .pi * 440 / 48_000)
+            data[1][index] = 0.1 * sin(Float(index) * 2 * .pi * 660 / 48_000)
+        }
+        let file = try AVAudioFile(
+            forWriting: url,
+            settings: [
+                AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: 48_000, AVNumberOfChannelsKey: 2,
+                AVEncoderBitRateKey: 128_000,
+            ])
+        try file.write(from: buffer)
+        return url
+    }
+
+    private func samples(_ url: URL) throws -> [[Float]] {
+        let file = try AVAudioFile(forReading: url)
+        let buffer = try #require(
+            AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(file.length)))
+        try file.read(into: buffer)
+        let data = try #require(buffer.floatChannelData)
+        return (0..<2).map { Array(UnsafeBufferPointer(start: data[$0], count: Int(buffer.frameLength))) }
+    }
+
+    @Test func soundAlreadyInTheRecordersFormatIsCopiedWithoutEncoding() async throws {
+        defer { try? FileManager.default.removeItem(at: base) }
+        let source = try stereoAAC("Call.m4a")
+        let library = RecordingLibrary(root: base.appendingPathComponent("TapeUp"))
+        let candidate = try await RecordingImport.inspect(source)
+        let reported = Reported()
+        let folder = try await RecordingImport.copy(candidate, into: library, plan: .init(transcribe: false)) {
+            reported.add($0)
+        }
+        #expect(reported.values.last == 1)
+        let before = try samples(source)
+        let after = try samples(folder.appendingPathComponent("audio.m4a"))
+        #expect(abs(before[0].count - after[0].count) <= 2048)
+        // A second encoding would change the samples; the same packets don't.
+        let shared = min(before[0].count, after[0].count)
+        for channel in 0..<2 {
+            let difference = (0..<shared).map { abs(before[channel][$0] - after[channel][$0]) }.max() ?? 1
+            #expect(difference < 0.0001)
+        }
+    }
+
+    @Test func encodingReportsProgressBeforeItFinishes() async throws {
+        defer { try? FileManager.default.removeItem(at: base) }
+        let source = try tone("Memo.wav", seconds: 3)
+        let reported = Reported()
+        let destination = base.appendingPathComponent("out.m4a")
+        try await RecordingImport.encode(source, to: destination, duration: 3) { reported.add($0) }
+        #expect(reported.values.count > 2)
+        #expect(reported.values.first ?? 1 < 1)
+        #expect(reported.values.last == 1)
+        #expect(reported.values == reported.values.sorted())
+    }
+
+    @Test func severalFilesCanCopyAtOnce() async throws {
+        defer { try? FileManager.default.removeItem(at: base) }
+        let library = RecordingLibrary(root: base.appendingPathComponent("TapeUp"))
+        var candidates: [RecordingImport.Candidate] = []
+        for index in 0..<4 {
+            candidates.append(
+                try await RecordingImport.inspect(tone("Memo \(index).wav", seconds: 1 + Double(index) / 10)))
+        }
+        let folders = try await withThrowingTaskGroup(of: URL.self) { group in
+            for candidate in candidates {
+                group.addTask {
+                    try await RecordingImport.copy(candidate, into: library, plan: .init(transcribe: false))
+                }
+            }
+            return try await group.reduce(into: [URL]()) { $0.append($1) }
+        }
+        #expect(Set(folders).count == 4)
+        #expect(RecordingImport.imported(in: library) == Set(candidates.map(\.fingerprint)))
+        for folder in folders { #expect(try energy(folder.appendingPathComponent("audio.m4a")).left > 0.1) }
+    }
+
     @Test func transcribingKeepsTheFileNameAndMarksItWaiting() async throws {
         defer { try? FileManager.default.removeItem(at: base) }
         let library = RecordingLibrary(root: base.appendingPathComponent("TapeUp"))

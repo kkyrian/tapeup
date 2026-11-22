@@ -5,12 +5,16 @@ import UniformTypeIdentifiers
 
 /// Recordings made elsewhere, copied in as ordinary TapeUp recordings. The
 /// original file is only read, never moved or changed. The copy's audio is
-/// re-encoded as the recorder writes it (48 kHz stereo AAC) so transcripts
-/// and speaker labels work the same; the same sound is in both channels,
-/// so an imported recording has no sides.
+/// what the recorder writes (48 kHz stereo AAC), so transcripts and speaker
+/// labels work the same: sound already in that format is copied as it is,
+/// and the rest is encoded. An imported recording has no sides.
 public enum RecordingImport {
     /// What can be imported: any audio, and the sound of any movie.
     public static let contentTypes: [UTType] = [.audio, .movie]
+
+    /// How many files to copy at once. Encoding one file uses about one
+    /// core, and more than four at once stopped helping.
+    public static var simultaneous: Int { max(1, min(4, ProcessInfo.processInfo.activeProcessorCount / 2)) }
 
     /// A file looked at before importing.
     public struct Candidate: Sendable, Equatable, Identifiable {
@@ -229,7 +233,7 @@ public enum RecordingImport {
     }
 
     /// The file's sound as 48 kHz stereo AAC, every track mixed; a mono file
-    /// fills both channels.
+    /// fills both channels. Encoding is nearly all of an import's time.
     static func encode(
         _ source: URL, to destination: URL, duration: Double = 0,
         progress: @escaping @Sendable (Double) -> Void = { _ in }
@@ -237,6 +241,11 @@ public enum RecordingImport {
         let asset = AVURLAsset(url: source)
         let tracks = try await asset.loadTracks(withMediaType: .audio)
         guard !tracks.isEmpty else { throw Failure.noSound }
+        if tracks.count == 1,
+            await copyPackets(of: tracks[0], in: asset, to: destination, duration: duration, progress: progress)
+        {
+            return
+        }
         let reader = try AVAssetReader(asset: asset)
         let output = AVAssetReaderAudioMixOutput(
             audioTracks: tracks,
@@ -254,6 +263,8 @@ public enum RecordingImport {
             outputSettings: [
                 AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: 48_000, AVNumberOfChannelsKey: 2,
                 AVEncoderBitRateKey: 192_000,
+                // Twice as fast at this bitrate, and speech measures within 2 dB.
+                AVEncoderAudioQualityKey: AVAudioQuality.low.rawValue,
             ])
         input.expectsMediaDataInRealTime = false
         guard writer.canAdd(input) else { throw Failure.unreadable }
@@ -264,12 +275,58 @@ public enum RecordingImport {
         writer.startSession(atSourceTime: .zero)
         let pump = Pump(reader: reader, output: output, input: input, duration: duration, progress: progress)
         await pump.run()
-        if reader.status == .failed {
+        if reader.status == .failed || writer.status == .failed {
+            let failure = reader.error ?? writer.error ?? Failure.unreadable
+            reader.cancelReading()
             writer.cancelWriting()
-            throw reader.error ?? Failure.unreadable
+            throw failure
         }
         await writer.finishWriting()
         if writer.status != .completed { throw writer.error ?? Failure.unreadable }
+        progress(1)
+    }
+
+    /// Copies sound already in the recorder's format without encoding it.
+    /// False, with nothing left behind, when it isn't or the copy falls short.
+    private static func copyPackets(
+        of track: AVAssetTrack, in asset: AVURLAsset, to destination: URL, duration: Double,
+        progress: @Sendable (Double) -> Void
+    ) async -> Bool {
+        guard let formats = try? await track.load(.formatDescriptions), formats.count == 1,
+            let stream = CMAudioFormatDescriptionGetStreamBasicDescription(formats[0])?.pointee,
+            stream.mFormatID == kAudioFormatMPEG4AAC, stream.mSampleRate == 48_000, stream.mChannelsPerFrame == 2,
+            let reader = try? AVAssetReader(asset: asset)
+        else { return false }
+        let output = AVAssetReaderTrackOutput(track: track, outputSettings: nil)
+        guard reader.canAdd(output) else { return false }
+        reader.add(output)
+        try? FileManager.default.removeItem(at: destination)
+        guard let writer = try? AVAssetWriter(outputURL: destination, fileType: .m4a) else { return false }
+        let input = AVAssetWriterInput(mediaType: .audio, outputSettings: nil, sourceFormatHint: formats[0])
+        input.expectsMediaDataInRealTime = false
+        guard writer.canAdd(input) else { return false }
+        writer.add(input)
+        guard reader.startReading(), writer.startWriting() else {
+            reader.cancelReading()
+            writer.cancelWriting()
+            try? FileManager.default.removeItem(at: destination)
+            return false
+        }
+        writer.startSession(atSourceTime: .zero)
+        // Over in a moment; encoding, if this falls short, reports its own progress.
+        await Pump(reader: reader, output: output, input: input, duration: duration, progress: { _ in }).run()
+        var copied = reader.status != .failed && writer.status != .failed
+        if copied {
+            await writer.finishWriting()
+            let expected = duration > 0 ? duration : (try? await asset.load(.duration).seconds) ?? 0
+            let frames = (try? AVAudioFile(forReading: destination).length) ?? 0
+            copied = writer.status == .completed && frames > 0 && Double(frames) >= (expected - 0.1) * 48_000
+        } else {
+            reader.cancelReading()
+            writer.cancelWriting()
+        }
+        if copied { progress(1) } else { try? FileManager.default.removeItem(at: destination) }
+        return copied
     }
 
     /// Moves samples from the reader to the writer as the writer takes them.
@@ -311,13 +368,13 @@ public enum RecordingImport {
                 input.requestMediaDataWhenReady(on: queue) { [self] in
                     guard !finished else { return }
                     while input.isReadyForMoreMediaData {
-                        if let buffer = output.copyNextSampleBuffer(), reader.status == .reading {
+                        if let buffer = output.copyNextSampleBuffer(), reader.status == .reading,
                             input.append(buffer)
+                        {
                             report(buffer)
                         } else {
                             finished = true
                             input.markAsFinished()
-                            progress(1)
                             done.resume()
                             return
                         }

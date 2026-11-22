@@ -149,6 +149,9 @@ final class Imports {
         items.removeAll { $0.url == item.url }
         // A file kept out as a duplicate of this one can now come in.
         if let fingerprint = item.candidate?.fingerprint, known?.contains(fingerprint) != true,
+            !items.contains(where: {
+                $0.candidate?.fingerprint == fingerprint && ($0.state == .ready || $0.state == .copying)
+            }),
             let twin = items.firstIndex(where: { $0.state == .duplicate && $0.candidate?.fingerprint == fingerprint })
         {
             items[twin].state = .ready
@@ -216,50 +219,58 @@ final class Imports {
         }
     }
 
-    /// Copies ready files in, one at a time, until none is left or Stop.
+    /// Copies ready files in, a few at a time, until none is left or Stop.
     func start() {
         guard worker == nil else { return }
         stopping = false
         earlier = Set(items.filter { $0.state == .copied || $0.state.isFailure }.map(\.id))
         worker = Task {
-            while !stopping {
-                // Files added meanwhile join this import, once read.
-                guard let item = items.first(where: { $0.state == .ready }), let candidate = item.candidate else {
-                    if reading {
-                        try? await Task.sleep(for: .milliseconds(100))
-                        continue
+            await withTaskGroup(of: Void.self) { group in
+                while true {
+                    let copying = items.count { $0.state == .copying }
+                    // Files added meanwhile join this import, once read.
+                    if !stopping, copying < RecordingImport.simultaneous,
+                        let item = items.first(where: { $0.state == .ready }), let candidate = item.candidate
+                    {
+                        set(item.url) { $0.state = .copying }
+                        group.addTask { await self.copy(item, candidate) }
+                    } else if copying > 0 || (!stopping && reading) {
+                        try? await Task.sleep(for: .milliseconds(50))
+                    } else {
+                        break
                     }
-                    break
-                }
-                let url = item.url
-                set(url) { $0.state = .copying }
-                do {
-                    let stamp = try await model.importRecording(
-                        candidate, transcribe: transcribe, labelSpeakers: labeling,
-                        voices: labeling ? item.voices : nil, title: item.title
-                    ) { fraction in
-                        Task { @MainActor in self.set(url) { $0.copied = max($0.copied, fraction) } }
-                    }
-                    known?.insert(candidate.fingerprint)
-                    set(url) {
-                        $0.state = .copied
-                        $0.copied = 1
-                        $0.stamp = stamp
-                    }
-                    // Renamed while it was copying.
-                    if let now = items.first(where: { $0.url == url }), now.title != item.title {
-                        model.renameImported(stamp, to: now.shownName)
-                    }
-                } catch {
-                    let reason = (error as? RecordingImport.Failure)?.description ?? error.localizedDescription
-                    set(url) { $0.state = .failed(reason) }
                 }
             }
             worker = nil
         }
     }
 
-    /// Lets the file copying now finish and leaves the rest.
+    private func copy(_ item: Item, _ candidate: RecordingImport.Candidate) async {
+        let url = item.url
+        do {
+            let stamp = try await model.importRecording(
+                candidate, transcribe: transcribe, labelSpeakers: labeling,
+                voices: labeling ? item.voices : nil, title: item.title
+            ) { fraction in
+                Task { @MainActor in self.set(url) { $0.copied = max($0.copied, fraction) } }
+            }
+            known?.insert(candidate.fingerprint)
+            set(url) {
+                $0.state = .copied
+                $0.copied = 1
+                $0.stamp = stamp
+            }
+            // Renamed while it was copying.
+            if let now = items.first(where: { $0.url == url }), now.title != item.title {
+                model.renameImported(stamp, to: now.shownName)
+            }
+        } catch {
+            let reason = (error as? RecordingImport.Failure)?.description ?? error.localizedDescription
+            set(url) { $0.state = .failed(reason) }
+        }
+    }
+
+    /// Lets the files copying now finish and leaves the rest.
     func stop() { stopping = true }
 
     private func set(_ url: URL, _ change: (inout Item) -> Void) {
