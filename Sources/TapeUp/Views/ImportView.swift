@@ -34,6 +34,10 @@ final class Imports {
         var name: String { (url.lastPathComponent as NSString).deletingPathExtension }
         /// What the recording will be called.
         var shownName: String { title ?? name }
+        /// Only encoding reports a share along the way, so a file that
+        /// couldn't be copied as it is reads right too.
+        var encoding: Bool { candidate?.needsEncoding == true || (copied > 0 && copied < 1) }
+        var copyStatus: String { "\(encoding ? "Encoding" : "Copying")… \(Int((copied * 100).rounded()))%" }
     }
 
     let model: AppModel
@@ -447,7 +451,7 @@ struct ImportView: View {
             HStack(spacing: 12) {
                 ProgressView(value: Imports.copiedShare(of: current))
                     .animation(.linear(duration: 0.2), value: Imports.copiedShare(of: current))
-                Text("Copying \(min(done + 1, total)) of \(total)")
+                Text("Importing \(min(done + 1, total)) of \(total)")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
@@ -681,7 +685,7 @@ private struct ImportRow: View {
         case .duplicate: return twin.map { "Copy of “\($0)”" } ?? "Already in TapeUp"
         case .unusable(let reason), .failed(let reason): return reason
         case .ready: return queued ? "Waiting to import · " + details : details
-        case .copying: return "Copying… \(Int((item.copied * 100).rounded()))%"
+        case .copying: return item.copyStatus
         case .copied:
             switch stage {
             case .waitingToTranscribe: return "Waiting to transcribe"

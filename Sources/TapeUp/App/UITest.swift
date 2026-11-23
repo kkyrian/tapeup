@@ -148,6 +148,8 @@ enum UITest {
             abs(Imports.copiedShare(of: [file(.failed("x"), 0), file(.copying, 0), file(.duplicate, 0)]) - 0.5) < 0.001,
             "a failed file counts as done and a duplicate not at all")
         expect(Imports.copiedShare(of: []) == 0, "nothing to copy leaves the bar empty")
+        expect(file(.copying, 0).copyStatus == "Copying… 0%", "a file not being encoded says Copying")
+        expect(file(.copying, 0.42).copyStatus == "Encoding… 42%", "a file reporting progress says Encoding")
         // From a recording, Get names from your AI opens on the steps.
         model.openPeople(filling: true)
         settle(0.3)
@@ -1116,6 +1118,16 @@ enum UITest {
         waitWhile { imports.importing }
         expect(imports.copiedCount == 3, "the second import brings it in")
         shot("import-more.png")
+        // A file that needs encoding says so while it does.
+        let long = files.appendingPathComponent("Long talk.wav")
+        writeTone(hertz: 770, seconds: 600, to: long)
+        imports.add([long])
+        waitWhile { imports.reading }
+        expect(imports.ready.first?.candidate?.needsEncoding == true, "a mono WAV needs encoding")
+        imports.start()
+        waitWhile { imports.importing && imports.items.last?.copied == 0 }
+        shot("import-encoding.png")
+        waitWhile { imports.importing }
         window.window.close()
         // Gone again, without going through the user's Trash.
         let stamps =

@@ -124,6 +124,12 @@ struct RecordingImportTests {
         }
     }
 
+    @Test func inspectingTellsWhichFilesNeedEncoding() async throws {
+        defer { try? FileManager.default.removeItem(at: base) }
+        #expect(try await RecordingImport.inspect(stereoAAC("Matching.m4a")).needsEncoding == false)
+        #expect(try await RecordingImport.inspect(tone("Mono.wav")).needsEncoding == true)
+    }
+
     @Test func encodingReportsProgressBeforeItFinishes() async throws {
         defer { try? FileManager.default.removeItem(at: base) }
         let source = try tone("Memo.wav", seconds: 3)

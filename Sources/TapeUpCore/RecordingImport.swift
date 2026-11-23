@@ -29,6 +29,8 @@ public enum RecordingImport {
         /// The file's SHA-256, so the same file is never imported twice.
         public let fingerprint: String
         public let isMovie: Bool
+        /// Its sound isn't in the recorder's format, so importing encodes it.
+        public let needsEncoding: Bool
     }
 
     public enum Failure: Error, Equatable, CustomStringConvertible {
@@ -89,11 +91,12 @@ public enum RecordingImport {
         if let item = try? await asset.load(.creationDate), let date = try? await item.load(.dateValue) {
             started = date
         }
+        let formats = tracks.count == 1 ? try? await tracks[0].load(.formatDescriptions) : nil
         let fingerprint = try await Task.detached(priority: .utility) { try Self.fingerprint(of: url) }.value
         return Candidate(
             url: url, name: url.lastPathComponent, started: started,
             duration: duration.isNumeric ? duration.seconds : 0, bytes: Int64(values?.fileSize ?? 0),
-            fingerprint: fingerprint, isMovie: !video.isEmpty)
+            fingerprint: fingerprint, isMovie: !video.isEmpty, needsEncoding: !isRecorderFormat(formats ?? []))
     }
 
     static func fingerprint(of url: URL) throws -> String {
@@ -286,15 +289,21 @@ public enum RecordingImport {
         progress(1)
     }
 
+    /// One format, 48 kHz stereo AAC.
+    private static func isRecorderFormat(_ formats: [CMFormatDescription]) -> Bool {
+        guard formats.count == 1, let stream = CMAudioFormatDescriptionGetStreamBasicDescription(formats[0])?.pointee
+        else { return false }
+        return stream.mFormatID == kAudioFormatMPEG4AAC && stream.mSampleRate == 48_000
+            && stream.mChannelsPerFrame == 2
+    }
+
     /// Copies sound already in the recorder's format without encoding it.
     /// False, with nothing left behind, when it isn't or the copy falls short.
     private static func copyPackets(
         of track: AVAssetTrack, in asset: AVURLAsset, to destination: URL, duration: Double,
         progress: @Sendable (Double) -> Void
     ) async -> Bool {
-        guard let formats = try? await track.load(.formatDescriptions), formats.count == 1,
-            let stream = CMAudioFormatDescriptionGetStreamBasicDescription(formats[0])?.pointee,
-            stream.mFormatID == kAudioFormatMPEG4AAC, stream.mSampleRate == 48_000, stream.mChannelsPerFrame == 2,
+        guard let formats = try? await track.load(.formatDescriptions), isRecorderFormat(formats),
             let reader = try? AVAssetReader(asset: asset)
         else { return false }
         let output = AVAssetReaderTrackOutput(track: track, outputSettings: nil)
