@@ -4,6 +4,16 @@
         <title>TapeUp</title>
         <link>https://github.com/kkyrian/tapeup</link>
         <item>
+            <title>TapeUp 0.1.7</title>
+            <pubDate>Mon, 23 Nov 2026 05:11:03 GMT</pubDate>
+            <sparkle:version>0.1.7</sparkle:version>
+            <sparkle:shortVersionString>0.1.7</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[<h3>What's new</h3><ul><li><b>Importing is much faster.</b> A batch of four 30-minute files now takes about 8 seconds instead of about 33. TapeUp brings in up to four files at once.</li><li><b>Files already in the right format skip encoding.</b> A 48 kHz stereo AAC file now comes in almost instantly.</li><li><b>The import window shows what each file is doing.</b> A file says Encoding when TapeUp is converting its sound, and Copying when it isn't.</li></ul><h3>Install</h3><p>Download <b>TapeUp.dmg</b> below and drag TapeUp to Applications, or:</p><pre>brew install kkyrian/tap/tapeup
+</pre><p>Already on TapeUp? It updates itself when you're not recording, or use <b>Check for Updates…</b> in the ··· menu.</p>]]></description>
+            <enclosure url="https://github.com/kkyrian/tapeup/releases/download/v0.1.7/TapeUp.dmg" type="application/octet-stream" sparkle:edSignature="WACVlQUkrAk4oue2WwayvqMOW4+gDZgPJcZ2OGR9JeHKjkwPjG6rAVEw7+UmpyC8BnhDifxdd0t7066ZZ3pWDw==" length="50464589"/>
+        </item>
+        <item>
             <title>TapeUp 0.1.6</title>
             <pubDate>Sun, 22 Nov 2026 22:26:58 GMT</pubDate>
             <sparkle:version>0.1.6</sparkle:version>
