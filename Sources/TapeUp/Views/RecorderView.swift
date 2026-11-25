@@ -66,14 +66,15 @@ struct RecordButton: View {
             HStack(spacing: 7) {
                 Image(systemName: model.phase == .idle ? "circle.fill" : "stop.fill")
                     .font(.system(size: 8, weight: .bold))
-                Text(title)
+                Text(title).lineLimit(1)
                 if model.phase != .idle {
                     PausableTime(elapsed: model.elapsed, paused: model.paused)
                         .contentTransition(.numericText())
                         .animation(.snappy(duration: 0.2), value: Int(model.elapsed))
                 }
                 Spacer()
-                if let shortcut = model.shortcutLabel {
+                // The shortcut does nothing while saving, and an hour-long time needs its room.
+                if !isSaving, let shortcut = model.shortcutLabel {
                     Text(shortcut).font(.system(size: 11, weight: .medium)).opacity(0.65)
                 }
             }
@@ -200,6 +201,8 @@ struct PausableTime: View {
     var body: some View {
         Text(Format.duration(elapsed))
             .monospacedDigit()
+            .lineLimit(1)
+            .fixedSize()
             .opacity(paused ? (dim ? 0.35 : 0.85) : 0.85)
             .contentTransition(.numericText())
             .animation(.snappy(duration: 0.2), value: Int(elapsed))

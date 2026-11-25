@@ -66,6 +66,15 @@ enum Snapshot {
                 phase: .recording(started: Date()), elapsed: 2526, microphone: devices.microphone,
                 output: devices.output, levels: wave)
         }
+        shoot("03-recording-hour") {
+            model.stage(
+                phase: .recording(started: Date()), elapsed: 4860, microphone: devices.microphone,
+                output: devices.output, levels: wave)
+        }
+        shoot("03-saving-hour") {
+            model.stage(
+                phase: .saving(started: Date()), elapsed: 4860, microphone: devices.microphone, output: devices.output)
+        }
         shoot("03-recording-first-words") { model.transcription.stage(download: .ready, live: true) }
         shoot("03-recording-waiting-for-model") {
             model.transcription.stage(download: .downloading(812_000_000), live: false)
